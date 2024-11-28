@@ -1,9 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
+import { plainToInstance } from 'class-transformer';
 
 @Injectable()
 export class UserService {
@@ -12,7 +11,6 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-
     const lastCustomer = await this.userRepository
     .createQueryBuilder('user')
     .orderBy('user.createdAt', 'DESC') 
@@ -25,16 +23,56 @@ export class UserService {
     return result;
   }
 
-  async findAll() {
-    const result = await this.userRepository.find({
-      relations: ['userPermissions', 'userPermissions.permission'],
-    });
-    return result;
+  async findAll(options: any, filterOptions: any) {
+    const page = Number(options.page || 1);
+    const limit = Number(options.limit || 10);
+    const skip = (page - 1) * limit;
+    const sortBy = options.sortBy || 'createdAt';
+    const sortOrder = (options.sortOrder || 'DESC').toUpperCase();
+
+    const queryBuilder = this.userRepository.createQueryBuilder('users');
+
+    // Debugging inputs
+    console.log('Filter Options:', filterOptions?.searchTerm);
+    console.log('Sort By:', sortBy, 'Order:', sortOrder);
+
+    // Search Term Filter
+    if (filterOptions?.searchTerm) {
+      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+      queryBuilder.andWhere(
+        '(users.name LIKE :searchTerm OR users.userId LIKE :searchTerm)',
+        { searchTerm }
+      );
+    }
+
+    // Role Filter
+    if (filterOptions?.role) {
+      queryBuilder.andWhere('users.role = :role', {
+        role: filterOptions.role,
+      });
+    }
+
+    queryBuilder
+      .orderBy(`users.${sortBy}`, sortOrder) 
+      .skip(skip)
+      .take(limit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    const modifyData = plainToInstance(Users, data);
+
+    // Return paginated result
+    return {
+      data: modifyData,
+      total,
+      page,
+      limit,
+    };
   }
 
-  async findOne(id: number) {
+
+  async findOne(id: string) {
     const result = await this.userRepository.findOne({
-      where: { id },
+      where: { userId:id },
       relations: ['userPermissions', 'userPermissions.permission'],
     });
   
@@ -59,7 +97,7 @@ export class UserService {
   }
   
 
-  update(id: number, updateUserDto: UpdateUserDto) {
+  update(id: number, updateUserDto: Users) {
     return `This action updates a #${id} user`;
   }
 

@@ -11,10 +11,18 @@ export class UserpermissionService {
     @InjectRepository(UserPermission)
     private readonly userPermissionRepository: Repository<UserPermission>,
   ) {}
- async create(createUserpermissionDto: CreateUserpermissionDto) {
-   const result=await this.userPermissionRepository.save(createUserpermissionDto)
-    return result
+  async create(createUserpermissionDtos: UserPermission[]) {
+    try {
+      // Use the repository's `save` method to save multiple records at once
+      const results = await this.userPermissionRepository.save(createUserpermissionDtos);
+      return results;
+    } catch (error) {
+      // Handle error appropriately
+      console.error('Error saving user permissions:', error);
+      throw new Error('Failed to save user permissions');
+    }
   }
+  
 
   findAll() {
     return `This action returns all userpermission`;

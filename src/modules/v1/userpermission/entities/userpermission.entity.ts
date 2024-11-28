@@ -12,7 +12,7 @@ import {
   import { Permission } from '../../permission/entities/permission.entity';
   
   @Entity({ name: 'userpermission' })
-  @Unique('user_permission_unique', ['userId', 'permissionId']) // Composite unique constraint
+  @Unique('user_permission_unique', ['userId', 'permissionId']) 
   export class UserPermission {
     @PrimaryGeneratedColumn('increment')
     id: number;

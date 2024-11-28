@@ -15,6 +15,8 @@ export class Permission {
 
   @Column({ unique: true, nullable: false, type: 'varchar' })
   label: string;
+  @Column({ nullable: true, type: 'varchar' })
+  base: string;
   @OneToMany(
     () => UserPermission,
     (userPermission) => userPermission.permission,

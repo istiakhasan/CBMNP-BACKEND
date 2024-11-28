@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query } from '@nestjs/common';
 import { UserpermissionService } from './userpermission.service';
 import { CreateUserpermissionDto } from './dto/create-userpermission.dto';
 import { UpdateUserpermissionDto } from './dto/update-userpermission.dto';
@@ -9,8 +9,7 @@ export class UserpermissionController {
   constructor(private readonly userpermissionService: UserpermissionService) {}
 
   @Post()
-  create(@Body() createUserpermissionDto: UserPermission) {
-   
+  create(@Body() createUserpermissionDto: UserPermission[]) {
     return this.userpermissionService.create(createUserpermissionDto);
   }
 

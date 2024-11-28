@@ -3,7 +3,7 @@ import { Permission } from './entities/permission.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ApiError } from 'src/middleware/ApiError';
-
+import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class PermissionService {
   constructor(
@@ -27,9 +27,29 @@ export class PermissionService {
   }
 
  async findAll() {
-
     const result=await this.permissionRepository.find()
-    return result
+    const transformed = Object.values(
+      result.reduce((acc, { base, label, id }) => {
+        console.log(acc, "check");
+        if (!acc[base]) {
+          acc[base] = {
+            title: base,
+            key: uuidv4(),
+            children: [],
+          };
+        }
+        acc[base].children.push({
+          title: label,
+          key: id, 
+        });
+        return acc;
+      }, {})
+    );
+    
+    console.log(transformed);
+    
+    
+    return transformed
   }
 
   findOne(id: number) {

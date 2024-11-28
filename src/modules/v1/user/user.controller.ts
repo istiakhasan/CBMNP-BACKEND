@@ -1,7 +1,5 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Query } from '@nestjs/common';
 import { UserService } from './user.service';
-import { CreateUserDto } from './dto/create-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
 import { Users } from './entities/user.entity';
 
 @Controller('v1/user')
@@ -9,22 +7,54 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Post()
-  create(@Body() createUserDto: Users) {
-    return this.userService.create(createUserDto);
+ async create(@Body() createUserDto: Users) {
+    const result=await this.userService.create(createUserDto);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'User create successfully',
+      data:result
+   }
   }
 
   @Get()
-  findAll() {
-    return this.userService.findAll();
+  async findAll(@Query() query) {
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm', 'employmentStatus', 'role'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result:any=await this.userService.findAll(   options,
+      searchFilterOptions,);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'User retrived successfully',
+      data:result?.data,
+      meta: {
+        page: result?.page,
+        limit: result?.limit,
+        total: result?.total
+      }
+   }
   }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.userService.findOne(+id);
+    return this.userService.findOne(id);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
+  update(@Param('id') id: string, @Body() updateUserDto: Users) {
     return this.userService.update(+id, updateUserDto);
   }
 
