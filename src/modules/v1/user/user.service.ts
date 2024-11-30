@@ -82,7 +82,12 @@ export class UserService {
   
     // Map the permissions into an array of labels
     const permissions = result.userPermissions.map(
-      (userPermission) => userPermission.permission.label
+      (userPermission) => {
+        return {
+          permissinId:userPermission.permissionId,
+          label:userPermission.permission.label
+        }
+      }
     );
   
     // Return the transformed data

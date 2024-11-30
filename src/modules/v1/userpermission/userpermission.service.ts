@@ -11,17 +11,44 @@ export class UserpermissionService {
     @InjectRepository(UserPermission)
     private readonly userPermissionRepository: Repository<UserPermission>,
   ) {}
-  async create(createUserpermissionDtos: UserPermission[]) {
-    try {
-      // Use the repository's `save` method to save multiple records at once
-      const results = await this.userPermissionRepository.save(createUserpermissionDtos);
+  async createOrUpdate(userPermissions: UserPermission[]): Promise<UserPermission[]> {
+   
+
+      try {
+    if (userPermissions.length === 0) {
+      throw new Error('No user permissions provided');
+    }
+    const userId = userPermissions[0].userId;
+
+    await this.userPermissionRepository.delete({ userId });
+      const results = await Promise.all(
+        userPermissions.map(async (userPermissionDto) => {
+          const existingRecord = await this.userPermissionRepository.findOne({
+            where: {
+              userId: userPermissionDto.userId,
+              permissionId: userPermissionDto.permissionId,
+            },
+          });
+  
+          if (existingRecord) {
+            const updatedRecord = { 
+              ...existingRecord, 
+              ...userPermissionDto 
+            };
+            return this.userPermissionRepository.save(updatedRecord);
+          } else {
+            return this.userPermissionRepository.save(userPermissionDto);
+          }
+        })
+      );
+  
       return results;
     } catch (error) {
-      // Handle error appropriately
-      console.error('Error saving user permissions:', error);
-      throw new Error('Failed to save user permissions');
+      console.error('Error creating or updating user permissions:', error);
+      throw new Error('Failed to create or update user permissions');
     }
   }
+  
   
 
   findAll() {
