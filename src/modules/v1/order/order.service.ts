@@ -1,0 +1,122 @@
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { Order } from './entities/order.entity';
+import { ProductService } from '../product/product.service';
+import { Products } from './entities/products.entity';
+import paginationHelpers from 'src/helpers/paginationHelpers';
+import { plainToInstance } from 'class-transformer';
+import { generateUniqueOrderNumber } from 'src/util/genarateUniqueNumber';
+
+@Injectable()
+export class OrderService {
+  constructor(
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    private readonly productService: ProductService, // To fetch product details
+  ) {}
+
+
+  async createOrder(payload: Order) {
+    const { customerId, receiverPhoneNumber, products, ...rest } = payload;
+
+    if (!products || !products.length) {
+      throw new Error('Order must include at least one product');
+    }
+   
+      const   orderNumber = generateUniqueOrderNumber();
+  
+      const validatedProducts = await Promise.all(
+        products.map(async (product) => {
+          const existingProduct = await this.productService.getProductById(product.productId);
+          if (!existingProduct) {
+            throw new NotFoundException(`Product with ID ${product.productId} not found`);
+          }
+          const subtotal = product.productQuantity * existingProduct.price;
+          return {
+            productId: product.productId,
+            productQuantity: product.productQuantity,
+            productPrice: existingProduct.price,
+            subtotal,
+          };
+        })
+      );
+
+    return this.orderRepository.save({
+      orderNumber,
+      customerId,
+      receiverPhoneNumber,
+      products: validatedProducts,
+      currier: payload.currier,
+      orderSource: payload.orderSource,
+      shippingCharge: payload.shippingCharge,
+      totalPrice:Number(payload.shippingCharge)+Number(validatedProducts?.reduce((acc,b)=>acc+b.subtotal,0)),
+      productValue:Number(validatedProducts?.reduce((acc,b)=>acc+b.subtotal,0)),
+      ...rest
+    });
+  }
+  
+
+
+
+
+  async getOrders(options, filterOptions) {
+    const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
+  
+    const queryBuilder = this.orderRepository.createQueryBuilder('orders');
+
+    if (filterOptions?.searchTerm) {
+      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+      queryBuilder.andWhere(
+        '(orders.orderNumber LIKE :searchTerm OR customers.name LIKE :searchTerm)',
+        { searchTerm }
+      );
+    }
+  
+    queryBuilder
+      .leftJoinAndSelect('orders.customer', 'customer') 
+      .orderBy(`orders.${sortBy}`, sortOrder) 
+      .skip(skip) 
+      .take(limit); 
+  
+    const [data, total] = await queryBuilder.getManyAndCount();
+    const modifyData = plainToInstance(Order, data);
+  
+    return {
+      data: modifyData,
+      total,
+      page,
+      limit,
+    };
+  }
+  
+
+  async getOrderById(orderId: number): Promise<Order> {
+    const order = await this.orderRepository.findOne({
+      where: { id: orderId },
+      relations: ['products'],
+    });
+
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+
+    return order;
+  }
+
+  /**
+   * Delete an order by its ID.
+   */
+  async deleteOrder(orderId: number): Promise<void> {
+    const result = await this.orderRepository.delete(orderId);
+
+    if (result.affected === 0) {
+      throw new NotFoundException(`Order with ID ${orderId} not found`);
+    }
+  }
+
+
+
+ 
+  
+}

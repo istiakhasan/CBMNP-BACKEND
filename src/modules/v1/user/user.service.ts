@@ -32,9 +32,6 @@ export class UserService {
 
     const queryBuilder = this.userRepository.createQueryBuilder('users');
 
-    // Debugging inputs
-    console.log('Filter Options:', filterOptions?.searchTerm);
-    console.log('Sort By:', sortBy, 'Order:', sortOrder);
 
     // Search Term Filter
     if (filterOptions?.searchTerm) {
