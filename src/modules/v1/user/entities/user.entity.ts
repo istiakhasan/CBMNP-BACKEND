@@ -38,7 +38,7 @@ export class Users {
   address: string;
   @Column({ nullable: false, type: 'varchar' })
   password: string;
-  @Column({ nullable: true, type: 'boolean' })
+  @Column({ nullable: true, type: 'boolean',default:true })
   active: boolean;
   @OneToMany(() => UserPermission, (userPermission) => userPermission.user)
   userPermissions: UserPermission[];

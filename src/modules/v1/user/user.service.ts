@@ -1,8 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
 import { Brackets, Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
+import paginationHelpers from 'src/helpers/paginationHelpers';
 
 @Injectable()
 export class UserService {
@@ -24,14 +25,10 @@ export class UserService {
   }
 
   async findAll(options: any, filterOptions: any) {
-    const page = Number(options.page || 1);
-    const limit = Number(options.limit || 10);
-    const skip = (page - 1) * limit;
-    const sortBy = options.sortBy || 'createdAt';
-    const sortOrder = (options.sortOrder || 'DESC').toUpperCase();
+    const {skip,sortBy,sortOrder,limit,page}=paginationHelpers(options)
 
     const queryBuilder = this.userRepository.createQueryBuilder('users');
-
+    queryBuilder.select(['users.id', 'users.name','users.userId','users.role','users.active','users.phone','users.address','users.email','users.createdAt']);
 
     // Search Term Filter
     if (filterOptions?.searchTerm) {
@@ -99,9 +96,18 @@ export class UserService {
   }
   
 
-  update(id: number, updateUserDto: Users) {
-    return `This action updates a #${id} user`;
+  async update(id: string, updateUserDto: Partial<Users>) {
+    const user = await this.userRepository.findOneBy({userId: id });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+    await this.userRepository.update({userId:id}, updateUserDto);
+    return this.userRepository.findOne({
+      where:{userId:id},
+      select:['userId','name','updatedAt','active']
+    });
   }
+
 
   remove(id: number) {
     return `This action removes a #${id} user`;
