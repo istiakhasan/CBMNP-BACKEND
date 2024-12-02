@@ -17,7 +17,7 @@ export class CustomerController {
       }
       
     }
-    @Get('/get-all')
+    @Get('/')
     async getAllCustomers(@Query() query) {
       const options = {};
       const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
@@ -35,12 +35,17 @@ export class CustomerController {
       }
       const result=await this.customerService.getAllCustomers(options,
         searchFilterOptions,);
-      return {
-        success:true,
-        statusCode:HttpStatus.OK,
-        message:"Customer create successfully",
-        data:result
-      }
+        return {
+          success:true,
+          statusCode:HttpStatus.OK,
+          message:'Customers retrieved successfully',
+          data:result?.data,
+          meta: {
+            page: result?.page,
+            limit: result?.limit,
+            total: result?.total
+          }
+       }
       
     }
    

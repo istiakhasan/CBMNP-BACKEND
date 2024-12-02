@@ -64,7 +64,7 @@ export class OrderService {
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
   
     const queryBuilder = this.orderRepository.createQueryBuilder('orders');
-
+  
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
       queryBuilder.andWhere(
@@ -74,10 +74,12 @@ export class OrderService {
     }
   
     queryBuilder
-      .leftJoinAndSelect('orders.customer', 'customer') 
-      .orderBy(`orders.${sortBy}`, sortOrder) 
-      .skip(skip) 
-      .take(limit); 
+      .leftJoinAndSelect('orders.customer', 'customer')
+      .leftJoin('orders.status', 'status') // Change to leftJoin
+      .addSelect(['status.label', 'status.value'])  // Select only the fields you need
+      .orderBy(`orders.${sortBy}`, sortOrder)
+      .skip(skip)
+      .take(limit);
   
     const [data, total] = await queryBuilder.getManyAndCount();
     const modifyData = plainToInstance(Order, data);
@@ -89,6 +91,7 @@ export class OrderService {
       limit,
     };
   }
+  
   
 
   async getOrderById(orderId: number): Promise<Order> {

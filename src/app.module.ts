@@ -10,9 +10,10 @@ import { UserpermissionModule } from './modules/v1/userpermission/userpermission
 import { ProductModule } from './modules/v1/product/product.module';
 import { OrderModule } from './modules/v1/order/order.module';
 import { CustomerModule } from './modules/v1/customers/customers.module';
+import { StatusModule } from './modules/v1/status/status.module';
 
 @Module({
-  imports: [UserModule, PermissionModule,DatabaseModule, UserpermissionModule,ProductModule,OrderModule,CustomerModule],
+  imports: [UserModule, PermissionModule,DatabaseModule, UserpermissionModule,ProductModule,OrderModule,CustomerModule,StatusModule],
   controllers: [AppController],
   providers: [AppService,{
     useClass:GlobalExceptionFilter,
