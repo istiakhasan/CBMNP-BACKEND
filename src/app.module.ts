@@ -11,13 +11,31 @@ import { ProductModule } from './modules/v1/product/product.module';
 import { OrderModule } from './modules/v1/order/order.module';
 import { CustomerModule } from './modules/v1/customers/customers.module';
 import { StatusModule } from './modules/v1/status/status.module';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 @Module({
-  imports: [UserModule, PermissionModule,DatabaseModule, UserpermissionModule,ProductModule,OrderModule,CustomerModule,StatusModule],
+  imports: [
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'uploads'),
+      serveRoot: '/images/',
+    }),
+    UserModule,
+    PermissionModule,
+    DatabaseModule,
+    UserpermissionModule,
+    ProductModule,
+    OrderModule,
+    CustomerModule,
+    StatusModule,
+  ],
   controllers: [AppController],
-  providers: [AppService,{
-    useClass:GlobalExceptionFilter,
-    provide:APP_FILTER
-  }],
+  providers: [
+    AppService,
+    {
+      useClass: GlobalExceptionFilter,
+      provide: APP_FILTER,
+    },
+  ],
 })
 export class AppModule {}

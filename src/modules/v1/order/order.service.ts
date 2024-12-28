@@ -27,16 +27,16 @@ export class OrderService {
       const   orderNumber = generateUniqueOrderNumber();
   
       const validatedProducts = await Promise.all(
-        products.map(async (product) => {
+        products.map(async (product:any) => {
           const existingProduct = await this.productService.getProductById(product.productId);
           if (!existingProduct) {
             throw new NotFoundException(`Product with ID ${product.productId} not found`);
           }
-          const subtotal = product.productQuantity * existingProduct.price;
+          const subtotal = product.productQuantity * existingProduct.salePrice;
           return {
             productId: product.productId,
             productQuantity: product.productQuantity,
-            productPrice: existingProduct.price,
+            productPrice: existingProduct.salePrice,
             subtotal,
           };
         })
