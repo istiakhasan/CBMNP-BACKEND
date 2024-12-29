@@ -17,10 +17,8 @@ import { ProductSchema } from './product.validation';
 import { ApiError } from 'src/middleware/ApiError';
 import { uploadFiles } from 'src/util/file-upload.util';
 import { extractOptions } from 'src/helpers/queryHelper';
-
-import sendResponse, { IResponse } from 'src/util/sendResponse';
-import { Response } from 'express';
 import { catchAsync } from 'src/hoc/createAsync';
+import { IResponse } from 'src/util/sendResponse';
 
 @Controller('v1/products')
 export class ProductController {
@@ -37,7 +35,7 @@ export class ProductController {
     @Body(new ZodPipe(ProductSchema)) data: Omit<Product, 'images'>,
     @UploadedFiles() files: { images?: Express.Multer.File[] },
   ) {
-    return catchAsync(async () => {
+    return catchAsync(async ():Promise<IResponse<Product>> => {
       if (!files?.images || files.images.length === 0) {
         throw new ApiError(HttpStatus.BAD_REQUEST, 'Please select at least one image');
       }
@@ -46,7 +44,7 @@ export class ProductController {
       return {
         success: true,
         message: 'Product created successfully',
-        status: HttpStatus.OK,
+        statusCode: HttpStatus.OK,
         data: result,
       };
     });
@@ -54,13 +52,13 @@ export class ProductController {
   
   @Get()
   async getProducts(@Query() query) {
-    return catchAsync(async () => {
+    return catchAsync(async ():Promise<IResponse<Product[]>> => {
       const paginationOptions = extractOptions(query, ['limit', 'page', 'sortBy', 'sortOrder']);
       const filterOptions = extractOptions(query, ['searchTerm', 'filterByCustomerType']);
       const result = await this.productService.getProducts(paginationOptions, filterOptions);
       return {
         success: true,
-        status: HttpStatus.OK,
+        statusCode: HttpStatus.OK,
         message: 'Products retrieved successfully',
         data: result?.data,
         meta: {
@@ -75,6 +73,14 @@ export class ProductController {
 
   @Get(':id')
   async getProductById(@Param('id') id: number): Promise<Product> {
-    return await this.productService.getProductById(id);
+    return catchAsync(async () => {
+      const result =  await this.productService.getProductById(id);
+      return {
+        success: true,
+        message: 'Product retrieved  successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    });
   }
 }

@@ -13,12 +13,13 @@ import { CustomerModule } from './modules/v1/customers/customers.module';
 import { StatusModule } from './modules/v1/status/status.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
+import { CategoryModule } from './modules/v1/category/category.module';
 
 @Module({
   imports: [
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
-      serveRoot: '/images/',
+      serveRoot: '/api/v1/images/',
     }),
     UserModule,
     PermissionModule,
@@ -28,6 +29,7 @@ import { join } from 'path';
     OrderModule,
     CustomerModule,
     StatusModule,
+    CategoryModule
   ],
   controllers: [AppController],
   providers: [

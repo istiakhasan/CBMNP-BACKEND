@@ -5,8 +5,10 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  ManyToOne,
 } from 'typeorm';
 import { Products } from '../../order/entities/products.entity';
+import { Category } from '../../category/entity/category.entity';
 
 @Entity({ name: 'product' })
 export class Product {
@@ -19,6 +21,8 @@ export class Product {
   name: string;
   @Column({ nullable: false, type: 'text' })
   description: string;
+  @Column({ nullable: true, type: 'boolean' })
+  active: boolean;
   @Column({ nullable: false, type: 'text' })
   weight: string;
   @Column({ nullable: false, type: 'text' })
@@ -37,6 +41,8 @@ export class Product {
 
   @OneToMany(() => Products, (products) => products.product)
   products: Products[];
+  @ManyToOne(() => Category, (category) => category.products)
+  categories: Category;
 
   @CreateDateColumn({
     type: 'timestamp',

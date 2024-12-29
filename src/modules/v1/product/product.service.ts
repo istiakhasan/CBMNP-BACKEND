@@ -53,6 +53,7 @@ export class ProductService {
   }
 
   async getProductById(id: number): Promise<Product> {
+    console.log(id,"check");
     return await this.productRepository.findOne({ where: { id } });
   }
 }
