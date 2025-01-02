@@ -6,19 +6,29 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   ManyToOne,
+  JoinColumn,
 } from 'typeorm';
 import { Products } from '../../order/entities/products.entity';
 import { Category } from '../../category/entity/category.entity';
-
+import { Attribute } from './attributes.entity';
+enum ProductType {
+  Variant = 'Variant',
+  SimpleProduct = 'Simple product',
+  BaseProduct = 'Base Product',
+}
 @Entity({ name: 'product' })
 export class Product {
   @PrimaryGeneratedColumn()
   id: number;
   @Column({ type: 'text', array: true, nullable: false })
   images: string[];
+  @OneToMany(() => Attribute, (attribute) => attribute.product, { cascade: true })
+  attributes: Attribute[];
 
   @Column({ nullable: false })
   name: string;
+  @Column({ nullable: true, type: 'text' })
+  sku: string;
   @Column({ nullable: false, type: 'text' })
   description: string;
   @Column({ nullable: true, type: 'boolean' })
@@ -27,6 +37,9 @@ export class Product {
   weight: string;
   @Column({ nullable: false, type: 'text' })
   unit: string;
+  @Column({ nullable: true, type: 'enum', enum: ProductType,
+    enumName: 'product_type_enum', })
+  productType: 'Variant' | 'Simple product' | 'Base Product';
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   regularPrice: number;
@@ -41,8 +54,24 @@ export class Product {
 
   @OneToMany(() => Products, (products) => products.product)
   products: Products[];
+  @Column({ type: 'string', nullable: true })
+  categoryId: string;
+  @Column({ nullable: true })
+  isBaseProduct: boolean;
+  // Relationship to base product
+  @ManyToOne(() => Product, (product) => product.variants, { nullable: true })
+  @JoinColumn({ name: 'baseProductId' })
+  baseProduct: Product;
+
+  @Column({ nullable: true })
+  baseProductId: string;
+
+  // Relationship to variants
+  @OneToMany(() => Product, (product) => product.baseProduct)
+  variants: Product[];
   @ManyToOne(() => Category, (category) => category.products)
-  categories: Category;
+  @JoinColumn({ name: 'categoryId', referencedColumnName: 'id' })
+  category: Category;
 
   @CreateDateColumn({
     type: 'timestamp',

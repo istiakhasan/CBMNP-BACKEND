@@ -7,13 +7,14 @@ import {
   UseInterceptors,
   UploadedFiles,
   HttpStatus,
-  Query
+  Query,
+  Patch
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { Product } from './entity/product.entity';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ZodPipe } from 'src/middleware/ZodPipe';
-import { ProductSchema } from './product.validation';
+import { ProductSchema, VariantProductSchema } from './product.validation';
 import { ApiError } from 'src/middleware/ApiError';
 import { uploadFiles } from 'src/util/file-upload.util';
 import { extractOptions } from 'src/helpers/queryHelper';
@@ -23,24 +24,50 @@ import { IResponse } from 'src/util/sendResponse';
 @Controller('v1/products')
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
-
+  @Get('/count')
+  async countProduct(){
+    return catchAsync(async()=>{
+      console.log("aaaaaaaaaa");
+      const result = await this.productService.countProducts();
+      return {
+        success: true,
+        message: 'Product count retrieved successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    })
+  }
+  // @Post()
+  // @UseInterceptors(
+  //   FileFieldsInterceptor([
+  //     { name: 'images', maxCount: 10 },
+  //     // { name: 'example', maxCount: 1 },
+  //   ]),
+  // )
+  // async createProduct(
+  //   @Body(new ZodPipe(ProductSchema)) data: Omit<Product, 'images'>,
+  //   @UploadedFiles() files: { images?: Express.Multer.File[] },
+  // ) {
+  //   return catchAsync(async ():Promise<IResponse<Product>> => {
+  //     if (!files?.images || files.images.length === 0) {
+  //       throw new ApiError(HttpStatus.BAD_REQUEST, 'Please select at least one image');
+  //     }
+  //     const images = await uploadFiles(files.images, './uploads');
+  //     const result = await this.productService.createProduct({ ...data, images });
+  //     return {
+  //       success: true,
+  //       message: 'Product created successfully',
+  //       statusCode: HttpStatus.OK,
+  //       data: result,
+  //     };
+  //   });
+  // }
   @Post()
-  @UseInterceptors(
-    FileFieldsInterceptor([
-      { name: 'images', maxCount: 10 },
-      // { name: 'example', maxCount: 1 },
-    ]),
-  )
   async createProduct(
-    @Body(new ZodPipe(ProductSchema)) data: Omit<Product, 'images'>,
-    @UploadedFiles() files: { images?: Express.Multer.File[] },
+    @Body(new ZodPipe(ProductSchema)) data: Product,
   ) {
     return catchAsync(async ():Promise<IResponse<Product>> => {
-      if (!files?.images || files.images.length === 0) {
-        throw new ApiError(HttpStatus.BAD_REQUEST, 'Please select at least one image');
-      }
-      const images = await uploadFiles(files.images, './uploads');
-      const result = await this.productService.createProduct({ ...data, images });
+      const result = await this.productService.createSimpleProduct(data);
       return {
         success: true,
         message: 'Product created successfully',
@@ -50,6 +77,21 @@ export class ProductController {
     });
   }
   
+
+  @Post('variant')
+  async createVariantProduct(
+    @Body(new ZodPipe(VariantProductSchema)) data:Product,
+  ){
+    return catchAsync(async ():Promise<IResponse<Product>> => {
+      const result = await this.productService.createVariantProduct(data);
+      return {
+        success: true,
+        message: 'Product created successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    });
+  }
   @Get()
   async getProducts(@Query() query) {
     return catchAsync(async ():Promise<IResponse<Product[]>> => {
@@ -72,12 +114,45 @@ export class ProductController {
   
 
   @Get(':id')
-  async getProductById(@Param('id') id: number): Promise<Product> {
+  async getProductById(@Param('id') id: string): Promise<Product> {
     return catchAsync(async () => {
-      const result =  await this.productService.getProductById(id);
+      const parsedId = parseInt(id, 10); // Parse id as integer
+  if (isNaN(parsedId)) {
+    return {
+      success: true,
+      message: 'Invalid product id',
+      statusCode: HttpStatus.OK,
+      data: null,
+    };
+  }
+      const result =  await this.productService.getProductById(parsedId);
       return {
         success: true,
         message: 'Product retrieved  successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    });
+  }
+  @Patch(':id')
+  async updateProductById(
+    @Param('id') id: string,
+    @Body() data: Product,
+  ) {
+    return catchAsync(async () => {
+      const parsedId = parseInt(id, 10); 
+  if (isNaN(parsedId)) {
+    return {
+      success: true,
+      message: 'Invalid product id',
+      statusCode: HttpStatus.OK,
+      data: null,
+    };
+  }
+      const result =  await this.productService.updateProductById(parsedId,data);
+      return {
+        success: true,
+        message: 'Product update  successfully',
         statusCode: HttpStatus.OK,
         data: result,
       };
