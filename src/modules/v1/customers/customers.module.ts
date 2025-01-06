@@ -5,7 +5,7 @@ import { Customers } from './entities/customers.entity';
 import { CustomerController } from './customers.controller';
 import { CustomerService } from './customers.service';
 @Module({
-    imports: [TypeOrmModule.forFeature([Customers])],
+   imports: [TypeOrmModule.forFeature([Customers])],
   controllers: [CustomerController],
   providers: [CustomerService],
   exports: [CustomerService],

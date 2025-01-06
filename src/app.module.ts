@@ -14,6 +14,8 @@ import { StatusModule } from './modules/v1/status/status.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { CategoryModule } from './modules/v1/category/category.module';
+import { TransactionModule } from './modules/v1/transaction/transaction.module';
+import { InventoryModule } from './modules/v1/inventory/inventory.module';
 
 @Module({
   imports: [
@@ -29,7 +31,10 @@ import { CategoryModule } from './modules/v1/category/category.module';
     OrderModule,
     CustomerModule,
     StatusModule,
-    CategoryModule
+    CategoryModule,
+    InventoryModule,
+    TransactionModule,
+
   ],
   controllers: [AppController],
   providers: [
