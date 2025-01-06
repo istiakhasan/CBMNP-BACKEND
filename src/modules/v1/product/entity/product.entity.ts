@@ -11,6 +11,7 @@ import {
 import { Products } from '../../order/entities/products.entity';
 import { Category } from '../../category/entity/category.entity';
 import { Attribute } from './attributes.entity';
+import { ProductImages } from './image.entity';
 enum ProductType {
   Variant = 'Variant',
   SimpleProduct = 'Simple product',
@@ -18,10 +19,11 @@ enum ProductType {
 }
 @Entity({ name: 'product' })
 export class Product {
-  @PrimaryGeneratedColumn()
-  id: number;
-  @Column({ type: 'text', array: true, nullable: false })
-  images: string[];
+  @PrimaryGeneratedColumn('uuid') // Use UUID as the primary key type
+  id: string;
+  @OneToMany(() => ProductImages, (images) => images.product, { cascade: true, eager: true })
+  images: ProductImages[];
+
   @OneToMany(() => Attribute, (attribute) => attribute.product, { cascade: true })
   attributes: Attribute[];
 
@@ -38,7 +40,7 @@ export class Product {
   @Column({ nullable: false, type: 'text' })
   unit: string;
   @Column({ nullable: true, type: 'enum', enum: ProductType,
-    enumName: 'product_type_enum', })
+  enumName: 'product_type_enum', })
   productType: 'Variant' | 'Simple product' | 'Base Product';
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })

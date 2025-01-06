@@ -2,18 +2,19 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
-import { ProductService } from '../product/product.service';
+
 import { Products } from './entities/products.entity';
 import paginationHelpers from 'src/helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { generateUniqueOrderNumber } from 'src/util/genarateUniqueNumber';
+import { Product } from '../product/entity/product.entity';
 
 @Injectable()
 export class OrderService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
-    private readonly productService: ProductService, // To fetch product details
+    @InjectRepository(Product) private readonly productRepository: Repository<Product>, 
   ) {}
 
 
@@ -28,7 +29,7 @@ export class OrderService {
   
       const validatedProducts = await Promise.all(
         products.map(async (product:any) => {
-          const existingProduct = await this.productService.getProductById(product.productId);
+          const existingProduct = await this.productRepository.findOne({where:{id:product.productId}});
           if (!existingProduct) {
             throw new NotFoundException(`Product with ID ${product.productId} not found`);
           }

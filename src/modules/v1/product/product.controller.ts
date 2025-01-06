@@ -8,7 +8,8 @@ import {
   UploadedFiles,
   HttpStatus,
   Query,
-  Patch
+  Patch,
+  Delete
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { Product } from './entity/product.entity';
@@ -27,8 +28,20 @@ export class ProductController {
   @Get('/count')
   async countProduct(){
     return catchAsync(async()=>{
-      console.log("aaaaaaaaaa");
       const result = await this.productService.countProducts();
+      return {
+        success: true,
+        message: 'Product count retrieved successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    })
+  }
+
+  @Delete('/image/delete')
+  async deleteProductImage(@Body() data){
+    return catchAsync(async()=>{
+      const result = await this.productService.deleteProductImageService(data?.url);
       return {
         success: true,
         message: 'Product count retrieved successfully',
@@ -116,16 +129,8 @@ export class ProductController {
   @Get(':id')
   async getProductById(@Param('id') id: string): Promise<Product> {
     return catchAsync(async () => {
-      const parsedId = parseInt(id, 10); // Parse id as integer
-  if (isNaN(parsedId)) {
-    return {
-      success: true,
-      message: 'Invalid product id',
-      statusCode: HttpStatus.OK,
-      data: null,
-    };
-  }
-      const result =  await this.productService.getProductById(parsedId);
+
+      const result =  await this.productService.getProductById(id);
       return {
         success: true,
         message: 'Product retrieved  successfully',
@@ -140,16 +145,8 @@ export class ProductController {
     @Body() data: Product,
   ) {
     return catchAsync(async () => {
-      const parsedId = parseInt(id, 10); 
-  if (isNaN(parsedId)) {
-    return {
-      success: true,
-      message: 'Invalid product id',
-      statusCode: HttpStatus.OK,
-      data: null,
-    };
-  }
-      const result =  await this.productService.updateProductById(parsedId,data);
+
+      const result =  await this.productService.updateProductById(id,data);
       return {
         success: true,
         message: 'Product update  successfully',

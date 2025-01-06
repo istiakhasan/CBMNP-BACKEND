@@ -5,6 +5,8 @@ import { Product } from './entity/product.entity';
 import { plainToInstance } from 'class-transformer';
 import paginationHelpers from 'src/helpers/paginationHelpers';
 import { ApiError } from 'src/middleware/ApiError';
+import { ProductImages } from './entity/image.entity';
+import axios from 'axios';
 
 
 
@@ -13,6 +15,8 @@ export class ProductService {
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(ProductImages)
+    private readonly productImageRepository: Repository<ProductImages>,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -49,6 +53,7 @@ export class ProductService {
      const queryBuilder = this.productRepository.createQueryBuilder('product')
      .leftJoinAndSelect('product.category', 'category') 
      .leftJoinAndSelect('product.attributes', 'attributes') 
+     .leftJoinAndSelect('product.images', 'images') 
      .take(limit)
      .skip(skip)
      .orderBy(`product.${sortBy}`, sortOrder);
@@ -81,25 +86,82 @@ export class ProductService {
         };
   }
 
-  async getProductById(id: number){
-    if(!await this.productRepository.findOne({ where: { id } })){
-      throw new ApiError(HttpStatus.BAD_GATEWAY,'Product is not exist')
+  async getProductById(id: string) {
+    const product = await this.productRepository.findOne({
+      where: { id },
+      relations: ['category', 'attributes', 'variants','images'],
+    });
+  
+    if (!product) {
+      throw new ApiError(HttpStatus.BAD_GATEWAY, 'Product does not exist');
     }
-    return await this.productRepository.findOne({ where: { id } });
+  
+ 
+    let result;
+    if (product.baseProductId) {
+      const baseProduct = await this.productRepository.findOne({
+        where: { id: product.baseProductId },
+        relations: ['category', 'attributes', 'variants'],
+      });
+  
+      if (baseProduct) {
+        const productIds = [
+          { id: baseProduct.id, name: baseProduct.name },
+          ...baseProduct.variants?.map(item => ({
+            id: item.id,
+            name: item.name,
+          })) || [],
+        ];
+  
+        result = {
+          ids: productIds,
+          data: product,
+        };
+      } else {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'Base product does not exist');
+      }
+    } else {
+      result = {
+        ids: [
+          ...(product?.isBaseProduct ? [{ id: product.id, name: product.name }] : []),
+          ...(product.variants?.map(item => ({
+            id: item.id,
+            name: item.name,
+          })) || []),
+        ],
+        data: product,
+      };
+    }
+  
+    return result;
   }
-  async updateProductById(id: number,data:Product): Promise<Product> {
-    if(!await this.productRepository.findOne({ where: { id } })){
-      throw new ApiError(HttpStatus.BAD_GATEWAY,'Product is not exist')
+  
+  async updateProductById(id: string, data: Product): Promise<Product> {
+    const existingProduct = await this.productRepository.findOne({ where: { id } });
+    if (!existingProduct) {
+        throw new ApiError(HttpStatus.BAD_GATEWAY, 'Product does not exist');
     }
-    const result= await this.productRepository.update({id},data);
-
-    if(result?.affected>0){
-      return await this.productRepository.findOne({where:{id}})
+    if (data.images) {
+        await this.productImageRepository.delete({ productId: id });
+        for (const image of data.images) {
+            await this.productImageRepository.save({
+                productId: id,
+                url: image.url,
+                delete_url: image.delete_url,
+            });
+        }
+        delete data.images;
     }
-    else{
-      return null
+    const result = await this.productRepository.update({ id }, data);
+    if (result.affected > 0) {
+        return await this.productRepository.findOne({
+            where: { id },
+            relations: ['images'],
+        });
+    } else {
+        return null;
     }
-  }
+}
 
   async countProducts() {
     const rawStatuses = await this.productRepository
@@ -137,6 +199,23 @@ export class ProductService {
   
     console.log(result, 'Result');
     return result;
+  }
+
+  async deleteProductImageService(deleteUrl:string){
+ 
+    const deleteImage = async () => {
+      const deleteUrl = "https://ibb.co/P6dLKwB/f1276341a76e23561be64e9b33afa48a";
+    
+      try {
+        const response = await axios.get(deleteUrl);
+        console.log("Image deleted successfully", response.data);
+      } catch (error) {
+        console.error("Error deleting image:", error.message);
+      }
+    };
+    
+    deleteImage();
+    
   }
   
 }
