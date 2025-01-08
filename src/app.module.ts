@@ -16,6 +16,7 @@ import { join } from 'path';
 import { CategoryModule } from './modules/v1/category/category.module';
 import { TransactionModule } from './modules/v1/transaction/transaction.module';
 import { InventoryModule } from './modules/v1/inventory/inventory.module';
+import { WarehouseModule } from './modules/v1/warehouse/warehouse.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { InventoryModule } from './modules/v1/inventory/inventory.module';
     CategoryModule,
     InventoryModule,
     TransactionModule,
+    WarehouseModule,
 
   ],
   controllers: [AppController],
