@@ -24,7 +24,7 @@ export class WarehouseService {
 
   async findAll(options,filterOptions) {
     const {page,limit,skip,sortBy,sortOrder}=paginationHelpers(options)
-    const quneryBuilder=this.warehouse.createQueryBuilder('warehouse')
+    const queryBuilder=this.warehouse.createQueryBuilder('warehouse')
     .take(limit)
     .skip(skip)
     .orderBy(`warehouse.${sortBy}`,sortOrder)
@@ -34,13 +34,13 @@ export class WarehouseService {
     const searchTerm = `%${filterOptions.searchTerm}%`;
 
     // Use LOWER function to perform a case-insensitive search
-    quneryBuilder.andWhere(
+    queryBuilder.andWhere(
       'LOWER(warehouse.name) LIKE LOWER(:searchTerm)',
       { searchTerm },
     );
   }
 
-    const [data, total] = await quneryBuilder.getManyAndCount();
+    const [data, total] = await queryBuilder.getManyAndCount();
     const modifyData = plainToInstance(Warehouse, data);
     return {
       data:modifyData,
