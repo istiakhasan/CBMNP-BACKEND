@@ -15,6 +15,7 @@ import { Attribute } from './attributes.entity';
 import { ProductImages } from './image.entity';
 import { Inventory } from '../../inventory/entities/inventory.entity';
 import { Transaction } from '../../transaction/entities/transaction.entity';
+import { InventoryItem } from '../../inventory/entities/inventoryitem.entity';
 enum ProductType {
   Variant = 'Variant',
   SimpleProduct = 'Simple product',
@@ -102,5 +103,9 @@ export class Product {
   @OneToMany(() => Transaction, (transaction) => transaction.product)
   @JoinColumn({name:"productId",referencedColumnName:"productId"})
   transactions: Transaction[];
+  @OneToMany(() => InventoryItem, (inventoryItem) => inventoryItem.product, {
+    cascade: true,
+  })
+  inventoryItems: InventoryItem[];
 }
 

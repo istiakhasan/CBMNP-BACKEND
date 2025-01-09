@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn, ManyToOne, OneToMany, ManyToMany, OneToOne, JoinColumn } from 'typeorm';
 import { Product } from '../../product/entity/product.entity';
 import { Transaction } from '../../transaction/entities/transaction.entity';
+import { InventoryItem } from './inventoryitem.entity';
 
 @Entity()
 export class Inventory {
@@ -17,6 +18,9 @@ export class Inventory {
   @OneToMany(() => Transaction, (transaction) => transaction.inventory)
   transactions: Transaction[];
 
+  @OneToMany(() => InventoryItem, (product) => product.inventory, { cascade: true })
+  inventoryItems: InventoryItem[];
+  
   @Column('int')
   stock: number;
 

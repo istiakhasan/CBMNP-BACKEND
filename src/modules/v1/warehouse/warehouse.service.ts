@@ -1,5 +1,4 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { CreateWarehouseDto } from './dto/create-warehouse.dto';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { Warehouse } from './entities/warehouse.entity';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -28,12 +27,8 @@ export class WarehouseService {
     .take(limit)
     .skip(skip)
     .orderBy(`warehouse.${sortBy}`,sortOrder)
-   console.log(filterOptions);
-
    if (filterOptions?.searchTerm) {
     const searchTerm = `%${filterOptions.searchTerm}%`;
-
-    // Use LOWER function to perform a case-insensitive search
     queryBuilder.andWhere(
       'LOWER(warehouse.name) LIKE LOWER(:searchTerm)',
       { searchTerm },
