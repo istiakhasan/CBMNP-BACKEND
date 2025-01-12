@@ -1,29 +1,24 @@
 import {
   Entity,
   Column,
-  PrimaryGeneratedColumn,
+  PrimaryColumn,
   ManyToOne,
   OneToOne,
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
-  Unique,
 } from 'typeorm';
 import { Product } from '../../product/entity/product.entity';
 import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 import { Inventory } from './inventory.entity';
 
 @Entity('inventoryItems')
-@Unique(['locationId', 'productId']) 
 export class InventoryItem {
-  @PrimaryGeneratedColumn('uuid')
-  id: string;
+  @PrimaryColumn()
+  locationId: string;
 
-  @Column()
-  locationId: string; 
-
-  @Column()
-  productId: string; 
+  @PrimaryColumn()
+  productId: string;
 
   @OneToOne(() => Product)
   @JoinColumn({ name: 'productId' })

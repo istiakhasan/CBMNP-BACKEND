@@ -1,6 +1,7 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
 import { Product } from '../../product/entity/product.entity';
 import { Inventory } from '../../inventory/entities/inventory.entity';
+import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'inventory_transaction' })
 export class Transaction {
@@ -11,7 +12,11 @@ export class Transaction {
   productId: string;
   @Column({ type: 'uuid',nullable:true })
   inventoryId: string;
-
+  @Column({nullable:true})
+  locationId:string;
+  @ManyToOne(() => Warehouse)
+  @JoinColumn({ name: 'locationId' })
+  location: Warehouse;
   @Column('int')
   quantity: number;
 

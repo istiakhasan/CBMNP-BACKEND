@@ -45,6 +45,14 @@ export class WarehouseService {
     }
   }
 
+  async loadOptions() {
+    const options = await this.warehouse
+      .createQueryBuilder('warehouse')
+      .select(['warehouse.id AS value', 'warehouse.name AS label']) 
+      .getRawMany();
+  
+    return options;
+  }
   findOne(id: number) {
     return `This action returns a #${id} warehouse`;
   }

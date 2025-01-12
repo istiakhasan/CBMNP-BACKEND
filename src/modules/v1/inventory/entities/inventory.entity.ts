@@ -23,6 +23,10 @@ export class Inventory {
   
   @Column('int')
   stock: number;
+  @Column('int',{nullable:true})
+  wastageQuantity: number;
+  @Column('int',{nullable:true})
+  expiredQuantity: number;
 
   @CreateDateColumn()
   createdAt: Date;

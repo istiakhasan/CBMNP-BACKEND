@@ -12,11 +12,13 @@ export class InventoryService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(Inventory)
     private readonly inventoryRepository: Repository<Inventory>,
+    @InjectRepository(InventoryItem)
+    private readonly inventoryItemRepository: Repository<InventoryItem>,
     private readonly dataSource: DataSource,
   ) {}
 
   async addProductToInventory(createTransactionDto): Promise<Inventory & {type?:boolean}> {
-    const { productId, quantity ,type,inventoryItems} = createTransactionDto;
+    const { productId, quantity ,type,inventoryItems,expiredQuantity,wastageQuantity} = createTransactionDto;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -33,28 +35,61 @@ export class InventoryService {
       if (!inventory) {
         inventory = queryRunner.manager.create(Inventory, {
           productId,
-          stock: 0
+          stock: 0,
+          expiredQuantity: 0,
+          wastageQuantity: 0,
         });
-        console.log(inventory,"===============");
         await queryRunner.manager.save(inventory);
-        if (inventoryItems && inventoryItems.length > 0) {
-          const itemsToSave = inventoryItems.map((item) =>
-          {
-            const a=   queryRunner.manager.create(InventoryItem, {
-              ...item
-            })
-            return {
-              ...a,
-              inventory:inventory
-            }
-          }
-          );
-          await queryRunner.manager.save(InventoryItem, itemsToSave);
-        }
       }
-      console.log(inventory);
-      throw new Error('adsfasd')
-      type ? inventory.stock += quantity :inventory.stock -= quantity
+      if (inventoryItems && inventoryItems.length > 0) {
+        const itemsToSave =await Promise.all(inventoryItems.map(async(item) =>
+          {
+            const isExist=await queryRunner.manager.findOne(InventoryItem,{
+              where:{inventory:{id:inventory.id},productId:item?.productId,locationId:item?.locationId}
+            })
+            if(isExist){
+              type?Number(isExist.quantity += item.quantity):isExist.quantity -= item.quantity
+              type?Number(isExist.wastageQuantity += item.wastageQuantity):isExist.wastageQuantity -= item.wastageQuantity
+              type?Number(isExist.expiredQuantity += item.expiredQuantity):isExist.expiredQuantity -= item.expiredQuantity
+
+              const inventoryItemTransaction = queryRunner.manager.create('Transaction', {
+                productId: item.productId,
+                quantity: item.quantity,
+                totalAmount: product.regularPrice * item.quantity,
+                type: type ? 'IN' : 'OUT',
+                inventoryId: inventory.productId,
+                locationId: item.locationId,
+              });
+              console.log(inventoryItemTransaction,"b");
+              await queryRunner.manager.save(inventoryItemTransaction);
+              return isExist;
+            }else{
+              const a=   queryRunner.manager.create(InventoryItem, {
+                ...item
+              })
+              const inventoryItemTransaction = queryRunner.manager.create('Transaction', {
+                productId: item.productId,
+                quantity: item.quantity,
+                totalAmount: product.regularPrice * item.quantity,
+                type: type ? 'IN' : 'OUT',
+                inventoryId: inventory.productId,
+                locationId: item.locationId,
+              });
+              console.log(inventoryItemTransaction,"a");
+              await queryRunner.manager.save(inventoryItemTransaction);
+              return {
+                ...a,
+                inventory:inventory
+              }
+            }
+           
+          }
+          ));
+        await queryRunner.manager.save(InventoryItem, itemsToSave);
+      }
+      type ? Number(inventory.stock += quantity) :inventory.stock -= quantity
+      type? Number(inventory.expiredQuantity +=expiredQuantity):inventory.expiredQuantity -=expiredQuantity
+      type ? Number(inventory.wastageQuantity +=wastageQuantity):inventory.wastageQuantity -=wastageQuantity
       const result=  await queryRunner.manager.save(inventory);
       const transaction = queryRunner.manager.create('Transaction', {
         productId,
@@ -78,10 +113,37 @@ export class InventoryService {
     const result=await this.inventoryRepository.find({
       // relations:['product','product.transactions']
       relations:[
-        // 'product',
+        'product',
         'transactions',
-        'inventoryItems'
+        'inventoryItems',
+        'inventoryItems.location',
       ]
+    })
+
+    return result
+  }
+  async loadInventoryByProductId(productId:string) {
+    const result=await this.inventoryRepository.findOne({
+      where:{productId:productId},
+      relations:[
+        'product',
+        'inventoryItems',
+        'inventoryItems.location',
+      ],
+      order:{createdAt:'DESC'}
+    })
+
+    return result
+  }
+  async loadInventoryByWarehouseProduct(query:any) {
+    const {productId,locationId}=query
+    const result=await this.inventoryItemRepository.findOne({
+      where:{productId:productId,locationId:locationId},
+      relations:[
+        'product',
+        'location',
+      ],
+      order:{createdAt:'DESC'}
     })
 
     return result
