@@ -15,10 +15,73 @@ export class StatusService {
     return result;
   }
 
-  //   get all customers
-
   async getAllStatus() {
     const result = await this.statusRepository.find();
     return result;
   }
+  async getAllOrdersCountByStatus() {
+    const queryRunner = await this.statusRepository
+      .createQueryBuilder('status')
+      .leftJoin('status.orders', 'orders')
+      .select('status.label', 'label')
+      .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
+      .groupBy('status.value') 
+      .addGroupBy('status.label')
+      .getRawMany();
+      const totalOrders = await this.statusRepository
+    .createQueryBuilder('status')
+    .leftJoin('status.orders', 'orders')
+    .select('COALESCE(COUNT(orders.id), 0)', 'count')
+    .getRawOne();
+  
+    return [...queryRunner,{label:"All",count:totalOrders?.count}];
+  }
+  
 }
+
+
+// async countOrdersByStatus() {
+//   // Count PendingBD
+//   const pendingBdCount = await this.orderStatusRepository
+//     .createQueryBuilder('orderStatus')
+//     .leftJoin('orderStatus.orders', 'orders')
+//     .where('orderStatus.name = :name', { name: 'Pending' })
+//     .andWhere('orders.isBangladesh = true')
+//     .select('COALESCE(COUNT(orders.id), 0)', 'count')
+//     .getRawOne();
+
+//   // Count PendingNRB
+//   const pendingNrbCount = await this.orderStatusRepository
+//     .createQueryBuilder('orderStatus')
+//     .leftJoin('orderStatus.orders', 'orders')
+//     .where('orderStatus.name = :name', { name: 'Pending' })
+//     .andWhere('orders.isBangladesh = false')
+//     .select('COALESCE(COUNT(orders.id), 0)', 'count')
+//     .getRawOne();
+
+//   // Count other statuses
+//   const otherStatuses = await this.orderStatusRepository
+//     .createQueryBuilder('orderStatus')
+//     .leftJoin('orderStatus.orders', 'orders')
+//     .select('orderStatus.name', 'status')
+//     .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
+//     .andWhere('orderStatus.name != :name', { name: 'Pending' })
+//     .groupBy('orderStatus.name')
+//     .orderBy('orderStatus.name', 'ASC')
+//     .getRawMany();
+
+//   // Count total orders
+//   const totalOrders = await this.orderStatusRepository
+//     .createQueryBuilder('orderStatus')
+//     .leftJoin('orderStatus.orders', 'orders')
+//     .select('COALESCE(COUNT(orders.id), 0)', 'count')
+//     .getRawOne();
+
+//   // Combine all results
+//   return [
+//     { status: 'PendingBD', count: Number(pendingBdCount?.count || 0) },
+//     { status: 'PendingNRB', count: Number(pendingNrbCount?.count || 0) },
+//     ...otherStatuses.map(item => ({ status: item.status, count: Number(item.count) })),
+//     { status: 'Total', count: Number(totalOrders?.count || 0) },
+//   ];
+// }

@@ -16,7 +16,7 @@ export class OrderStatus {
   @Column({ nullable: false, type: 'varchar' })
   label: string;
 
-  @OneToMany(() => Order, (order) => order.customer)
+  @OneToMany(() => Order, (order) => order.status)
   orders: Order[];
 
   @CreateDateColumn({

@@ -24,9 +24,7 @@ export class OrderService {
     if (!products || !products.length) {
       throw new Error('Order must include at least one product');
     }
-   
       const   orderNumber = generateUniqueOrderNumber();
-  
       const validatedProducts = await Promise.all(
         products.map(async (product:any) => {
           const existingProduct = await this.productRepository.findOne({where:{id:product.productId}});
@@ -72,6 +70,13 @@ export class OrderService {
         '(orders.orderNumber LIKE :searchTerm OR customers.name LIKE :searchTerm)',
         { searchTerm }
       );
+    }
+
+     // Role Filter
+     if (filterOptions?.statusId) {
+      queryBuilder.andWhere('orders.statusId = :statusId', {
+        statusId: filterOptions.statusId,
+      });
     }
   
     queryBuilder

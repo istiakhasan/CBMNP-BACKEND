@@ -29,5 +29,17 @@ export class StatusController {
       }
 
     }
+    @Get('/orders-count')
+    async getAllOrdersCountByStatus() {
+
+      const result=await this.statusService.getAllOrdersCountByStatus();
+      return {
+        success:true,
+        statusCode:HttpStatus.OK,
+        message:"Status retrieved  successfully",
+        data:result
+      }
+
+    }
    
   }

@@ -8,6 +8,7 @@ export class OrderController {
 
   @Post()
   async createOrder(@Body() payload: any): Promise<Order> {
+    console.log(payload,"payload");
     return await this.orderService.createOrder(payload);
   }
 
@@ -21,7 +22,7 @@ export class OrderController {
       }
     }
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm', 'employmentStatus', 'role'];
+    const filterKeys = ['searchTerm', 'statusId'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];
