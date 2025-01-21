@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { UserPermission } from '../../userpermission/entities/userpermission.entity';
+import { Order } from '../../order/entities/order.entity';
 export enum UserRole {
   ADMIN = 'admin',
   CTGADMIN = 'ctgadmin',
@@ -42,6 +43,8 @@ export class Users {
   active: boolean;
   @OneToMany(() => UserPermission, (userPermission) => userPermission.user)
   userPermissions: UserPermission[];
+  @OneToMany(() => Order, (Order) => Order.agent)
+  orders: Order[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

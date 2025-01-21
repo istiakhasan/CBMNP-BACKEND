@@ -29,7 +29,6 @@ export class OrderController {
       }
     }
     const result= await this.orderService.getOrders(options,searchFilterOptions);
-
     return {
       success:true,
       statusCode:HttpStatus.OK,

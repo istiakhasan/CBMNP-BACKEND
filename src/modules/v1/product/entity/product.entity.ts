@@ -98,7 +98,7 @@ export class Product {
   updatedAt: Date;
 
   @OneToOne(() => Inventory, (inventory) => inventory.product)
-  inventories: Inventory[];
+  inventories: Inventory;
 
   @OneToMany(() => Transaction, (transaction) => transaction.product)
   @JoinColumn({name:"productId",referencedColumnName:"productId"})

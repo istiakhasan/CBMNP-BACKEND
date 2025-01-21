@@ -9,7 +9,7 @@ export class Inventory {
   id: string;
 
   @OneToOne(() => Product, (product) => product.inventories)
-  @JoinColumn()
+  @JoinColumn({name:'productId'})
   product: Product;
 
   @Column({ type: 'uuid', unique: true, nullable: true })

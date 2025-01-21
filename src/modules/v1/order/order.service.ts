@@ -8,13 +8,19 @@ import paginationHelpers from 'src/helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { generateUniqueOrderNumber } from 'src/util/genarateUniqueNumber';
 import { Product } from '../product/entity/product.entity';
-
+import { OrderStatus } from '../status/entities/status.entity';
+import { Customers } from '../customers/entities/customers.entity';
+import { In } from 'typeorm';
+import { Users } from '../user/entities/user.entity';
 @Injectable()
 export class OrderService {
   constructor(
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Product) private readonly productRepository: Repository<Product>, 
+    @InjectRepository(OrderStatus) private readonly statusRepository: Repository<OrderStatus>, 
+    @InjectRepository(Customers) private readonly customerRepository: Repository<Customers>, 
+    @InjectRepository(Users) private readonly usersRepository: Repository<Users>, 
   ) {}
 
 
@@ -59,39 +65,55 @@ export class OrderService {
 
 
 
+
+
   async getOrders(options, filterOptions) {
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
-  
     const queryBuilder = this.orderRepository.createQueryBuilder('orders');
   
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
-      queryBuilder.andWhere(
-        '(orders.orderNumber LIKE :searchTerm OR customers.name LIKE :searchTerm)',
-        { searchTerm }
-      );
+      queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', { searchTerm });
     }
-
-     // Role Filter
-     if (filterOptions?.statusId) {
+  
+    if (filterOptions?.statusId) {
       queryBuilder.andWhere('orders.statusId = :statusId', {
         statusId: filterOptions.statusId,
       });
     }
   
     queryBuilder
-      .leftJoinAndSelect('orders.customer', 'customer')
-      .leftJoin('orders.status', 'status') // Change to leftJoin
-      .addSelect(['status.label', 'status.value'])  // Select only the fields you need
       .orderBy(`orders.${sortBy}`, sortOrder)
       .skip(skip)
       .take(limit);
   
-    const [data, total] = await queryBuilder.getManyAndCount();
-    const modifyData = plainToInstance(Order, data);
+    const [orders, total] = await queryBuilder.getManyAndCount();
+    const statusIds = [...new Set(orders.map(order => order.statusId))];
+    const statuses = await this.statusRepository.findBy({
+      value: In(statusIds),
+    });
+    const customerIds = [...new Set(orders.map(order => order.customerId))];
+    const customers = await this.customerRepository.findBy({
+      customer_Id: In(customerIds),
+    });
+
+    const agentIds=[...new Set(orders.map(order=>order.agentId))]
+    const agents=await this.usersRepository.findBy({
+      userId:In(agentIds)
+    })
+    const statusMap = new Map(statuses.map(status => [status.value, status]));
+    const customerMap = new Map(customers.map(customer => [customer.customer_Id, customer]));
+    const agentMap = new Map(agents.map(order => [order.userId, order]));
+   
+    const modifiedData = orders.map(order => ({
+      ...order,
+      status: statusMap.get(order.statusId),
+      customer: customerMap.get(order.customerId as any),
+      agent: agentMap.get(order.agentId as any),
+    }));
   
     return {
-      data: modifyData,
+      data: plainToInstance(Order, modifiedData),
       total,
       page,
       limit,
