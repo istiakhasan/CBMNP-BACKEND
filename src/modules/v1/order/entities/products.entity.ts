@@ -18,7 +18,9 @@ import { Product } from '../../product/entity/product.entity';
     id: number;
   
     @Column()
-    productId: number;
+    productId: string;
+    @Column()
+    orderId: number;
   
     @Column({ type: 'int' })
     productQuantity: number;

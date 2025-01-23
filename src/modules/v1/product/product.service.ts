@@ -49,7 +49,6 @@ export class ProductService {
   
 
   async getProducts(options,filterOptions) {
-    console.log(await this.productRepository.find({relations:['inventories']}));
      const {page,limit,skip,sortBy,sortOrder}=   paginationHelpers(options)
      const queryBuilder = this.productRepository.createQueryBuilder('product')
      .leftJoinAndSelect('product.category', 'category') 

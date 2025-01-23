@@ -30,7 +30,7 @@ export class Order {
   @Column({ nullable: true })
   deliveryNote: string;
   @Column({ nullable: true })
-  shippingCharge: string;
+  shippingCharge: number;
   @Column({ nullable: true })
   shippingType: string;
   @Column({ nullable: true })
@@ -41,8 +41,16 @@ export class Order {
   productValue: string;
   @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
   totalPrice: number;
+  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  discount: number;
+  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  totalPaidAmount: number;
+  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  totalReceiveAbleAmount: number;
   @Column({ nullable: true })
   currier: string;
+  @Column({ nullable: true })
+  paymentStatus: string;
   @Column({ nullable: true })
   paymentMethod: string;
   @Column({ nullable: true })

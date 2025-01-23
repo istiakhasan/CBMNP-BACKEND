@@ -4,7 +4,8 @@ import { Users } from './entities/user.entity';
 import { Brackets, Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
 import paginationHelpers from 'src/helpers/paginationHelpers';
-
+import * as bcryptjs from 'bcrypt';
+import config from 'src/config';
 @Injectable()
 export class UserService {
   constructor(
@@ -20,7 +21,11 @@ export class UserService {
      const currentId =lastUserId || (0).toString().padStart(9, '0'); //000000
      let incrementedId = (parseInt(currentId) + 1).toString().padStart(9, '0');
      incrementedId = `R-${incrementedId}`;
-    const result = await this.userRepository.save({...data,userId:incrementedId});
+
+     const {password,...rest}=data
+     const hashPassword=await bcryptjs.hash(password,12)
+    
+    const result = await this.userRepository.save({...rest,userId:incrementedId,password:hashPassword});
     return result;
   }
 

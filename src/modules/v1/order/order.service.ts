@@ -21,44 +21,56 @@ export class OrderService {
     @InjectRepository(OrderStatus) private readonly statusRepository: Repository<OrderStatus>, 
     @InjectRepository(Customers) private readonly customerRepository: Repository<Customers>, 
     @InjectRepository(Users) private readonly usersRepository: Repository<Users>, 
+    @InjectRepository(Products) private readonly productsRepository: Repository<Products>, 
   ) {}
 
 
   async createOrder(payload: Order) {
-    const { customerId, receiverPhoneNumber, products, ...rest } = payload;
-
-    if (!products || !products.length) {
+    const { customerId, receiverPhoneNumber, products, discount = 0, paymentHistory = [], shippingCharge = 0, ...rest } = payload;
+    if (!products || products.length === 0) {
       throw new Error('Order must include at least one product');
     }
-      const   orderNumber = generateUniqueOrderNumber();
-      const validatedProducts = await Promise.all(
-        products.map(async (product:any) => {
-          const existingProduct = await this.productRepository.findOne({where:{id:product.productId}});
-          if (!existingProduct) {
-            throw new NotFoundException(`Product with ID ${product.productId} not found`);
-          }
-          const subtotal = product.productQuantity * existingProduct.salePrice;
-          return {
-            productId: product.productId,
-            productQuantity: product.productQuantity,
-            productPrice: existingProduct.salePrice,
-            subtotal,
-          };
-        })
-      );
-
-    return this.orderRepository.save({
+  
+    const orderNumber = generateUniqueOrderNumber();
+    const validatedProducts: any[] = [];
+    let productValue = 0;
+  
+    for (const product of products) {
+      const existingProduct = await this.productRepository.findOne({ where: { id: product.productId } });
+      if (!existingProduct) {
+        throw new NotFoundException(`Product with ID ${product.productId} not found`);
+      }
+  
+      const subtotal = product.productQuantity * existingProduct.salePrice;
+      productValue += subtotal;
+  
+      validatedProducts.push({
+        productId: product.productId,
+        productQuantity: product.productQuantity,
+        productPrice: existingProduct.salePrice,
+        subtotal,
+      });
+    }
+    const totalPaidAmount = paymentHistory.reduce((total, payment) => total + Number(payment.paidAmount), 0);
+    const grandTotal = productValue + Number(shippingCharge) - Number(discount);
+    const totalReceivableAmount = grandTotal - totalPaidAmount;
+     const result=await this.orderRepository.save({
       orderNumber,
+      paymentHistory:paymentHistory ,
       customerId,
       receiverPhoneNumber,
       products: validatedProducts,
       currier: payload.currier,
       orderSource: payload.orderSource,
-      shippingCharge: payload.shippingCharge,
-      totalPrice:Number(payload.shippingCharge)+Number(validatedProducts?.reduce((acc,b)=>acc+b.subtotal,0)),
-      productValue:Number(validatedProducts?.reduce((acc,b)=>acc+b.subtotal,0)),
-      ...rest
+      shippingCharge,
+      totalPrice: grandTotal,
+      productValue,
+      totalPaidAmount,
+      totalReceiveAbleAmount: totalReceivableAmount,
+      discount,
+      ...rest,
     });
+    return result
   }
   
 
@@ -125,16 +137,28 @@ export class OrderService {
   async getOrderById(orderId: number): Promise<Order> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['products'],
+      relations:['paymentHistory']
     });
-
+     console.log(order,"order");
     if (!order) {
       throw new NotFoundException(`Order with ID ${orderId} not found`);
     }
-
-    return order;
+  
+    const [products, customer] = await Promise.all([
+      this.productsRepository.find({ where: { orderId: order.id } ,relations:['product']}),
+      this.customerRepository.findOne({ where: { customer_Id: order.customerId } }),
+    ]);
+  
+    if (!customer) {
+      throw new NotFoundException(`Customer with ID ${order.customerId} not found`);
+    }
+    return {
+      ...order,
+      products: products || [],
+      customer,
+    };
   }
-
+  
   /**
    * Delete an order by its ID.
    */

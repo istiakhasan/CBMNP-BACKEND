@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { Secret } from 'jsonwebtoken';
 import { ApiError } from './ApiError';
 import { jwtHelpers } from 'src/helpers/jwtHelpers';
+import config from 'src/config';
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -24,7 +25,7 @@ export class AuthGuard implements CanActivate {
     try {
       const verifiedUser = jwtHelpers.verifyToken(
         token,
-        "1234",
+        config.jwt.secret as Secret,
       );
       request.user = verifiedUser;
       if (roles && roles.length > 0 && !roles.includes(verifiedUser.role)) {

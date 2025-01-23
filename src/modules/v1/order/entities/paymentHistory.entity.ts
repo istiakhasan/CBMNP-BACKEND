@@ -15,16 +15,16 @@ import {
     id: string;
   
     @Column({ nullable: false })
-    paymentMethod: string; // E.g., 'Credit Card', 'PayPal', etc.
+    paymentMethod: string; 
   
     @Column({ nullable: false, type: 'decimal', precision: 10, scale: 2 })
     paidAmount: number; 
   
     @Column({ nullable: true, type: 'text' })
-    transactionId: string; //exist
+    transactionId: string;
   
     @Column({ nullable: true })
-    paymentStatus: string; // E.g., 'Paid', 'Pending', etc.
+    paymentStatus: string; 
   
     @ManyToOne(() => Order, (order) => order.paymentHistory, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'orderId' })

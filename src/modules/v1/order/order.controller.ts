@@ -8,7 +8,6 @@ export class OrderController {
 
   @Post()
   async createOrder(@Body() payload: any): Promise<Order> {
-    console.log(payload,"payload");
     return await this.orderService.createOrder(payload);
   }
 

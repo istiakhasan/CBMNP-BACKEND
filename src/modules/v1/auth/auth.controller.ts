@@ -17,17 +17,17 @@ import { Request, Response } from 'express';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Roles } from 'src/middleware/roles.decorator';
 import { AuthGuard } from 'src/middleware/auth.guard';
-@Controller('auth')
+@Controller('/v1/auth')
 export class AuthenTicationController {
   constructor(private readonly authenTicationService: AuthenTicationService) {}
-  @Post('/sign-in')
+  @Post('/log-in')
   async login(@Body(new ZodPipe(loginSchema)) data, @Res() res: Response) {
     const result = await this.authenTicationService.login(data);
     res.status(HttpStatus.OK).json({
       success: true,
       statusCode: HttpStatus.OK,
       message: 'User signed in successfully',
-      data: { token: result },
+      data: result,
     });
   }
 

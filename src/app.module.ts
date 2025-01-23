@@ -17,6 +17,7 @@ import { CategoryModule } from './modules/v1/category/category.module';
 import { TransactionModule } from './modules/v1/transaction/transaction.module';
 import { InventoryModule } from './modules/v1/inventory/inventory.module';
 import { WarehouseModule } from './modules/v1/warehouse/warehouse.module';
+import { AuthModule } from './modules/v1/auth/auth.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { WarehouseModule } from './modules/v1/warehouse/warehouse.module';
     InventoryModule,
     TransactionModule,
     WarehouseModule,
+    AuthModule
 
   ],
   controllers: [AppController],

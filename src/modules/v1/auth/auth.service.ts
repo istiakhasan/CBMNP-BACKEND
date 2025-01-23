@@ -9,11 +9,12 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { ApiError } from 'src/middleware/ApiError';
-import { jwtHelpers } from 'src/helpers/jwtHelpers';
 import config from 'src/config';
 import * as bcryptjs from 'bcrypt';
-import { Users } from '../users/entities/users.entity';
+
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { Users } from '../user/entities/user.entity';
+import { jwtHelpers } from 'src/helpers/jwtHelpers';
 @Injectable()
 export class AuthenTicationService {
   constructor(
@@ -24,25 +25,24 @@ export class AuthenTicationService {
     data: any,
   ): Promise<{ refreshToken: string; accessToken: string }> {
     const isUserExist = await this.usersRepository.findOne({
-      where: { employeeId: data?.userId },
+      where: { userId: data?.userId },
     });
     if (!isUserExist) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not exist');
     }
-    const { employeeId, password: savePassword, role, id } = isUserExist;
-    // const isPasswordMatch =savePassword====data.password
-    // const isPasswordMatch =await bcryptjs.compare(data.password, savePassword);
-    if (savePassword !==data.password) {
+    const { userId, password: savePassword, role, id } = isUserExist;
+    const isPasswordMatch =await bcryptjs.compare(data.password, savePassword);
+    if (!isPasswordMatch) {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'Password is incorrect');
     }
 
     const accessToken = jwtHelpers.createToken(
-      { employeeId, role, id },
+      { userId, role, id },
       config.jwt.secret as string,
       config.jwt.expires_in as string,
     );
     const refreshToken = jwtHelpers.createToken(
-      { employeeId, role, id },
+      { userId, role, id },
       config.jwt.refresh_secret as string,
       config.jwt.refresh_expires_in as string,
     );
@@ -65,15 +65,15 @@ export class AuthenTicationService {
 
     const { userId } = verifiedToken;
     const isUserExist = await this.usersRepository.findOne({
-      where: { employeeId: userId },
+      where: { userId: userId },
     });
     if (!isUserExist) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'User does not exist');
     }
-    const { employeeId, role, id } = isUserExist;
+    const { role, id } = isUserExist;
 
     const newAccessToken = jwtHelpers.createToken(
-      { employeeId, role, id },
+      { userId, role, id },
       config.jwt.secret as string,
       config.jwt.expires_in as string,
     );
@@ -87,7 +87,7 @@ export class AuthenTicationService {
     let result: Users;
     if (user) {
       result = await this.usersRepository.findOne({
-        where: { employeeId: user.employeeId },
+        where: { userId: user.employeeId },
         relations: ['employee'],
       });
     }
@@ -105,7 +105,7 @@ export class AuthenTicationService {
     }
 
     const user = await this.usersRepository.findOne({
-      where: { employeeId: userId },
+      where: { userId: userId },
       relations: ['employee'],
     });
 
