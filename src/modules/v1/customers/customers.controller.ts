@@ -62,5 +62,17 @@ export class CustomerController {
        }
       }) 
     }
+    @Get('/:id')
+    async getOrderByid(@Param('id') customerId) {
+      return catchAsync(async()=>{
+        const result=await this.customerService.getOrderByid(customerId);
+        return {
+          success:true,
+          statusCode:HttpStatus.OK,
+          message:'Customers  retrieved successfully',
+          data:result
+       }
+      }) 
+    }
    
   }

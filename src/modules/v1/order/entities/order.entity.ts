@@ -13,6 +13,8 @@ import { Customers } from '../../customers/entities/customers.entity';
 import { OrderStatus } from '../../status/entities/status.entity';
 import { Users } from '../../user/entities/user.entity';
 import { PaymentHistory } from './paymentHistory.entity';
+import { Comments } from '../../Comments/entities/orderComment.entity';
+
 
 
 @Entity({ name: 'orders' })
@@ -38,7 +40,7 @@ export class Order {
   @Column({ nullable: true })
   orderSource: string;
   @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
-  productValue: string;
+  productValue: number;
   @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
   totalPrice: number;
   @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
@@ -87,6 +89,8 @@ export class Order {
 
   @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, { cascade: true })
   paymentHistory: PaymentHistory[];
+  @OneToMany(() => Comments, (comment) => comment.order,{ cascade: true })
+  comments: Comments[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

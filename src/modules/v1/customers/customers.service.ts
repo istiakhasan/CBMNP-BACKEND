@@ -104,4 +104,9 @@ async getOrdersCount(customerId: string) {
     { label: 'Total', count: parseInt(totalOrders?.total || '0', 10) },
   ];
 }
+async getOrderByid(customerId: string) {
+  const result = await this.customerRepository.findOne({where:{customer_Id:customerId}})
+
+  return result
+}
 }

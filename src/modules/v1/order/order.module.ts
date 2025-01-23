@@ -10,6 +10,7 @@ import { Customers } from '../customers/entities/customers.entity';
 import { Users } from '../user/entities/user.entity';
 import { Products } from './entities/products.entity';
 
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([Order,Product,OrderStatus,Customers,Users,Products]),

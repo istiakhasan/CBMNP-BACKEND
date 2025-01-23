@@ -18,6 +18,7 @@ import { TransactionModule } from './modules/v1/transaction/transaction.module';
 import { InventoryModule } from './modules/v1/inventory/inventory.module';
 import { WarehouseModule } from './modules/v1/warehouse/warehouse.module';
 import { AuthModule } from './modules/v1/auth/auth.module';
+import { CommentModule } from './modules/v1/Comments/comment.module';
 
 @Module({
   imports: [
@@ -37,7 +38,8 @@ import { AuthModule } from './modules/v1/auth/auth.module';
     InventoryModule,
     TransactionModule,
     WarehouseModule,
-    AuthModule
+    AuthModule,
+    CommentModule
 
   ],
   controllers: [AppController],

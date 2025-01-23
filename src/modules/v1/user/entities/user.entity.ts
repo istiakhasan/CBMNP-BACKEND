@@ -8,6 +8,7 @@ import {
 } from 'typeorm';
 import { UserPermission } from '../../userpermission/entities/userpermission.entity';
 import { Order } from '../../order/entities/order.entity';
+import { Comments } from '../../Comments/entities/orderComment.entity';
 export enum UserRole {
   ADMIN = 'admin',
   CTGADMIN = 'ctgadmin',
@@ -45,6 +46,8 @@ export class Users {
   userPermissions: UserPermission[];
   @OneToMany(() => Order, (Order) => Order.agent)
   orders: Order[];
+  @OneToMany(() => Comments, (comment) => comment.user)
+  comments: Comments[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

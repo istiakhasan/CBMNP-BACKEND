@@ -1,6 +1,8 @@
-import { Controller, Get, Post, Param, Body, HttpStatus, Query } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
+import { catchAsync } from 'src/hoc/createAsync';
+import { IResponse } from 'src/util/sendResponse';
 
 @Controller('v1/orders')
 export class OrderController {  
@@ -40,9 +42,20 @@ export class OrderController {
       }
    }
   }
-
   @Get(':id')
   async getOrderById(@Param('id') id: number): Promise<Order> {
     return await this.orderService.getOrderById(id);
+  }
+  @Patch(':id')
+  async update(@Param('id') id: number,@Body() data:Order){
+    return  catchAsync(async():Promise<IResponse<Order>>=>{
+      const result=await this.orderService.update(id,data);
+      return {
+        message:'Order update successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
   }
 }
