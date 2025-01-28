@@ -9,6 +9,8 @@ import {
 import { UserPermission } from '../../userpermission/entities/userpermission.entity';
 import { Order } from '../../order/entities/order.entity';
 import { Comments } from '../../Comments/entities/orderComment.entity';
+import { OrdersLog } from '../../order/entities/orderlog.entity';
+import { PaymentHistory } from '../../order/entities/paymentHistory.entity';
 export enum UserRole {
   ADMIN = 'admin',
   CTGADMIN = 'ctgadmin',
@@ -38,7 +40,7 @@ export class Users {
   email: string;
   @Column({ nullable: true, type: 'text' })
   address: string;
-  @Column({ nullable: false, type: 'varchar' })
+  @Column({ nullable: false, type: 'varchar'})
   password: string;
   @Column({ nullable: true, type: 'boolean',default:true })
   active: boolean;
@@ -48,6 +50,10 @@ export class Users {
   orders: Order[];
   @OneToMany(() => Comments, (comment) => comment.user)
   comments: Comments[];
+  @OneToMany(() => OrdersLog, (orderLog) =>orderLog.updatedBy )
+  logs: OrdersLog[];
+  @OneToMany(() => PaymentHistory, (orderLog) =>orderLog.user )
+  paymentHistory: PaymentHistory[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

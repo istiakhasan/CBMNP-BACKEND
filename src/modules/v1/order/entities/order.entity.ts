@@ -14,6 +14,7 @@ import { OrderStatus } from '../../status/entities/status.entity';
 import { Users } from '../../user/entities/user.entity';
 import { PaymentHistory } from './paymentHistory.entity';
 import { Comments } from '../../Comments/entities/orderComment.entity';
+import { OrdersLog } from './orderlog.entity';
 
 
 
@@ -38,16 +39,18 @@ export class Order {
   @Column({ nullable: true })
   orderType: string;
   @Column({ nullable: true })
+  invoiceNumber: string;
+  @Column({ nullable: true })
   orderSource: string;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   productValue: number;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   totalPrice: number;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   discount: number;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   totalPaidAmount: number;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
   totalReceiveAbleAmount: number;
   @Column({ nullable: true })
   currier: string;
@@ -66,6 +69,10 @@ export class Order {
   receiverThana: string;
   @Column({ nullable: true })
   receiverAddress: string;
+  @Column({ nullable: true })
+  onHoldReason: string;
+  @Column({ nullable: true })
+  onCancelReason: string;
  
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
@@ -91,6 +98,8 @@ export class Order {
   paymentHistory: PaymentHistory[];
   @OneToMany(() => Comments, (comment) => comment.order,{ cascade: true })
   comments: Comments[];
+  @OneToMany(() => OrdersLog, (logs) => logs.order)
+  orderLogs: OrdersLog[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

@@ -1,5 +1,5 @@
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { In, Like, Not, Repository } from 'typeorm';
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from './entities/status.entity';
 
@@ -15,8 +15,28 @@ export class StatusService {
     return result;
   }
 
-  async getAllStatus() {
-    const result = await this.statusRepository.find();
+  async getAllStatus(query:{label:string}) {
+    let result
+    if(query?.label==="Hold"){
+        result = await this.statusRepository.findBy({
+          label: In(["Approved","Cancel"])
+    });
+    }
+    if(query?.label==="Pending"){
+        result = await this.statusRepository.findBy({
+          label: In(["Hold", "Approved","Cancel"])
+    });
+    }
+    if(query?.label==="Approved"){
+        result = await this.statusRepository.findBy({
+          label: Not("Approved")
+    });
+    }
+    if(query?.label==="Cancel"){
+        result = await this.statusRepository.findBy({
+          label: In(["Hold", "Approved","Pending"])
+    });
+    }
     return result;
   }
   async getAllOrdersCountByStatus() {

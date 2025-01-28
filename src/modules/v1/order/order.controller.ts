@@ -3,15 +3,13 @@ import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
 import { catchAsync } from 'src/hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
+import { PaymentHistory } from './entities/paymentHistory.entity';
 
 @Controller('v1/orders')
 export class OrderController {  
   constructor(private readonly orderService: OrderService) {}
 
-  @Post()
-  async createOrder(@Body() payload: any): Promise<Order> {
-    return await this.orderService.createOrder(payload);
-  }
+ 
 
   @Get()
   async getOrders(@Query() query){
@@ -42,9 +40,49 @@ export class OrderController {
       }
    }
   }
+  @Get('/logs/:id')
+  async getOrdersLogs(@Param('id') id:number){
+
+
+    const result= await this.orderService.getOrdersLogs(id);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Order retrieved successfully',
+      data:result,
+   }
+  }
   @Get(':id')
   async getOrderById(@Param('id') id: number): Promise<Order> {
     return await this.orderService.getOrderById(id);
+  }
+  @Post()
+  async createOrder(@Body() payload: any): Promise<Order> {
+    return await this.orderService.createOrder(payload);
+  }
+  @Post('/payment/:id')
+  async updatePayment(@Param('id') id: number,@Body() data:PaymentHistory){
+    return  catchAsync(async():Promise<IResponse<any>>=>{
+      const result=await this.orderService.addPayment(id,data);
+      return {
+        message:'Order update successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
+  }
+  @Patch('/change-status/:id')
+  async changeStatus(@Param('id') id: number,@Body() data:Order){
+    return  catchAsync(async():Promise<IResponse<Order>>=>{
+      const result=await this.orderService.changeStatus(id,data);
+      return {
+        message:'Order status change  successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
   }
   @Patch(':id')
   async update(@Param('id') id: number,@Body() data:Order){
@@ -58,4 +96,5 @@ export class OrderController {
       }
     })
   }
+  
 }

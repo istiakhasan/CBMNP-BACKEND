@@ -2,6 +2,9 @@ import { Body, Controller, Get, HttpStatus, Post, Query } from "@nestjs/common";
 import { ZodPipe } from "src/middleware/zodPipe";
 import { StatusService } from "./status.service";
 import { CreateStatusSchema } from "./status.validation";
+import { catchAsync } from "src/hoc/createAsync";
+import { OrderStatus } from "./entities/status.entity";
+import { IResponse } from "src/util/sendResponse";
 
 @Controller('v1/status')
 export class StatusController {
@@ -18,15 +21,17 @@ export class StatusController {
       
     }
     @Get()
-    async getAllStatus() {
-
-      const result=await this.statusService.getAllStatus();
+    async getAllStatus(@Query() query:{label:string}) {
+      console.log(query,"query");
+      return  catchAsync(async():Promise<IResponse<OrderStatus[]>>=>{
+        const result=await this.statusService.getAllStatus(query);
       return {
         success:true,
         statusCode:HttpStatus.OK,
         message:"Status retrieved  successfully",
         data:result
       }
+      })
 
     }
     @Get('/orders-count')

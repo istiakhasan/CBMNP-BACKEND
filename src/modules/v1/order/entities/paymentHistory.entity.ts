@@ -8,6 +8,7 @@ import {
     JoinColumn,
   } from 'typeorm';
   import { Order } from './order.entity';
+import { Users } from '../../user/entities/user.entity';
   
   @Entity({ name: 'payment_history' })
   export class PaymentHistory {
@@ -25,10 +26,17 @@ import {
   
     @Column({ nullable: true })
     paymentStatus: string; 
-  
+    @Column({ nullable: true })
+    orderId: number; 
+    @Column({ nullable: true })
+    userId: string; 
+     
     @ManyToOne(() => Order, (order) => order.paymentHistory, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'orderId' })
     order: Order;
+    @ManyToOne(() => Users, (user) => user.paymentHistory, { onDelete: 'CASCADE' })
+    @JoinColumn({ name: 'userId',referencedColumnName:'userId' })
+    user: Users;
   
     @CreateDateColumn({
       type: 'timestamp',

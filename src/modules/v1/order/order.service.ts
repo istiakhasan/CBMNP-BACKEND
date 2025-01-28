@@ -13,6 +13,8 @@ import { Customers } from '../customers/entities/customers.entity';
 import { In } from 'typeorm';
 import { Users } from '../user/entities/user.entity';
 import { ApiError } from 'src/middleware/ApiError';
+import { PaymentHistory } from './entities/paymentHistory.entity';
+import { OrdersLog } from './entities/orderlog.entity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -28,6 +30,10 @@ export class OrderService {
     private readonly usersRepository: Repository<Users>,
     @InjectRepository(Products)
     private readonly productsRepository: Repository<Products>,
+    @InjectRepository(PaymentHistory)
+    private readonly paymentHistoryRepository: Repository<PaymentHistory>,
+    @InjectRepository(OrdersLog)
+    private readonly orderLogsRepository: Repository<OrdersLog>,
   ) {}
 
   async createOrder(payload: Order) {
@@ -74,6 +80,17 @@ export class OrderService {
     );
     const grandTotal = productValue + Number(shippingCharge) - Number(discount);
     const totalReceivableAmount = grandTotal - totalPaidAmount;
+
+    // generate invoice number 
+    const lastOrder = await this.orderRepository
+    .createQueryBuilder('order')
+    .orderBy('order.createdAt', 'DESC') 
+    .take(1)
+    .getOne();
+    const lastUserId=lastOrder?.invoiceNumber?.substring(3)
+     const currentId =lastUserId || (0).toString().padStart(4, '0'); //000000
+     let incrementedId = (parseInt(currentId) + 1).toString().padStart(4, '0');
+     incrementedId = `SO-${incrementedId}`;
     const result = await this.orderRepository.save({
       orderNumber,
       paymentHistory: paymentHistory,
@@ -88,8 +105,16 @@ export class OrderService {
       totalPaidAmount,
       totalReceiveAbleAmount: totalReceivableAmount,
       discount,
+      invoiceNumber:incrementedId,
       ...rest,
     });
+
+    await this.orderLogsRepository.save({
+      orderId:result.id,
+      agentId:payload.agentId,
+      action:'The Order created',
+      previousValue:null,
+    })
     return result;
   }
 
@@ -233,36 +258,29 @@ export class OrderService {
       const subtotal = product.productQuantity * existingProduct.salePrice;
       productValue += subtotal;
   
-      const existingOrderProduct = await this.productsRepository.findOne({
-        where: { orderId, productId: product.productId },
+       await this.productsRepository.delete({orderId});
+       validatedProducts.push({
+        orderId,
+        productId: product.productId,
+        productQuantity: product.productQuantity,
+        productPrice: existingProduct.salePrice,
+        subtotal,
       });
-  
-      if (existingOrderProduct) {
-        Object.assign(existingOrderProduct, {
-          productQuantity: product.productQuantity,
-          subtotal,
-        });
-        await this.productsRepository.save(existingOrderProduct);
-      } else {
-        validatedProducts.push({
-          orderId,
-          productId: product.productId,
-          productQuantity: product.productQuantity,
-          productPrice: existingProduct.salePrice,
-          subtotal,
-        });
-      }
     }
-  
     if (validatedProducts.length > 0) {
       await this.productsRepository.save(validatedProducts);
     }
+    await this.orderLogsRepository.save({
+      orderId: orderId,
+      agentId: data.agentId,
+      action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
+      previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
+      newValue: JSON.stringify(data),
+    });
   
 
     const grandTotal = productValue + Number(shippingCharge) - Number(discount);
     const totalReceivableAmount = grandTotal - rest.totalPaidAmount;
-    console.log(totalReceivableAmount,grandTotal,rest.totalPaidAmount);
-  
     // Update order
     await this.orderRepository.update(
       { id: orderId },
@@ -281,5 +299,81 @@ export class OrderService {
     // Return updated order
     return await this.orderRepository.findOne({ where: { id: orderId }, relations: ['products'] });
   }
+
+
+
+  // update payment
+  async addPayment(orderId:number,data:PaymentHistory){
+   
+   const isOrderExist=await this.orderRepository.findOne({where:{id:orderId}})
+   if(!isOrderExist){
+    throw new ApiError(HttpStatus.BAD_REQUEST,'Order is not exist ')
+   }
+   const previousHistory=await this.paymentHistoryRepository.find({
+    where:{orderId:orderId}
+   })
+
+   const insertPayment =await this.paymentHistoryRepository.save(data)
+   if(!insertPayment){
+    throw new ApiError(HttpStatus.BAD_REQUEST,'Payment is not added ')
+   }
+
+
+    const totalPaidAmount = [...previousHistory,data].reduce(
+      (total, payment) => total + Number(payment.paidAmount),
+      0,
+    );
+    const grandTotal =( Number(isOrderExist.productValue) + Number(isOrderExist.shippingCharge)) - Number(isOrderExist.discount);
+    const totalReceivableAmount = grandTotal - totalPaidAmount;
+    await this.orderRepository.update({
+    id:orderId  
+    },{
+      totalPaidAmount,
+      totalReceiveAbleAmount:totalReceivableAmount,
+      paymentStatus:data?.paymentStatus
+      })
+      await this.orderLogsRepository.save({
+        orderId: orderId,
+        agentId: data.userId,
+        action: `A payment with status '${data.paymentStatus}' was added using the '${data.paymentMethod}' method.`,
+        previousValue: previousHistory?.length>0?JSON.stringify(previousHistory[0]):null,
+        newValue:JSON.stringify(data)
+      });
+     return  this.orderRepository.findOne({where:{id:orderId}})
+  }
+
+
+
+
+  async changeStatus(orderId:number,data:Order){
+     const isExist=await this.orderRepository.findOne({where:{id:orderId}})
+     if(!isExist){
+      throw new ApiError(HttpStatus.BAD_REQUEST,'Order is not exist')
+     }
+    await this.orderRepository.update({id:orderId},data)
+   
+    const result= await this.orderRepository.findOne({where:{id:orderId},relations:['status']})
+    await this.orderLogsRepository.save({
+      orderId:isExist.id,
+      agentId:data.agentId,
+      action:`Order Status change to ${isExist.status.label} from ${result.status.label}`,
+      previousValue:null,
+    })
+    return result
+  }
+  async getOrdersLogs(orderId:number){
+     const isExist=await this.orderRepository.findOne({where:{id:orderId}})
+     if(!isExist){
+      throw new ApiError(HttpStatus.BAD_REQUEST,'Order is not exist')
+     }
+    return await this.orderLogsRepository.find({where:{orderId:orderId},relations:['updatedBy'],select:{
+      updatedBy:{
+        name:true
+      }
+    }})
+  }
+
+
+
   
 }
