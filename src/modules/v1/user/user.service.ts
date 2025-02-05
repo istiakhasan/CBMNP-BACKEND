@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
 import { Brackets, Repository } from 'typeorm';
@@ -6,6 +6,7 @@ import { plainToInstance } from 'class-transformer';
 import paginationHelpers from 'src/helpers/paginationHelpers';
 import * as bcryptjs from 'bcrypt';
 import config from 'src/config';
+import { ApiError } from 'src/middleware/ApiError';
 @Injectable()
 export class UserService {
   constructor(
@@ -13,6 +14,19 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
+   const isUserIdExist=await this.userRepository.findOne({where:{userId:data?.userId}})
+   if(isUserIdExist){
+    throw new ApiError(HttpStatus.BAD_REQUEST,'User Id Already Exist')
+   }
+   const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
+   if(isEmailExist){
+    throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
+   }
+   const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
+   if(isPhoneNumberExist){
+    throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
+   }
+
     const lastCustomer = await this.userRepository
     .createQueryBuilder('user')
     .orderBy('user.createdAt', 'DESC') 

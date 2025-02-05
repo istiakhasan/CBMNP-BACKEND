@@ -13,15 +13,7 @@ import { OrdersLog } from '../../order/entities/orderlog.entity';
 import { PaymentHistory } from '../../order/entities/paymentHistory.entity';
 export enum UserRole {
   ADMIN = 'admin',
-  CTGADMIN = 'ctgadmin',
-  HR = 'hr',
-  AGENT = 'agent',
-  USER = 'user',
-  COS = 'cos',
-  warehouse_manager = 'warehouse_manager',
-  operation_manager = 'operation_manager',
-  cs_agent = 'cs_agent',
-  media_manager = 'media_manager',
+  User = 'user',
 }
 
 @Entity({ name: 'users' })
