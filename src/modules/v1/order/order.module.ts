@@ -11,11 +11,12 @@ import { Users } from '../user/entities/user.entity';
 import { Products } from './entities/products.entity';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { OrdersLog } from './entities/orderlog.entity';
+import { Organization } from '../organization/entities/organization.entity';
 
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order,Product,OrderStatus,Customers,Users,Products,PaymentHistory,OrdersLog]),
+    TypeOrmModule.forFeature([Order,Product,OrderStatus,Customers,Users,Products,PaymentHistory,OrdersLog,Organization]),
   ],
   controllers: [OrderController],
   providers: [OrderService],

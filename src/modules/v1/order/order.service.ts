@@ -15,6 +15,7 @@ import { Users } from '../user/entities/user.entity';
 import { ApiError } from 'src/middleware/ApiError';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { OrdersLog } from './entities/orderlog.entity';
+import { Organization } from '../organization/entities/organization.entity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -34,9 +35,11 @@ export class OrderService {
     private readonly paymentHistoryRepository: Repository<PaymentHistory>,
     @InjectRepository(OrdersLog)
     private readonly orderLogsRepository: Repository<OrdersLog>,
+    @InjectRepository(Organization)
+    private readonly organizationRepository: Repository<Organization>,
   ) {}
 
-  async createOrder(payload: Order) {
+  async createOrder(payload: Order,organizationId:string) {
     const {
       customerId,
       receiverPhoneNumber,
@@ -48,6 +51,10 @@ export class OrderService {
     } = payload;
     if (!products || products.length === 0) {
       throw new Error('Order must include at least one product');
+    }
+
+    if(!organizationId || !await this.organizationRepository.findOne({where:{id:organizationId}})){
+      throw new ApiError(HttpStatus.BAD_REQUEST,'You are not authorized ')
     }
 
     const orderNumber = generateUniqueOrderNumber();
@@ -106,6 +113,7 @@ export class OrderService {
       totalReceiveAbleAmount: totalReceivableAmount,
       discount,
       invoiceNumber:incrementedId,
+      organizationId,
       ...rest,
     });
 
@@ -118,9 +126,11 @@ export class OrderService {
     return result;
   }
 
-  async getOrders(options, filterOptions) {
+  async getOrders(options, filterOptions,organizationId) {
+
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
-    const queryBuilder = this.orderRepository.createQueryBuilder('orders');
+    const queryBuilder = this.orderRepository.createQueryBuilder('orders')
+                                             .where('orders.organizationId = :organizationId', { organizationId });
 
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;

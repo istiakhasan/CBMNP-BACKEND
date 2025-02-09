@@ -14,10 +14,6 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-   const isUserIdExist=await this.userRepository.findOne({where:{userId:data?.userId}})
-   if(isUserIdExist){
-    throw new ApiError(HttpStatus.BAD_REQUEST,'User Id Already Exist')
-   }
    const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
    if(isEmailExist){
     throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')

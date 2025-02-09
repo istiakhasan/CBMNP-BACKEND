@@ -39,10 +39,11 @@ export class StatusService {
     }
     return result;
   }
-  async getAllOrdersCountByStatus() {
+  async getAllOrdersCountByStatus(organizationId) {
     const queryRunner = await this.statusRepository
       .createQueryBuilder('status')
       .leftJoin('status.orders', 'orders')
+      .where('orders.organizationId = :organizationId',{organizationId})
       .select('status.label', 'label')
       .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
       .groupBy('status.value') 
@@ -51,6 +52,7 @@ export class StatusService {
       const totalOrders = await this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
+    .where('orders.organizationId = :organizationId',{organizationId})
     .select('COALESCE(COUNT(orders.id), 0)', 'count')
     .getRawOne();
   

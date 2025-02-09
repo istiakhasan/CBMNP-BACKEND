@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
 import { catchAsync } from 'src/hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { PaymentHistory } from './entities/paymentHistory.entity';
+import { Request } from 'express';
 
 @Controller('v1/orders')
 export class OrderController {  
@@ -12,7 +13,9 @@ export class OrderController {
  
 
   @Get()
-  async getOrders(@Query() query){
+  async getOrders(@Query() query,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    console.log(organizationId,"organizationid");
     const options = {};
     const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
     for (const key of keys) {
@@ -27,7 +30,7 @@ export class OrderController {
         searchFilterOptions[key] = query[key];
       }
     }
-    const result= await this.orderService.getOrders(options,searchFilterOptions);
+    const result= await this.orderService.getOrders(options,searchFilterOptions,organizationId);
     return {
       success:true,
       statusCode:HttpStatus.OK,
@@ -57,8 +60,9 @@ export class OrderController {
     return await this.orderService.getOrderById(id);
   }
   @Post()
-  async createOrder(@Body() payload: any): Promise<Order> {
-    return await this.orderService.createOrder(payload);
+  async createOrder(@Body() payload: any,@Req() req:Request): Promise<Order> {
+    const organizationId=req.headers['x-organization-id']
+    return await this.orderService.createOrder(payload,organizationId as string);
   }
   @Post('/payment/:id')
   async updatePayment(@Param('id') id: number,@Body() data:PaymentHistory){

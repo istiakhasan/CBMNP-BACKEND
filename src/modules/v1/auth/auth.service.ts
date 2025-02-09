@@ -26,23 +26,26 @@ export class AuthenTicationService {
   ): Promise<{ refreshToken: string; accessToken: string }> {
     const isUserExist = await this.usersRepository.findOne({
       where: { userId: data?.userId },
+      relations:['organization']
     });
+    console.log(isUserExist,"check");
     if (!isUserExist) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not exist');
     }
-    const { userId, password: savePassword, role, id } = isUserExist;
+    const { userId, password: savePassword, role, id,organization:{id:organizationId} } = isUserExist;
+    console.log(organizationId,"check");
     const isPasswordMatch =await bcryptjs.compare(data.password, savePassword);
     if (!isPasswordMatch) {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'Password is incorrect');
     }
 
     const accessToken = jwtHelpers.createToken(
-      { userId, role, id },
+      { userId, role, id ,organizationId },
       config.jwt.secret as string,
       config.jwt.expires_in as string,
     );
     const refreshToken = jwtHelpers.createToken(
-      { userId, role, id },
+      { userId, role, id ,organizationId },
       config.jwt.refresh_secret as string,
       config.jwt.refresh_expires_in as string,
     );

@@ -7,6 +7,7 @@ import {
   UpdateDateColumn,
   JoinColumn,
   ManyToOne,
+  Index,
 } from 'typeorm';
 import { Products } from './products.entity';
 import { Customers } from '../../customers/entities/customers.entity';
@@ -30,6 +31,8 @@ export class Order {
   receiverPhoneNumber: string;
   @Column({ nullable: true })
   receiverName: string;
+  @Column({ nullable: true })
+  organizationId: string;
   @Column({ nullable: true })
   deliveryNote: string;
   @Column({ nullable: true })
@@ -100,6 +103,8 @@ export class Order {
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
+
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
