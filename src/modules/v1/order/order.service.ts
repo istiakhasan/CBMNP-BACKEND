@@ -16,6 +16,8 @@ import { ApiError } from 'src/middleware/ApiError';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { OrdersLog } from './entities/orderlog.entity';
 import { Organization } from '../organization/entities/organization.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
+import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -37,6 +39,10 @@ export class OrderService {
     private readonly orderLogsRepository: Repository<OrdersLog>,
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
+    @InjectRepository(Inventory)
+    private readonly inventoryRepository: Repository<Inventory>,
+    @InjectRepository(InventoryItem)
+    private readonly InventoryItemItemRepository: Repository<InventoryItem>,
   ) {}
 
   async createOrder(payload: Order,organizationId:string) {
@@ -95,7 +101,7 @@ export class OrderService {
     .take(1)
     .getOne();
     const lastUserId=lastOrder?.invoiceNumber?.substring(3)
-     const currentId =lastUserId || (0).toString().padStart(4, '0'); //000000
+     const currentId =lastUserId || (0).toString().padStart(4, '0');
      let incrementedId = (parseInt(currentId) + 1).toString().padStart(4, '0');
      incrementedId = `SO-${incrementedId}`;
     const result = await this.orderRepository.save({
@@ -123,6 +129,51 @@ export class OrderService {
       action:'The Order created',
       previousValue:null,
     })
+
+    for (const item of products) {
+      const { productId, productQuantity } = item;
+      const existingInventory = await this.inventoryRepository.findOne({ where: { productId } });
+      if (!existingInventory?.orderQue) {
+        await this.inventoryRepository.update({ productId }, { orderQue: 0 });
+      }
+      await this.inventoryRepository.increment(
+        { productId },
+        "orderQue",
+        productQuantity
+      );
+    
+      const existingInventoryItem = await this.InventoryItemItemRepository.findOne({
+        where: { productId, locationId: rest?.locationId },
+      });
+    
+
+      // 
+      if(!existingInventoryItem){
+       const newInventoryItems= await this.InventoryItemItemRepository.create({
+          locationId:rest?.locationId,
+          productId:productId,
+          quantity:0,
+          orderQue:productQuantity,
+          inventoryId:existingInventory.id
+        })
+
+        await this.InventoryItemItemRepository.save(newInventoryItems)
+      }else{
+        if (!existingInventoryItem?.orderQue) {
+          await this.InventoryItemItemRepository.update(
+            { productId, locationId: rest?.locationId },
+            { orderQue: 0 }
+          );
+        }
+      
+        await this.InventoryItemItemRepository.increment(
+          { productId, locationId: rest?.locationId },
+          "orderQue",
+          productQuantity
+        );
+      }
+     
+    }
     return result;
   }
 

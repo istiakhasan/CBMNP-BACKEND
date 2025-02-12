@@ -19,6 +19,8 @@ export class InventoryItem {
 
   @PrimaryColumn()
   productId: string;
+  @Column()
+  inventoryId: string;
 
   @OneToOne(() => Product)
   @JoinColumn({ name: 'productId' })
@@ -30,6 +32,10 @@ export class InventoryItem {
 
   @Column()
   quantity: number;
+  @Column({nullable:true})
+  orderQue: number;
+  @Column({nullable:true})
+  processing: number;
 
   @Column({ default: 0 })
   wastageQuantity: number;

@@ -20,6 +20,7 @@ import { WarehouseModule } from './modules/v1/warehouse/warehouse.module';
 import { AuthModule } from './modules/v1/auth/auth.module';
 import { CommentModule } from './modules/v1/Comments/comment.module';
 import { OrganizationModule } from './modules/v1/organization/organization.module';
+import { RequsitionModule } from './modules/v1/requsition/requsition.module';
 
 @Module({
   imports: [
@@ -42,7 +43,8 @@ import { OrganizationModule } from './modules/v1/organization/organization.modul
     AuthModule,
     CommentModule,
     OrganizationModule,
-    OrganizationModule
+    OrganizationModule,
+    RequsitionModule
 
   ],
   controllers: [AppController],

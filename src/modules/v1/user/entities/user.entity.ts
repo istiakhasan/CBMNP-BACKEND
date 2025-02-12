@@ -8,6 +8,7 @@ import {
   OneToOne,
   JoinColumn,
   ManyToOne,
+  Unique,
 } from 'typeorm';
 import { UserPermission } from '../../userpermission/entities/userpermission.entity';
 import { Order } from '../../order/entities/order.entity';
@@ -21,6 +22,7 @@ export enum UserRole {
 }
 
 @Entity({ name: 'users' })
+@Unique(['email', 'organizationId'])
 export class Users {
   @PrimaryGeneratedColumn('increment')
   id: number;
@@ -28,11 +30,11 @@ export class Users {
   name: string;
   @Column({ nullable: false, type: 'enum', enum: UserRole })
   role: UserRole;
-  @Column({ nullable: false, type: 'varchar', unique: true })
+  @Column({ nullable: false, type: 'varchar',unique:true })
   userId: string;
-  @Column({ nullable: false, type: 'varchar',unique:true })
+  @Column({ nullable: false, type: 'varchar' })
   phone: string;
-  @Column({ nullable: false, type: 'varchar',unique:true })
+  @Column({ nullable: false, type: 'varchar' })
   email: string;
   @Column({ nullable: true, type: 'text' })
   address: string;

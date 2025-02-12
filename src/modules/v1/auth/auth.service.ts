@@ -28,7 +28,6 @@ export class AuthenTicationService {
       where: { userId: data?.userId },
       relations:['organization']
     });
-    console.log(isUserExist,"check");
     if (!isUserExist) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not exist');
     }

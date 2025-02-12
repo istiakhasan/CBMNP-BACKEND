@@ -16,6 +16,7 @@ import { Users } from '../../user/entities/user.entity';
 import { PaymentHistory } from './paymentHistory.entity';
 import { Comments } from '../../Comments/entities/orderComment.entity';
 import { OrdersLog } from './orderlog.entity';
+import { Requisition } from '../../requsition/entities/requsition.entity';
 
 
 
@@ -76,6 +77,8 @@ export class Order {
   onHoldReason: string;
   @Column({ nullable: true })
   onCancelReason: string;
+  @Column({ nullable: true })
+  locationId: string;
  
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
@@ -84,6 +87,10 @@ export class Order {
   @JoinColumn({ name: 'customerId' ,referencedColumnName: 'customer_Id'}) 
   customer: Customers;
 
+  // relation with req
+  @ManyToOne(() => Requisition, (requisition) => requisition.orders)
+  requisition: Requisition;
+  @Index()
   @Column({ nullable: true })
   statusId: number;
   @ManyToOne(() => OrderStatus, (status) => status.orders, { eager: true })

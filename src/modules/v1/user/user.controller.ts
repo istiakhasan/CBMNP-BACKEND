@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Query } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Query, Req } from '@nestjs/common';
 import { UserService } from './user.service';
 import { Users } from './entities/user.entity';
 
@@ -7,7 +7,8 @@ export class UserController {
   constructor(private readonly userService: UserService) {}
 
   @Post()
- async create(@Body() createUserDto: Users) {
+ async create(@Body() createUserDto: Users,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
     const result=await this.userService.create(createUserDto);
     return {
       success:true,
@@ -18,7 +19,8 @@ export class UserController {
   }
 
   @Get()
-  async findAll(@Query() query) {
+  async findAll(@Query() query,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
     const options = {};
     const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
     for (const key of keys) {
@@ -34,7 +36,7 @@ export class UserController {
       }
     }
     const result:any=await this.userService.findAll(   options,
-      searchFilterOptions,);
+      searchFilterOptions,organizationId);
     return {
       success:true,
       statusCode:HttpStatus.OK,

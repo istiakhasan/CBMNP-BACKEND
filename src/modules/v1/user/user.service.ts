@@ -14,14 +14,14 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-   const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
-   if(isEmailExist){
-    throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
-   }
-   const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
-   if(isPhoneNumberExist){
-    throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
-   }
+  //  const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
+  //  if(isEmailExist){
+  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
+  //  }
+  //  const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
+  //  if(isPhoneNumberExist){
+  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
+  //  }
 
     const lastCustomer = await this.userRepository
     .createQueryBuilder('user')
@@ -39,10 +39,11 @@ export class UserService {
     return result;
   }
 
-  async findAll(options: any, filterOptions: any) {
+  async findAll(options: any, filterOptions: any,organizationId:any) {
     const {skip,sortBy,sortOrder,limit,page}=paginationHelpers(options)
 
-    const queryBuilder = this.userRepository.createQueryBuilder('users');
+    const queryBuilder = this.userRepository.createQueryBuilder('users')
+    .where('users.organizationId = :organizationId', { organizationId });
     queryBuilder.select(['users.id', 'users.name','users.userId','users.role','users.active','users.phone','users.address','users.email','users.createdAt']);
 
     // Search Term Filter
