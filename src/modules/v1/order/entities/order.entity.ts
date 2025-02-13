@@ -79,6 +79,8 @@ export class Order {
   onCancelReason: string;
   @Column({ nullable: true })
   locationId: string;
+  @Column({ nullable: true })
+  requisitionId: string;
  
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
@@ -90,6 +92,7 @@ export class Order {
   // relation with req
   @ManyToOne(() => Requisition, (requisition) => requisition.orders)
   requisition: Requisition;
+  
   @Index()
   @Column({ nullable: true })
   statusId: number;
