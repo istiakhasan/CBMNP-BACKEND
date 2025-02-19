@@ -10,8 +10,9 @@ export class RequsitionController {
   constructor(private readonly requsitionService: RequisitionService) {}
 
   @Post()
-  create(@Body() createRequsitionDto: CreateRequsitionDto) {
-    return this.requsitionService.createRequisition(createRequsitionDto);
+  create(@Body() createRequsitionDto: CreateRequsitionDto,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
+    return this.requsitionService.createRequisition(createRequsitionDto,organizationId);
   }
   @Get()
   async getAllRequisition(@Query() query,@Req() req:Request){

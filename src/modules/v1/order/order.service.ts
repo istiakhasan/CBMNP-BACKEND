@@ -195,6 +195,11 @@ export class OrderService {
         statusId: filterOptions.statusId,
       });
     }
+    if (filterOptions?.locationId) {
+      queryBuilder.andWhere('orders.locationId = :locationId', {
+        locationId: filterOptions.locationId,
+      });
+    }
 
     queryBuilder.orderBy(`orders.${sortBy}`, sortOrder).skip(skip).take(limit);
 
@@ -408,16 +413,18 @@ export class OrderService {
 
   async changeStatus(orderId:number,data:Order){
      const isExist=await this.orderRepository.findOne({where:{id:orderId}})
+     console.log(isExist,"abcd");
      if(!isExist){
       throw new ApiError(HttpStatus.BAD_REQUEST,'Order is not exist')
      }
     await this.orderRepository.update({id:orderId},data)
    
     const result= await this.orderRepository.findOne({where:{id:orderId},relations:['status']})
+    console.log(`Order Status change to ${result.status.label} from  ${isExist.status.label}`,"=============");
     await this.orderLogsRepository.save({
       orderId:isExist.id,
       agentId:data.agentId,
-      action:`Order Status change to ${isExist.status.label} from ${result.status.label}`,
+      action:`Order Status change to  ${result.status.label} from  ${isExist.status.label} `,
       previousValue:null,
     })
     return result
@@ -431,7 +438,7 @@ export class OrderService {
       updatedBy:{
         name:true
       }
-    }})
+    },order:{createdAt:'DESC'}})
   }
 
 

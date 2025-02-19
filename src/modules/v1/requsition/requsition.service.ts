@@ -29,7 +29,7 @@ export class RequisitionService {
     private InventoryItemRepository: Repository<InventoryItem>,
   ) {}
 
-  async createRequisition(createRequisitionDto: any) {
+  async createRequisition(createRequisitionDto: any,organizationId:string) {
     const { orderIds, userId } = createRequisitionDto;
   
     const queryRunner = this.dataSource.createQueryRunner();
@@ -56,7 +56,8 @@ export class RequisitionService {
         requisitionNumber,
         orders,
         userId,
-        totalOrders:orderIds?.length || 0
+        totalOrders:orderIds?.length || 0,
+        organizationId
       });
   
       const savedRequisition = await queryRunner.manager.save(Requisition, requisition);
@@ -129,6 +130,10 @@ export class RequisitionService {
             { requisitionNumber: Like(searchTerm) },
         ];
     }
+    if (organizationId) {
+      whereCondition.organizationId = organizationId
+    }
+    
 
     // Ensure sortOrder is either 'ASC' or 'DESC'
     const validSortOrder = sortOrder === 'DESC' ? 'DESC' : 'ASC';

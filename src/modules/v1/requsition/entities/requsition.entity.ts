@@ -16,11 +16,12 @@ import { Users } from '../../user/entities/user.entity';
 export class Requisition {
   @PrimaryGeneratedColumn('uuid')
   id: string;
-
   @Column({ unique: true })
   requisitionNumber: string;
   @Column({nullable:true})
   userId: string;
+  @Column({nullable:true})
+  organizationId: string;
   @Column({nullable:true})
   totalOrders: number;
 

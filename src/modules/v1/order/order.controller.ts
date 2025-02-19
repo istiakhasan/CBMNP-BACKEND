@@ -15,7 +15,6 @@ export class OrderController {
   @Get()
   async getOrders(@Query() query,@Req() req:Request){
     const organizationId=req.headers['x-organization-id']
-    console.log(organizationId,"organizationid");
     const options = {};
     const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
     for (const key of keys) {
@@ -24,7 +23,7 @@ export class OrderController {
       }
     }
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm', 'statusId'];
+    const filterKeys = ['searchTerm', 'statusId','locationId'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];
