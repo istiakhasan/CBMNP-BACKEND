@@ -24,13 +24,14 @@ export class ProductService {
     return await this.productRepository.save(payload);
   }
 
-  async createVariantProduct(createProductDto: Product): Promise<Product> {
+  async createVariantProduct(createProductDto: Product,organizationId:string): Promise<Product> {
     return await this.dataSource.transaction(async (manager) => {
       const { variants, ...baseProductData } = createProductDto;
       const variantEntities = variants.map((variant) =>
         this.productRepository.create({
           ...variant,
           isBaseProduct: false,
+          organizationId
         }),
       );
       const savedVariants = await manager.save(variantEntities);
@@ -48,9 +49,10 @@ export class ProductService {
   }
   
 
-  async getProducts(options,filterOptions) {
+  async getProducts(options,filterOptions,organizationId) {
      const {page,limit,skip,sortBy,sortOrder}=   paginationHelpers(options)
      const queryBuilder = this.productRepository.createQueryBuilder('product')
+     .where('product.organizationId = :organizationId', { organizationId })
      .leftJoinAndSelect('product.category', 'category') 
      .leftJoinAndSelect('product.attributes', 'attributes') 
      .leftJoinAndSelect('product.inventories', 'inventories') 
@@ -164,9 +166,10 @@ export class ProductService {
     }
 }
 
-  async countProducts() {
+  async countProducts(organizationId) {
     const rawStatuses = await this.productRepository
       .createQueryBuilder('products')
+      .where('products.organizationId = :organizationId', { organizationId })
       .select('COALESCE(products.active, false)', 'status')
       .addSelect('COUNT(products.id)', 'count')
       .groupBy('COALESCE(products.active, false)')
@@ -174,16 +177,18 @@ export class ProductService {
   
     const totalOrders = await this.productRepository
       .createQueryBuilder('products')
+      .where('products.organizationId = :organizationId', { organizationId })
       .select('COALESCE(COUNT(products.id), 0)', 'count')
       .getRawOne();
   
     const variantProducts = await this.productRepository
       .createQueryBuilder('product')
+      .where('product.organizationId = :organizationId', { organizationId })
       .select("'Variant'", 'status') 
       .addSelect('COUNT(product.id)', 'count')
-      .where('product.productType = :type', { type: 'Variant' })
+      .andWhere('product.productType = :type', { type: 'Variant' })
       .getRawOne();
-      console.log(variantProducts,"check");
+      console.log(variantProducts);
   
     // Transform the raw statuses
     const statuses = rawStatuses.map(item => ({

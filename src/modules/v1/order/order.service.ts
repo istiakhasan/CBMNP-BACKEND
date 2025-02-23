@@ -18,9 +18,11 @@ import { OrdersLog } from './entities/orderlog.entity';
 import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import {  QueryRunner, DataSource } from 'typeorm';
 @Injectable()
 export class OrderService {
   constructor(
+    private readonly dataSource: DataSource,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Product)
@@ -411,24 +413,92 @@ export class OrderService {
 
 
 
-  async changeStatus(orderId:number,data:Order){
-     const isExist=await this.orderRepository.findOne({where:{id:orderId}})
-     console.log(isExist,"abcd");
-     if(!isExist){
-      throw new ApiError(HttpStatus.BAD_REQUEST,'Order is not exist')
-     }
-    await this.orderRepository.update({id:orderId},data)
+  async changeStatusBulk(orderIds: number[], data: Order) {
+
    
-    const result= await this.orderRepository.findOne({where:{id:orderId},relations:['status']})
-    console.log(`Order Status change to ${result.status.label} from  ${isExist.status.label}`,"=============");
-    await this.orderLogsRepository.save({
-      orderId:isExist.id,
-      agentId:data.agentId,
-      action:`Order Status change to  ${result.status.label} from  ${isExist.status.label} `,
-      previousValue:null,
-    })
-    return result
+    const orders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
+  
+    if (orders.length !== orderIds.length) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+    }
+  
+      if(data?.statusId===7){
+        console.log("======================================");
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) {
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+      
+              if (inventory) {
+                productUpdates.push(
+                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                    processing: inventory.processing - product.productQuantity,
+                    stock: inventory.stock - product.productQuantity,
+                  })
+                );
+              }
+      
+              if (inventoryItem) {
+                productUpdates.push(
+                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                    processing: inventoryItem.processing - product.productQuantity,
+                    quantity: inventoryItem.quantity - product.productQuantity,
+                  })
+                );
+              }
+            }
+          }
+      
+          await Promise.all(productUpdates);
+      
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      }
+  
+    await this.orderRepository.update({ id: In(orderIds) }, data);
+  
+    const updatedOrders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
+  
+    const orderLogs = orders.map((order, index) => ({
+      orderId: order.id,
+      agentId: data.agentId,
+      action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
+      previousValue: null,
+    }));
+  
+    await this.orderLogsRepository.save(orderLogs);
+  
+    return updatedOrders;
   }
+  
+  
   async getOrdersLogs(orderId:number){
      const isExist=await this.orderRepository.findOne({where:{id:orderId}})
      if(!isExist){
@@ -440,8 +510,4 @@ export class OrderService {
       }
     },order:{createdAt:'DESC'}})
   }
-
-
-
-  
 }

@@ -10,6 +10,7 @@ import paginationHelpers from 'src/helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { ApiError } from 'src/middleware/ApiError';
 import {  QueryRunner, DataSource } from 'typeorm';
+import { OrdersLog } from '../order/entities/orderlog.entity';
 
 
 @Injectable()
@@ -27,11 +28,12 @@ export class RequisitionService {
     private productsRepository: Repository<Products>,
     @InjectRepository(InventoryItem)
     private InventoryItemRepository: Repository<InventoryItem>,
+    @InjectRepository(OrdersLog)
+    private readonly orderLogsRepository: Repository<OrdersLog>,
   ) {}
 
   async createRequisition(createRequisitionDto: any,organizationId:string) {
     const { orderIds, userId } = createRequisitionDto;
-  
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -57,7 +59,8 @@ export class RequisitionService {
         orders,
         userId,
         totalOrders:orderIds?.length || 0,
-        organizationId
+        organizationId,
+        orderIds
       });
   
       const savedRequisition = await queryRunner.manager.save(Requisition, requisition);
@@ -103,6 +106,14 @@ export class RequisitionService {
       await Promise.all(orders.map(order => 
         queryRunner.manager.update(Order, { id: order.id }, { statusId: 5,  requisition : savedRequisition })
       ));
+      const orderLogs = orders.map((order, index) => ({
+        orderId: order.id,
+        agentId: "R-000000015",
+        action: `Order Status changed to Packing and create requisition from ${order.status.label}`,
+        previousValue: null,
+      }));
+    
+      await this.orderLogsRepository.save(orderLogs);
   
       // Commit transaction
       await queryRunner.commitTransaction();
@@ -151,6 +162,8 @@ export class RequisitionService {
             createdAt: true,
             requisitionNumber: true,
             totalOrders: true,
+            orderIds:true,
+
             user: {
                 name: true,
             },

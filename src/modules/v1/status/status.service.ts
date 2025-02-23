@@ -37,6 +37,16 @@ export class StatusService {
           label: In(["Hold", "Approved","Pending"])
     });
     }
+    if(query?.label==="Store"){
+        result = await this.statusRepository.findBy({
+          label: In(["Packing", "Hold","Cancel"])
+    });
+    }
+    if(query?.label==="Packing"){
+        result = await this.statusRepository.findBy({
+          label: In(["In-transit", "Hold","Cancel"])
+    });
+    }
     return result;
   }
   async getAllOrdersCountByStatus(organizationId) {

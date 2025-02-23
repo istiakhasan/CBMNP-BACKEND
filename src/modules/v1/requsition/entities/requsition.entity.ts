@@ -24,6 +24,8 @@ export class Requisition {
   organizationId: string;
   @Column({nullable:true})
   totalOrders: number;
+  @Column('int', { array: true, nullable: true }) // Define the array type for PostgreSQL
+  orderIds: number[];
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   dateCreated: Date;

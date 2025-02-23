@@ -75,10 +75,11 @@ export class OrderController {
       }
     })
   }
-  @Patch('/change-status/:id')
-  async changeStatus(@Param('id') id: number,@Body() data:Order){
-    return  catchAsync(async():Promise<IResponse<Order>>=>{
-      const result=await this.orderService.changeStatus(id,data);
+  @Patch('/change-status')
+  async changeStatus(@Body() data:any){
+    return  catchAsync(async():Promise<IResponse<Order[]>>=>{
+      const {orderIds,...rest}=data
+      const result=await this.orderService.changeStatusBulk(orderIds,rest);
       return {
         message:'Order status change  successfully',
         statusCode:HttpStatus.OK,

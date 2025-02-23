@@ -9,7 +9,8 @@ import {
   HttpStatus,
   Query,
   Patch,
-  Delete
+  Delete,
+  Req
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { Product } from './entity/product.entity';
@@ -26,9 +27,10 @@ import { IResponse } from 'src/util/sendResponse';
 export class ProductController {
   constructor(private readonly productService: ProductService) {}
   @Get('/count')
-  async countProduct(){
+  async countProduct(@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
     return catchAsync(async()=>{
-      const result = await this.productService.countProducts();
+      const result = await this.productService.countProducts(organizationId);
       return {
         success: true,
         message: 'Product count retrieved successfully',
@@ -78,9 +80,11 @@ export class ProductController {
   @Post()
   async createProduct(
     @Body(new ZodPipe(ProductSchema)) data: Product,
+    @Req() req:Request
   ) {
+    const organizationId=req.headers['x-organization-id']
     return catchAsync(async ():Promise<IResponse<Product>> => {
-      const result = await this.productService.createSimpleProduct(data);
+      const result = await this.productService.createSimpleProduct({...data,organizationId});
       return {
         success: true,
         message: 'Product created successfully',
@@ -93,10 +97,12 @@ export class ProductController {
 
   @Post('variant')
   async createVariantProduct(
-    @Body(new ZodPipe(VariantProductSchema)) data:Product,
+    @Body(new ZodPipe(VariantProductSchema)) data:Product
+    ,@Req() req:Request
   ){
-    return catchAsync(async ():Promise<IResponse<Product>> => {
-      const result = await this.productService.createVariantProduct(data);
+    return catchAsync(async ():Promise<IResponse<Product>> => { 
+      const organizationId=req.headers['x-organization-id']
+      const result = await this.productService.createVariantProduct(data,organizationId);
       return {
         success: true,
         message: 'Product created successfully',
@@ -106,11 +112,12 @@ export class ProductController {
     });
   }
   @Get()
-  async getProducts(@Query() query) {
+  async getProducts(@Query() query,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
     return catchAsync(async ():Promise<IResponse<Product[]>> => {
       const paginationOptions = extractOptions(query, ['limit', 'page', 'sortBy', 'sortOrder']);
       const filterOptions = extractOptions(query, ['searchTerm', 'filterByCustomerType']);
-      const result = await this.productService.getProducts(paginationOptions, filterOptions);
+      const result = await this.productService.getProducts(paginationOptions, filterOptions,organizationId);
       return {
         success: true,
         statusCode: HttpStatus.OK,

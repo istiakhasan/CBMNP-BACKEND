@@ -18,7 +18,7 @@ export class InventoryService {
   ) {}
 
   async addProductToInventory(createTransactionDto): Promise<Inventory & {type?:boolean}> {
-    const { productId, quantity ,type,inventoryItems,expiredQuantity,wastageQuantity} = createTransactionDto;
+    const { productId, quantity ,type,inventoryItems,expiredQuantity,wastageQuantity, organizationId} = createTransactionDto;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -35,6 +35,7 @@ export class InventoryService {
       if (!inventory) {
         inventory = queryRunner.manager.create(Inventory, {
           productId,
+          organizationId,
           stock: 0,
           expiredQuantity: 0,
           wastageQuantity: 0,
@@ -60,7 +61,6 @@ export class InventoryService {
                 inventoryId: inventory.productId,
                 locationId: item.locationId,
               });
-              console.log(inventoryItemTransaction,"b");
               await queryRunner.manager.save(inventoryItemTransaction);
               return isExist;
             }else{
@@ -109,8 +109,10 @@ export class InventoryService {
     }
   }
 
-  async loadInventory() {
+  async loadInventory(organizationId) {
+
     const result=await this.inventoryRepository.find({
+      where:{organizationId},
       // relations:['product','product.transactions']
       relations:[
         'product',

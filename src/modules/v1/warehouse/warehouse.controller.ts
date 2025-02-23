@@ -8,6 +8,7 @@ import {
   Delete,
   HttpStatus,
   Query,
+  Req,
 } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
@@ -21,9 +22,10 @@ export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
   @Post()
-  create(@Body() createWarehouseDto: Warehouse) {
+  create(@Body() createWarehouseDto: Warehouse,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
     return catchAsync(async (): Promise<IResponse<Warehouse>> => {
-      const result = await this.warehouseService.create(createWarehouseDto);
+      const result = await this.warehouseService.create({...createWarehouseDto,organizationId});
       return {
         success: true,
         message: 'Warehouse created successfully',
@@ -34,7 +36,8 @@ export class WarehouseController {
   }
 
   @Get()
-  async findAll(@Query() query) {
+  async findAll(@Query() query,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
     return catchAsync(async (): Promise<IResponse<Warehouse[]>> => {
       const paginationOptions = extractOptions(query, [
         'limit',
@@ -46,6 +49,7 @@ export class WarehouseController {
       const result = await this.warehouseService.findAll(
         paginationOptions,
         filterOptions,
+        organizationId
       );
       return {
         success: true,
@@ -62,9 +66,10 @@ export class WarehouseController {
   }
 
   @Get('/options')
-  async warehouseOptions(){
+  async warehouseOptions(@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
    return catchAsync(async(): Promise<IResponse<{label:string;value:string}[]>>=>{
-    const result = await this.warehouseService.loadOptions();
+    const result = await this.warehouseService.loadOptions(organizationId);
     return {
       success: true,
       statusCode: HttpStatus.OK,

@@ -20,6 +20,8 @@ export class Inventory {
   orderQue: number;
   @Column({nullable:true})
   processing: number;
+  @Column({nullable:true})
+  organizationId: string;
   @Column('int')
   stock: number;
   @Column('int',{nullable:true})

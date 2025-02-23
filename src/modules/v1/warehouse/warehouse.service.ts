@@ -21,9 +21,10 @@ export class WarehouseService {
     return await this.warehouse.save(createWarehouseDto)
   }
 
-  async findAll(options,filterOptions) {
+  async findAll(options,filterOptions,organizationId) {
     const {page,limit,skip,sortBy,sortOrder}=paginationHelpers(options)
     const queryBuilder=this.warehouse.createQueryBuilder('warehouse')
+    .where('warehouse.organizationId = :organizationId', { organizationId })
     .take(limit)
     .skip(skip)
     .orderBy(`warehouse.${sortBy}`,sortOrder)
@@ -45,9 +46,10 @@ export class WarehouseService {
     }
   }
 
-  async loadOptions() {
+  async loadOptions(organizationId) {
     const options = await this.warehouse
       .createQueryBuilder('warehouse')
+      .where('warehouse.organizationId = :organizationId', { organizationId })
       .select(['warehouse.id AS value', 'warehouse.name AS label']) 
       .getRawMany();
   

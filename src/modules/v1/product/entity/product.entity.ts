@@ -49,6 +49,8 @@ export class Product {
 
   @Column({ nullable: false, type: 'text' })
   unit: string;
+  @Column({ nullable: true })
+  organizationId: string;
 
   @Column({ nullable: true, type: 'enum', enum: ProductType, enumName: 'product_type_enum' })
   productType: 'Variant' | 'Simple product' | 'Base Product';

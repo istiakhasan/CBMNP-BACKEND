@@ -1,4 +1,4 @@
-import { Controller, Post, Body, HttpStatus, Get, Query, Param } from '@nestjs/common';
+import { Controller, Post, Body, HttpStatus, Get, Query, Param, Req } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
 import { catchAsync } from 'src/hoc/createAsync';
@@ -11,9 +11,10 @@ export class InventoryController {
   constructor(private readonly inventoryService: InventoryService) {}
 
   @Post()
-  create(@Body() createInventoryDto: CreateInventoryDto & {type:boolean}) {
+  create(@Body() createInventoryDto: CreateInventoryDto & {type:boolean},@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
        return catchAsync(async ():Promise<IResponse<Inventory>> => {
-          const result = await this.inventoryService.addProductToInventory(createInventoryDto);
+          const result = await this.inventoryService.addProductToInventory({...createInventoryDto,organizationId});
           return {
             success: true,
             message: 'stock update successfully',
@@ -23,9 +24,10 @@ export class InventoryController {
         });
   }
   @Get()
-  loadStock() {
+  loadStock(@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
        return catchAsync(async ():Promise<IResponse<Inventory[]>> => {
-          const result = await this.inventoryService.loadInventory();
+          const result = await this.inventoryService.loadInventory(organizationId);
           return {
             success: true,
             message: 'stock update successfully',
