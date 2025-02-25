@@ -1,5 +1,5 @@
 import { Body, Controller, Get, HttpStatus, Post, Query, Req } from "@nestjs/common";
-import { ZodPipe } from "src/middleware/zodPipe";
+import { ZodPipe } from '../../../middleware/ZodPipe'
 import { StatusService } from "./status.service";
 import { CreateStatusSchema } from "./status.validation";
 import { catchAsync } from "src/hoc/createAsync";

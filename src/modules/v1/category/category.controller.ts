@@ -11,7 +11,7 @@ import {
   Patch
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ZodPipe } from 'src/middleware/ZodPipe';
+import { ZodPipe } from '../../../middleware/ZodPipe';
 import { CategorySchema } from './category.validation';
 import { ApiError } from 'src/middleware/ApiError';
 import { uploadFiles } from 'src/util/file-upload.util';

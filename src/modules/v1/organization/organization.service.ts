@@ -16,12 +16,14 @@ export class OrganizationService {
     return await this.organizationRepository.save(data)
   }
 
-  findAll() {
+  async findAll() {
+   
     return `This action returns all organization`;
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} organization`;
+  async findOne(id: string) {
+    const result=await this.organizationRepository.findOne({where:{id:id}})
+    return result
   }
 
   update(id: number, updateOrganizationDto: UpdateOrganizationDto) {

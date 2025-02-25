@@ -15,7 +15,7 @@ import {
 import { ProductService } from './product.service';
 import { Product } from './entity/product.entity';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
-import { ZodPipe } from 'src/middleware/ZodPipe';
+import { ZodPipe } from '../../../middleware/ZodPipe'
 import { ProductSchema, VariantProductSchema } from './product.validation';
 import { ApiError } from 'src/middleware/ApiError';
 import { uploadFiles } from 'src/util/file-upload.util';

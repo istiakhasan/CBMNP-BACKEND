@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { AuthenTicationService } from './auth.service';
 import { loginSchema } from './auth.validation';
-import { ZodPipe } from 'src/middleware/zodPipe';
+import { ZodPipe } from '../../../middleware/ZodPipe';
 import { Request, Response } from 'express';
 
 

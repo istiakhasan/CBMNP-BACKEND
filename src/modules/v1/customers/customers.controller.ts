@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpStatus, Param, Post, Query } from "@nestjs/common";
 import { CustomerService } from "./customers.service";
-import { ZodPipe } from "src/middleware/zodPipe";
+
 import { CreateCustomerSchema } from "./customer.validation";
 import { catchAsync } from "src/hoc/createAsync";
+import { ZodPipe } from "../../../middleware/ZodPipe";
 
 @Controller('v1/customers')
 export class CustomerController {

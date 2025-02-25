@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus } from '@nestjs/common';
 import { PermissionService } from './permission.service';
-import { ZodPipe } from 'src/middleware/ZodPipe';
+import { ZodPipe } from '../../../middleware/ZodPipe';
 import { CreatePermissionSchema } from './permission.validation';
 import { Permission } from './entities/permission.entity';
 
