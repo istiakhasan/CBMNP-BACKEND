@@ -27,7 +27,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
-import * as dotenv from 'dotenv';
+import * as dotenv from 'dotenv'; 
 
 dotenv.config(); // Load .env variables
 
@@ -43,7 +43,7 @@ dotenv.config(); // Load .env variables
       entities: [join(process.cwd(), '/dist/**/*.entity.js')],
       synchronize: true,
       logging: false,
-      ssl: {
+      ssl: { 
         rejectUnauthorized: false,
       },
     }),
