@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpStatus, Post, Query, Req } from "@nestjs/com
 import { ZodPipe } from '../../../middleware/ZodPipe'
 import { StatusService } from "./status.service";
 import { CreateStatusSchema } from "./status.validation";
-import { catchAsync } from "src/hoc/createAsync";
+import { catchAsync } from "../../../hoc/createAsync";
 import { OrderStatus } from "./entities/status.entity";
 import { IResponse } from "src/util/sendResponse";
 import { Request } from "express";

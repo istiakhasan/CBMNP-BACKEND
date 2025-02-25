@@ -2,7 +2,7 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { Permission } from './entities/permission.entity';
 import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 import { v4 as uuidv4 } from 'uuid';
 @Injectable()
 export class PermissionService {

@@ -2,7 +2,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req } fr
 import { OrganizationService } from './organization.service';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
-import { catchAsync } from 'src/hoc/createAsync';
+import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { Organization } from './entities/organization.entity';
 

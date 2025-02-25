@@ -12,10 +12,10 @@ import {
 } from '@nestjs/common';
 import { WarehouseService } from './warehouse.service';
 import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
-import { catchAsync } from 'src/hoc/createAsync';
+import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { Warehouse } from './entities/warehouse.entity';
-import { extractOptions } from 'src/helpers/queryHelper';
+import { extractOptions } from '../../../helpers/queryHelper';
 
 @Controller('v1/warehouse')
 export class WarehouseController {

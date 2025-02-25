@@ -3,8 +3,8 @@ import { UpdateWarehouseDto } from './dto/update-warehouse.dto';
 import { Warehouse } from './entities/warehouse.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { ApiError } from 'src/middleware/ApiError';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import { ApiError } from '../../../middleware/ApiError';;
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 
 @Injectable()

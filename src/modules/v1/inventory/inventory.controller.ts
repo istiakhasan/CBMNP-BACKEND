@@ -1,7 +1,7 @@
 import { Controller, Post, Body, HttpStatus, Get, Query, Param, Req } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { CreateInventoryDto } from './dto/create-inventory.dto';
-import { catchAsync } from 'src/hoc/createAsync';
+import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { Inventory } from './entities/inventory.entity';
 import { InventoryItem } from './entities/inventoryitem.entity';

@@ -1,18 +1,5 @@
 {
     "version": 2,
-    "env": {
-        "NODE_ENV": "@node_env",
-        "BCRYPT_SALT_ROUNDS": "@bcrypt_salt_rounds",
-        "JWT_SECRET": "@jwt_secret",
-        "JWT_EXPIRES_IN": "@jwt_expires_in",
-        "JWT_REFRESH_SECRET": "@jwt_refresh_secret",
-        "JWT_REFRESH_EXPIRES_IN": "@jwt_refresh_expires_in",
-        "DB_HOST": "@db_host",
-        "DB_PORT": "@db_port",
-        "DB_USERNAME": "@db_username",
-        "DB_PASSWORD": "@db_password",
-        "DB_NAME": "@db_name"
-    },
     "builds": [
         {
             "src": "src/main.ts",

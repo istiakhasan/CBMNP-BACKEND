@@ -4,21 +4,21 @@ import { Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 
 import { Products } from './entities/products.entity';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
-import { generateUniqueOrderNumber } from 'src/util/genarateUniqueNumber';
+import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Product } from '../product/entity/product.entity';
 import { OrderStatus } from '../status/entities/status.entity';
 import { Customers } from '../customers/entities/customers.entity';
 import { In } from 'typeorm';
 import { Users } from '../user/entities/user.entity';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { OrdersLog } from './entities/orderlog.entity';
 import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
-import {  QueryRunner, DataSource } from 'typeorm';
+import { DataSource } from 'typeorm';
 @Injectable()
 export class OrderService {
   constructor(

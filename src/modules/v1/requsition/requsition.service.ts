@@ -6,9 +6,9 @@ import { Requisition } from './entities/requsition.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { Products } from '../order/entities/products.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 import {  QueryRunner, DataSource } from 'typeorm';
 import { OrdersLog } from '../order/entities/orderlog.entity';
 

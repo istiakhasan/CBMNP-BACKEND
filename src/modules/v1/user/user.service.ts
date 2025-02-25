@@ -1,12 +1,10 @@
-import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import {  Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
-import { Brackets, Repository } from 'typeorm';
+import {  Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import * as bcryptjs from 'bcrypt';
-import config from 'src/config';
-import { ApiError } from 'src/middleware/ApiError';
 @Injectable()
 export class UserService {
   constructor(
