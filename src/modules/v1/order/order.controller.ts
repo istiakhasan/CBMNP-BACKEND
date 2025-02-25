@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
-import { catchAsync } from 'src/hoc/createAsync';
+import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { Request } from 'express';

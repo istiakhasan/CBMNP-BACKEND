@@ -4,7 +4,7 @@ import { Repository } from 'typeorm';
 
 import { Comments } from './entities/orderComment.entity';
 import { Order } from '../order/entities/order.entity';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 @Injectable()
 export class CommentService {
   constructor(

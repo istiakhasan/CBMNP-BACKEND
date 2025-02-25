@@ -3,7 +3,7 @@ import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Req, HttpStat
 import { CreateRequsitionDto } from './dto/create-requsition.dto';
 import { UpdateRequsitionDto } from './dto/update-requsition.dto';
 import { RequisitionService } from './requsition.service';
-import { extractOptions } from 'src/helpers/queryHelper';
+import { extractOptions } from '../../../helpers/queryHelper';
 
 @Controller('v1/requisition')
 export class RequsitionController {

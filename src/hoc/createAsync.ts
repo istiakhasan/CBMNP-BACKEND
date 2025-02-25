@@ -1,5 +1,5 @@
 import { HttpStatus } from "@nestjs/common";
-import { ApiError } from "src/middleware/ApiError";
+import { ApiError } from "../middleware/ApiError";
 
 export async function catchAsync(fn: Function) {
   try {

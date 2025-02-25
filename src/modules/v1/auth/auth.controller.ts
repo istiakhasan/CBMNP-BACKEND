@@ -15,8 +15,8 @@ import { Request, Response } from 'express';
 
 
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { Roles } from 'src/middleware/roles.decorator';
-import { AuthGuard } from 'src/middleware/auth.guard';
+import { Roles } from '../../../middleware/roles.decorator';
+import { AuthGuard } from '../../../middleware/auth.guard';
 @Controller('/v1/auth')
 export class AuthenTicationController {
   constructor(private readonly authenTicationService: AuthenTicationService) {}

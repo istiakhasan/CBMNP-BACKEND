@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpStatus, Param, Post, Query } from "@nestjs/c
 import { CustomerService } from "./customers.service";
 
 import { CreateCustomerSchema } from "./customer.validation";
-import { catchAsync } from "src/hoc/createAsync";
+import { catchAsync } from "../../../hoc/createAsync";
 import { ZodPipe } from "../../../middleware/ZodPipe";
 
 @Controller('v1/customers')

@@ -14,13 +14,10 @@ import {
 } from '@nestjs/common';
 import { ProductService } from './product.service';
 import { Product } from './entity/product.entity';
-import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ZodPipe } from '../../../middleware/ZodPipe'
 import { ProductSchema, VariantProductSchema } from './product.validation';
-import { ApiError } from 'src/middleware/ApiError';
-import { uploadFiles } from 'src/util/file-upload.util';
-import { extractOptions } from 'src/helpers/queryHelper';
-import { catchAsync } from 'src/hoc/createAsync';
+import { extractOptions } from '../../../helpers/queryHelper';
+import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 
 @Controller('v1/products')

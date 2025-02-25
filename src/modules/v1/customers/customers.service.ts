@@ -3,7 +3,7 @@ import { Like, Repository } from 'typeorm';
 import { HttpStatus, Injectable } from '@nestjs/common'
 import { Customers } from './entities/customers.entity';
 import { plainToInstance } from 'class-transformer';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 import { Order } from '../order/entities/order.entity';
 import { OrderStatus } from '../status/entities/status.entity';
 

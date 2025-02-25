@@ -2,7 +2,7 @@
 
 
 import {  HttpStatus } from '@nestjs/common';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../middleware/ApiError';
 
 /**
  * A utility function to wrap service calls and handle errors consistently.

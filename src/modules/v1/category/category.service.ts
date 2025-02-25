@@ -2,9 +2,9 @@ import { HttpStatus, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import { Category } from './entity/category.entity';
-import { ApiError } from 'src/middleware/ApiError';
+import { ApiError } from '../../../middleware/ApiError';
 
 
 

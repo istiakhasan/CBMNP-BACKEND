@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository,DataSource } from 'typeorm';
 import { Product } from './entity/product.entity';
 import { plainToInstance } from 'class-transformer';
-import paginationHelpers from 'src/helpers/paginationHelpers';
-import { ApiError } from 'src/middleware/ApiError';
+import paginationHelpers from '../../../helpers/paginationHelpers';
+import { ApiError } from '../../../middleware/ApiError';
 import { ProductImages } from './entity/image.entity';
 import axios from 'axios';
 

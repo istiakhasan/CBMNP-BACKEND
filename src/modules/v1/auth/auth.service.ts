@@ -8,13 +8,13 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ApiError } from 'src/middleware/ApiError';
-import config from 'src/config';
+import { ApiError } from '../../../middleware/ApiError';
+import config from '../../../config';
 import * as bcryptjs from 'bcrypt';
 
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Users } from '../user/entities/user.entity';
-import { jwtHelpers } from 'src/helpers/jwtHelpers';
+import { jwtHelpers } from '../../../helpers/jwtHelpers';
 @Injectable()
 export class AuthenTicationService {
   constructor(
