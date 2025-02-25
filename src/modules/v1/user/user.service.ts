@@ -1,10 +1,12 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
 import { Brackets, Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
 import paginationHelpers from 'src/helpers/paginationHelpers';
-
+import * as bcryptjs from 'bcrypt';
+import config from 'src/config';
+import { ApiError } from 'src/middleware/ApiError';
 @Injectable()
 export class UserService {
   constructor(
@@ -12,6 +14,15 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
+  //  const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
+  //  if(isEmailExist){
+  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
+  //  }
+  //  const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
+  //  if(isPhoneNumberExist){
+  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
+  //  }
+
     const lastCustomer = await this.userRepository
     .createQueryBuilder('user')
     .orderBy('user.createdAt', 'DESC') 
@@ -20,14 +31,19 @@ export class UserService {
      const currentId =lastUserId || (0).toString().padStart(9, '0'); //000000
      let incrementedId = (parseInt(currentId) + 1).toString().padStart(9, '0');
      incrementedId = `R-${incrementedId}`;
-    const result = await this.userRepository.save({...data,userId:incrementedId});
+
+     const {password,...rest}=data
+     const hashPassword=await bcryptjs.hash(password,12)
+    
+    const result = await this.userRepository.save({...rest,userId:incrementedId,password:hashPassword});
     return result;
   }
 
-  async findAll(options: any, filterOptions: any) {
+  async findAll(options: any, filterOptions: any,organizationId:any) {
     const {skip,sortBy,sortOrder,limit,page}=paginationHelpers(options)
 
-    const queryBuilder = this.userRepository.createQueryBuilder('users');
+    const queryBuilder = this.userRepository.createQueryBuilder('users')
+    .where('users.organizationId = :organizationId', { organizationId });
     queryBuilder.select(['users.id', 'users.name','users.userId','users.role','users.active','users.phone','users.address','users.email','users.createdAt']);
 
     // Search Term Filter

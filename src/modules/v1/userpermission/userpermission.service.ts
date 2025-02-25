@@ -27,11 +27,10 @@ export class UserpermissionService {
             where: {
               userId: userPermissionDto.userId,
               permissionId: userPermissionDto.permissionId,
-            },
+            }
           });
-  
           if (existingRecord) {
-            const updatedRecord = { 
+            const updatedRecord = {
               ...existingRecord, 
               ...userPermissionDto 
             };

@@ -7,10 +7,17 @@ import {
   UpdateDateColumn,
   JoinColumn,
   ManyToOne,
+  Index,
 } from 'typeorm';
 import { Products } from './products.entity';
 import { Customers } from '../../customers/entities/customers.entity';
 import { OrderStatus } from '../../status/entities/status.entity';
+import { Users } from '../../user/entities/user.entity';
+import { PaymentHistory } from './paymentHistory.entity';
+import { Comments } from '../../Comments/entities/orderComment.entity';
+import { OrdersLog } from './orderlog.entity';
+import { Requisition } from '../../requsition/entities/requsition.entity';
+
 
 
 @Entity({ name: 'orders' })
@@ -24,26 +31,90 @@ export class Order {
   @Column({ nullable: true })
   receiverPhoneNumber: string;
   @Column({ nullable: true })
-  shippingCharge: string;
+  receiverName: string;
+  @Column({ nullable: true })
+  organizationId: string;
+  @Column({ nullable: true })
+  deliveryNote: string;
+  @Column({ nullable: true })
+  shippingCharge: number;
+  @Column({ nullable: true })
+  shippingType: string;
+  @Column({ nullable: true })
+  orderType: string;
+  @Column({ nullable: true })
+  invoiceNumber: string;
   @Column({ nullable: true })
   orderSource: string;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
-  productValue: string;
-  @Column({ nullable: true, type: 'decimal', precision: 10, scale: 2 })
+  @Column({ nullable: true })
+  productValue: number;
+  @Column({ nullable: true })
   totalPrice: number;
+  @Column({ nullable: true })
+  discount: number;
+  @Column({ nullable: true })
+  totalPaidAmount: number;
+  @Column({ nullable: true })
+  totalReceiveAbleAmount: number;
   @Column({ nullable: true })
   currier: string;
   @Column({ nullable: true })
-  statusId: number;
+  paymentStatus: string;
+  @Column({ nullable: true })
+  paymentMethod: string;
+  @Column({ nullable: true })
+  deliveryDate: string;
+  // receiver address
+  @Column({ nullable: true })
+  receiverDivision: string;
+  @Column({ nullable: true })
+  receiverDistrict: string;
+  @Column({ nullable: true })
+  receiverThana: string;
+  @Column({ nullable: true })
+  receiverAddress: string;
+  @Column({ nullable: true })
+  onHoldReason: string;
+  @Column({ nullable: true })
+  onCancelReason: string;
+  @Column({ nullable: true })
+  locationId: string;
+  @Column({ nullable: true })
+  requisitionId: string;
+ 
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
 
   @ManyToOne(() => Customers, (customer) => customer.orders, { eager: true })
   @JoinColumn({ name: 'customerId' ,referencedColumnName: 'customer_Id'}) 
   customer: Customers;
+
+  // relation with req
+  @ManyToOne(() => Requisition, (requisition) => requisition.orders)
+  requisition: Requisition;
+  
+  @Index()
+  @Column({ nullable: true })
+  statusId: number;
   @ManyToOne(() => OrderStatus, (status) => status.orders, { eager: true })
   @JoinColumn({ name: 'statusId' ,referencedColumnName: 'value'}) 
   status: OrderStatus;
+
+
+  @Column({ nullable: true })
+  agentId: string;
+  @ManyToOne(() => Users, (status) => status.orders, { eager: true })
+  @JoinColumn({ name: 'agentId' ,referencedColumnName: 'userId'}) 
+  agent: Users;
+
+  @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, { cascade: true })
+  paymentHistory: PaymentHistory[];
+  @OneToMany(() => Comments, (comment) => comment.order,{ cascade: true })
+  comments: Comments[];
+  @OneToMany(() => OrdersLog, (logs) => logs.order)
+  orderLogs: OrdersLog[];
+
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

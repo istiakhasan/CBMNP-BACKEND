@@ -1,1 +1,3 @@
 npx typeorm migration:generate -n CreateUsersTable
+https://chatgpt.com/share/6770dfbb-be60-8006-855c-b78d442cf081
+nest g resource app/module/your-resource
