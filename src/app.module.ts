@@ -3,7 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UserModule } from './modules/v1/user/user.module';
 import { PermissionModule } from './modules/v1/permission/permission.module';
-import { DatabaseModule } from './modules/database/database.module';
+// import { DatabaseModule } from './modules/database/database.module';
 import { GlobalExceptionFilter } from './middleware/globalErrorHandler';
 import { APP_FILTER } from '@nestjs/core';
 import { UserpermissionModule } from './modules/v1/userpermission/userpermission.module';
@@ -21,6 +21,8 @@ import { AuthModule } from './modules/v1/auth/auth.module';
 import { CommentModule } from './modules/v1/Comments/comment.module';
 import { OrganizationModule } from './modules/v1/organization/organization.module';
 import { RequsitionModule } from './modules/v1/requsition/requsition.module';
+import { DatabaseModule } from './database/database.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
@@ -28,6 +30,7 @@ import { RequsitionModule } from './modules/v1/requsition/requsition.module';
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/api/v1/images/',
     }),
+    ConfigModule.forRoot({ isGlobal: true }),
     UserModule,
     PermissionModule,
     DatabaseModule,
