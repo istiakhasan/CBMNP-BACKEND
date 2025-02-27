@@ -23,6 +23,7 @@ import { OrganizationModule } from './modules/v1/organization/organization.modul
 import { RequsitionModule } from './modules/v1/requsition/requsition.module';
 import { DatabaseModule } from './database/database.module';
 import { ConfigModule } from '@nestjs/config';
+import { ShopifyModule } from './modules/v1/shopify/shopify.module';
 
 @Module({
   imports: [
@@ -47,7 +48,8 @@ import { ConfigModule } from '@nestjs/config';
     CommentModule,
     OrganizationModule,
     OrganizationModule,
-    RequsitionModule
+    RequsitionModule,
+    ShopifyModule
 
   ],
   controllers: [AppController],

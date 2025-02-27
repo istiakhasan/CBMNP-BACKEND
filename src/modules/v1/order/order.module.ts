@@ -22,6 +22,6 @@ import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
   ],
   controllers: [OrderController],
   providers: [OrderService],
-  exports: [],
+  exports: [OrderService],
 })
 export class OrderModule {}
