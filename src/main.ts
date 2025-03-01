@@ -2,10 +2,17 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ZodFilter } from './middleware/ZodFilter';
 import { ValidationPipe } from '@nestjs/common';
+import * as express from 'express'; // ✅ Import express
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
-
+  app.use(
+    express.json({
+      verify: (req: any, res, buf) => {
+        req.rawBody = buf.toString();
+      },
+    }),
+  );
   app.enableCors({
     origin: ['https://YOUR-APP-NAME.vercel.app', 'http://localhost:3000'],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],

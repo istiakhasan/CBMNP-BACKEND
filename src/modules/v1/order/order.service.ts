@@ -267,11 +267,11 @@ export class OrderService {
       }),
     ]);
 
-    if (!customer) {
-      throw new NotFoundException(
-        `Customer with ID ${order.customerId} not found`,
-      );
-    }
+    // if (!customer) {
+    //   throw new NotFoundException(
+    //     `Customer with ID ${order.customerId} not found`,
+    //   );
+    // }
 
     return {
       ...order,
@@ -426,7 +426,6 @@ export class OrderService {
     }
   
       if(data?.statusId===7){
-        console.log("======================================");
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
