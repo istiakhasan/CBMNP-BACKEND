@@ -18,7 +18,7 @@ import { join } from 'path';
         // entities: [join(process.cwd(), '/dist/**/*.entity.js')],
         entities: [join(__dirname, '/../**/*.entity{.ts,.js}')],
         // dont use synchronize: ture in real projects
-        ssl: { rejectUnauthorized: false },
+        // ssl: { rejectUnauthorized: false },
         // synchronize: true,
       }),
     }),

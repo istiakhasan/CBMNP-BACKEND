@@ -83,8 +83,7 @@ export class ShopifyWebhookService {
         receiverPhoneNumber: webhookData.shipping_address?.phone,
         receiverName: webhookData.shipping_address?.name,
         statusId: 1,
-        totalPrice: 12,
-        totalReceiveAbleAmount: 12,
+        totalPrice: Number(webhookData.total_line_items_price_set?.shop_money?.amount || '0') + Number(webhookData.total_shipping_price_set?.shop_money?.amount || '0'),
         paymentMethod: webhookData.payment_gateway_names?.join(', '),
         receiverDivision: webhookData.shipping_address?.province,
         receiverDistrict: webhookData.shipping_address?.city,
@@ -95,7 +94,8 @@ export class ShopifyWebhookService {
         shippingCharge: parseFloat(webhookData.total_shipping_price_set?.shop_money?.amount || '0'),
         productValue: parseFloat(webhookData.total_line_items_price_set?.shop_money?.amount || '0'),
         orderSource: "Shopify",
-        organizationId:shop.organizationId
+        organizationId:shop.organizationId,
+        totalReceiveAbleAmount:Number(webhookData.total_line_items_price_set?.shop_money?.amount || '0') + Number(webhookData.total_shipping_price_set?.shop_money?.amount || '0')
       });
       console.log('Order saved successfully:', result);
     } catch (error) {
