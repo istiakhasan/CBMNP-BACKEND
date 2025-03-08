@@ -2,9 +2,11 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { Procurement } from '../../procurement/entities/procurement.entity';
 
 @Entity({ name: 'supplier' })
 export class Supplier {
@@ -20,7 +22,9 @@ export class Supplier {
   email: string;
   @Column({ nullable: true })
   organizationId: string;
-
+  
+  @OneToMany(()=>Procurement,(item)=>item.supplier,{cascade:true})
+  procurements:Procurement[]
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

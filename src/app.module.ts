@@ -25,6 +25,7 @@ import { DatabaseModule } from './database/database.module';
 import { ConfigModule } from '@nestjs/config';
 import { ShopifyModule } from './modules/v1/shopify/shopify.module';
 import { SupplierModule } from './modules/v1/supplier/supplier.module';
+import { ProcurementModule } from './modules/v1/procurement/procurement.module';
 
 @Module({
   imports: [
@@ -51,7 +52,8 @@ import { SupplierModule } from './modules/v1/supplier/supplier.module';
     OrganizationModule,
     RequsitionModule,
     ShopifyModule,
-    SupplierModule
+    SupplierModule,
+    ProcurementModule
 
   ],
   controllers: [AppController],
