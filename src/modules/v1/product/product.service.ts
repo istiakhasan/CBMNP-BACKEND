@@ -52,7 +52,7 @@ export class ProductService {
   async getProducts(options,filterOptions,organizationId) {
      const {page,limit,skip,sortBy,sortOrder}=   paginationHelpers(options)
      const queryBuilder = this.productRepository.createQueryBuilder('product')
-     .where('product.organizationId = :organizationId', { organizationId })
+    //  .where('product.organizationId = :organizationId', { organizationId })
      .leftJoinAndSelect('product.category', 'category') 
      .leftJoinAndSelect('product.attributes', 'attributes') 
      .leftJoinAndSelect('product.inventories', 'inventories') 

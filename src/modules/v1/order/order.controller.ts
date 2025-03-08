@@ -76,10 +76,11 @@ export class OrderController {
     })
   }
   @Patch('/change-status')
-  async changeStatus(@Body() data:any){
+  async changeStatus(@Body() data:any,@Req() req:Request){
     return  catchAsync(async():Promise<IResponse<Order[]>>=>{
       const {orderIds,...rest}=data
-      const result=await this.orderService.changeStatusBulk(orderIds,rest);
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.orderService.changeStatusBulk(orderIds,rest,organizationId as string);
       return {
         message:'Order status change  successfully',
         statusCode:HttpStatus.OK,

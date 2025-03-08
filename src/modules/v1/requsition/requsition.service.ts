@@ -52,7 +52,7 @@ export class RequisitionService {
   
       if (orders.some(order => !!order.requisitionId)) {
         throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders are already in a requisition');
-      }
+      } 
   
       const requisition = queryRunner.manager.create(Requisition, {
         requisitionNumber,

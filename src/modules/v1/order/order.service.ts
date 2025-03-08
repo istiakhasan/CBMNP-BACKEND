@@ -19,6 +19,7 @@ import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { DataSource } from 'typeorm';
+import { RequisitionService } from '../requsition/requsition.service';
 @Injectable()
 export class OrderService {
   constructor(
@@ -45,6 +46,8 @@ export class OrderService {
     private readonly inventoryRepository: Repository<Inventory>,
     @InjectRepository(InventoryItem)
     private readonly InventoryItemItemRepository: Repository<InventoryItem>,
+
+    private readonly requisitionService: RequisitionService
   ) {}
 
   async createOrder(payload: Order,organizationId:string) {
@@ -301,7 +304,7 @@ export class OrderService {
       ...rest
     } = data;
   
-    const existingOrder = await this.orderRepository.findOne({ where: { id: orderId } });
+    const existingOrder = await this.orderRepository.findOne({ where: { id: orderId }, relations: ['products'] });
     if (!existingOrder) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
     }
@@ -309,6 +312,8 @@ export class OrderService {
     if (!products || products.length === 0) {
       throw new Error('Order must include at least one product');
     }
+  
+    const existingProducts = await this.productsRepository.find({ where: { orderId } });
   
     const validatedProducts: any[] = [];
     let productValue = 0;
@@ -318,16 +323,67 @@ export class OrderService {
         where: { id: product.productId },
       });
       if (!existingProduct) {
-        throw new NotFoundException(
-          `Product with ID ${product.productId} not found`,
-        );
+        throw new NotFoundException(`Product with ID ${product.productId} not found`);
       }
   
+      // Find previous product quantity
+      const prevProduct = existingProducts.find(p => p.productId === product.productId);
+      const prevQuantity = prevProduct ? prevProduct.productQuantity : 0;
+      const quantityDiff = product.productQuantity - prevQuantity;
+  
+  if(existingOrder.statusId===2){
+        // Adjust stock based on change in order quantity
+        const inventory = await this.inventoryRepository.findOne({
+          where: { productId: product.productId },
+        });
+    
+        const inventoryItem = await this.InventoryItemItemRepository.findOne({
+          where: { productId: product.productId, locationId: existingOrder.locationId },
+        });
+    
+        if (inventory) {
+          await this.inventoryRepository.update(
+            { productId: product.productId },
+            { orderQue: inventory.orderQue + quantityDiff }
+          );
+        }
+    
+        if (inventoryItem) {
+          await this.InventoryItemItemRepository.update(
+            { productId: product.productId, locationId: existingOrder.locationId },
+            { orderQue: inventoryItem.orderQue + quantityDiff }
+          );
+        }
+  }
+     if((existingOrder.statusId===5 && existingOrder.status.label==="Store") || existingOrder.statusId===6 ){
+        // Adjust stock based on change in order quantity
+        const inventory = await this.inventoryRepository.findOne({
+          where: { productId: product.productId },
+        });
+    
+        const inventoryItem = await this.InventoryItemItemRepository.findOne({
+          where: { productId: product.productId, locationId: existingOrder.locationId },
+        });
+    
+        if (inventory) {
+          await this.inventoryRepository.update(
+            { productId: product.productId },
+            { processing: inventory.processing + quantityDiff }
+          );
+        }
+    
+        if (inventoryItem) {
+          await this.InventoryItemItemRepository.update(
+            { productId: product.productId, locationId: existingOrder.locationId },
+            { processing: inventoryItem.processing + quantityDiff }
+          );
+        }
+  }
+  
+      // Calculate new subtotal
       const subtotal = product.productQuantity * existingProduct.salePrice;
       productValue += subtotal;
-  
-       await this.productsRepository.delete({orderId});
-       validatedProducts.push({
+      validatedProducts.push({
         orderId,
         productId: product.productId,
         productQuantity: product.productQuantity,
@@ -335,9 +391,14 @@ export class OrderService {
         subtotal,
       });
     }
+  
+    // Delete old products & insert new ones
+    await this.productsRepository.delete({ orderId });
     if (validatedProducts.length > 0) {
       await this.productsRepository.save(validatedProducts);
     }
+  
+    // Log the update
     await this.orderLogsRepository.save({
       orderId: orderId,
       agentId: data.agentId,
@@ -346,9 +407,10 @@ export class OrderService {
       newValue: JSON.stringify(data),
     });
   
-
+    // Calculate totals
     const grandTotal = productValue + Number(shippingCharge) - Number(discount);
     const totalReceivableAmount = grandTotal - rest.totalPaidAmount;
+  
     // Update order
     await this.orderRepository.update(
       { id: orderId },
@@ -367,7 +429,7 @@ export class OrderService {
     // Return updated order
     return await this.orderRepository.findOne({ where: { id: orderId }, relations: ['products'] });
   }
-
+  
 
 
   // update payment
@@ -413,7 +475,7 @@ export class OrderService {
 
 
 
-  async changeStatusBulk(orderIds: number[], data: Order) {
+  async changeStatusBulk(orderIds: number[], data: Order,organizationId:string) {
 
    
     const orders = await this.orderRepository.find({
@@ -424,7 +486,7 @@ export class OrderService {
     if (orders.length !== orderIds.length) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
     }
-  
+    console.log(data,"=================================");
       if(data?.statusId===7){
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
@@ -476,6 +538,10 @@ export class OrderService {
         } finally {
           await queryRunner.release();
         }
+      }
+
+      if(data?.statusId===5){
+        this.requisitionService.createRequisition({orderIds,useerId:data?.agentId},organizationId)
       }
   
     await this.orderRepository.update({ id: In(orderIds) }, data);
