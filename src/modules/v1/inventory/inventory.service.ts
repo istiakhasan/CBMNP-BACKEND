@@ -49,7 +49,7 @@ export class InventoryService {
               where:{inventory:{id:inventory.id},productId:item?.productId,locationId:item?.locationId}
             })
             if(isExist){
-              type?Number(isExist.quantity += item.quantity):isExist.quantity -= item.quantity
+              type?Number(isExist.quantity += Number(item.quantity)):isExist.quantity -= Number(item.quantity)
               type?Number(isExist.wastageQuantity += item.wastageQuantity):isExist.wastageQuantity -= item.wastageQuantity
               type?Number(isExist.expiredQuantity += item.expiredQuantity):isExist.expiredQuantity -= item.expiredQuantity
 
@@ -75,7 +75,6 @@ export class InventoryService {
                 inventoryId: inventory.productId,
                 locationId: item.locationId,
               });
-              console.log(inventoryItemTransaction,"a");
               await queryRunner.manager.save(inventoryItemTransaction);
               return {
                 ...a,

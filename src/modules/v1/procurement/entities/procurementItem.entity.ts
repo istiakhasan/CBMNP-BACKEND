@@ -1,5 +1,6 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn } from 'typeorm';
 import { Procurement } from './procurement.entity';
+import { Product } from '../../product/entity/product.entity';
 
 @Entity()
 export class ProcurementItem {
@@ -9,9 +10,12 @@ export class ProcurementItem {
   @ManyToOne(() => Procurement, (procurement) => procurement.items)
   procurement: Procurement;
 
-  @Column()
+  @Column({nullable:true})
   productId: string;
 
+  @ManyToOne(() => Product, (product) => product.procurementItems, { eager: true }) // Define relationship
+  @JoinColumn({ name: 'productId', referencedColumnName: 'id' }) // Explicitly specify foreign key
+  product: Product;
   @Column({ type: 'int' })
   orderedQuantity: number;
 

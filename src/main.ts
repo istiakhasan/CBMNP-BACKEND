@@ -14,7 +14,7 @@ async function bootstrap() {
     }),
   );
   app.enableCors({
-    origin: ['https://YOUR-APP-NAME.vercel.app', 'http://localhost:3000'],
+    origin: ['https://YOUR-APP-NAME.vercel.app', 'http://localhost:3000','http://localhost:3001'],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
     allowedHeaders: [

@@ -1,19 +1,20 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { Supplier } from '../supplier/entities/supplier.entity';
 import { ProcurementItem } from './entities/procurementItem.entity';
 import { Procurement } from './entities/procurement.entity';
 import { InvoiceCounter } from './entities/invoice-counter.entity';
 import paginationHelpers from 'src/helpers/paginationHelpers';
-import { extractOptions } from 'src/helpers/queryHelper';
 import { plainToInstance } from 'class-transformer';
+import { InventoryService } from '../inventory/inventory.service';
 
 
 @Injectable()
 export class ProcurementService {
   constructor(
+    private readonly inventoryService: InventoryService,
     @InjectRepository(Procurement) private procurementRepo: Repository<Procurement>,
     @InjectRepository(ProcurementItem) private procurementItemRepo: Repository<ProcurementItem>,
     @InjectRepository(Supplier) private supplierRepo: Repository<Supplier>,
@@ -57,7 +58,7 @@ export class ProcurementService {
       return this.procurementItemRepo.create({
         procurement,
         ...item,
-        totalPrice: item.receivedQuantity * item.unitPrice,
+        totalPrice: item.orderedQuantity * item.unitPrice,
       });
     });
 
@@ -67,18 +68,23 @@ export class ProcurementService {
     return procurement;
   }
 
-  async getAllProcurements(options,organizationId) {
-    
+  async getAllProcurements(options,organizationId,filterOptions) {
     const {limit,skip,sortBy,sortOrder,page}=paginationHelpers(options)
     const queryBuilder = this.procurementRepo.createQueryBuilder('procurement')
     .where('procurement.organizationId = :organizationId', { organizationId })
     .leftJoinAndSelect('procurement.supplier','supplier')
+    .leftJoinAndSelect('procurement.items','items')
+    .leftJoinAndSelect('items.product','product')
     .take(limit)
     .skip(skip)
     .orderBy(`procurement.${sortBy}`, sortOrder);
-
-     const [data, total] = await queryBuilder.getManyAndCount();
-     const modifyData = plainToInstance(Procurement, data);
+    if (filterOptions?.status) {
+      queryBuilder.andWhere('procurement.status = :status', {
+        status: filterOptions.status,
+      });
+    }
+    const [data, total] = await queryBuilder.getManyAndCount();
+    const modifyData = plainToInstance(Procurement, data);
     return  {
       data:modifyData,
       page,
@@ -92,4 +98,46 @@ export class ProcurementService {
     if (!procurement) throw new NotFoundException('Procurement not found');
     return procurement;
   }
+
+  async bulkUpdate(payload){
+    const {poIds,status}=payload
+    const procurements = await this.procurementRepo.find({
+      where: { id: In(poIds) },
+    });
+
+    if (procurements.length === 0) {
+      throw new NotFoundException('No procurements found for given IDs');
+    }
+
+
+    const result = await this.procurementRepo.update({ id: In(poIds) }, { status });
+
+    // Check if any records were updated
+    if (result.affected === 0) {
+      throw new NotFoundException('No procurements found for given IDs');
+    }
+    return {
+      message: 'Bulk update successful',
+      affected: result.affected,
+    };
+
+  }
+  async receiveOrder(payload, organizationId) {
+    const { poIds, stock } = payload;
+
+    // Add products to inventory in parallel
+    await Promise.all(
+      stock.map(async(item) =>
+      await  this.inventoryService.addProductToInventory({ ...item, organizationId })
+      )
+    );
+    console.log(poIds,"poids");
+    // Update procurement items in parallel
+    await Promise.all(
+      poIds.map(async({ id, productId, receivedQuantity }) =>
+       await this.procurementItemRepo.update({ id, productId }, { receivedQuantity })
+      )
+    );
+  }
+  
 }

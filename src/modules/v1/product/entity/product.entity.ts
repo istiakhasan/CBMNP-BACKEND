@@ -16,6 +16,7 @@ import { ProductImages } from './image.entity';
 import { Inventory } from '../../inventory/entities/inventory.entity';
 import { Transaction } from '../../transaction/entities/transaction.entity';
 import { InventoryItem } from '../../inventory/entities/inventoryitem.entity';
+import { ProcurementItem } from '../../procurement/entities/procurementItem.entity';
 enum ProductType {
   Variant = 'Variant',
   SimpleProduct = 'Simple product',
@@ -109,5 +110,8 @@ export class Product {
     cascade: true,
   })
   inventoryItems: InventoryItem[];
+
+  @OneToMany(() => ProcurementItem, (procurementItem) => procurementItem.product)
+  procurementItems: ProcurementItem[];
 }
 

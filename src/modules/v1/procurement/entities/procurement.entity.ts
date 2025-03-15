@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 import { Supplier } from '../../supplier/entities/supplier.entity';
 import { ProcurementItem } from './procurementItem.entity';
 
@@ -26,7 +26,7 @@ export class Procurement {
   @Column({nullable:true})
   receivedBy: string;
 
-  @Column({ type: 'enum', enum: ['Pending', 'Processing', 'Completed', 'Cancelled'], default: 'Pending' })
+  @Column({ type: 'enum', enum: ['Pending', 'Processing','Approved', 'Completed', 'Cancelled'], default: 'Pending' })
   status: string;
 
   @Column({ nullable: true })
@@ -34,9 +34,17 @@ export class Procurement {
   @Column({ nullable: true })
   organizationId: string;
 
-  @CreateDateColumn()
-  createdAt: Date;
-
-  @UpdateDateColumn()
-  updatedAt: Date;
+   @Index()
+   @CreateDateColumn({
+     type: 'timestamp',
+     default: () => 'CURRENT_TIMESTAMP(6)',
+   })
+   createdAt: Date;
+ 
+   @UpdateDateColumn({
+     type: 'timestamp',
+     default: () => 'CURRENT_TIMESTAMP(6)',
+     onUpdate: 'CURRENT_TIMESTAMP(6)',
+   })
+   updatedAt: Date;
 }

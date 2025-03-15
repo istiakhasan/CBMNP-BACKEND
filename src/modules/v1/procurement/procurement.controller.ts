@@ -1,10 +1,11 @@
-import { Controller, Post, Get, Body, Param, Req, HttpStatus, Query } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, Req, HttpStatus, Query, Patch } from '@nestjs/common';
 import { ProcurementService } from './procurement.service';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { catchAsync } from 'src/hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { Procurement } from './entities/procurement.entity';
 import { extractOptions } from 'src/helpers/queryHelper';
+import { BulkUpdateDto } from './dto/bulkupdate.dto';
 
 @Controller('v1/procurements')
 export class ProcurementController {
@@ -29,7 +30,8 @@ export class ProcurementController {
     const organizationId=req.headers['x-organization-id']
     return catchAsync(async (): Promise<IResponse<any>> => {
        const paginationOptions = extractOptions(query, ['limit', 'page', 'sortBy', 'sortOrder']);
-       const result=await this.procurementService.getAllProcurements( paginationOptions,organizationId as string);
+       const filterOptions = extractOptions(query, ['status']);
+       const result=await this.procurementService.getAllProcurements( paginationOptions,organizationId as string,filterOptions);
       return {
         success: true,
         message: 'Procurement retrieved successfully',
@@ -48,5 +50,33 @@ export class ProcurementController {
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.procurementService.getProcurementById(id);
+  }
+
+  @Patch('/receive-order')
+  async receiveOrder(@Body() payload:any,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    return catchAsync(async()=>{
+      const result= await this.procurementService.receiveOrder(payload,organizationId)
+      return {
+        success: true,
+        message: 'Order receive  successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+        
+      };
+    })
+  }
+  @Patch('/bulk-update')
+  async bulkUpdate(@Body() payload:any){
+    return catchAsync(async()=>{
+      const result= await this.procurementService.bulkUpdate(payload)
+      return {
+        success: true,
+        message: 'Status update  successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+        
+      };
+    })
   }
 }
