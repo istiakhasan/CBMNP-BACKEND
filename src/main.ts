@@ -2,19 +2,19 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ZodFilter } from './middleware/ZodFilter';
 import { ValidationPipe } from '@nestjs/common';
-import * as express from 'express'; // ✅ Import express
+import * as express from 'express'; // 
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.use(
     express.json({
       verify: (req: any, res, buf) => {
-        req.rawBody = buf.toString();
+        req.rawBody = buf.toString();  
       },
     }),
   );
   app.enableCors({
-    origin: ['https://YOUR-APP-NAME.vercel.app', 'http://localhost:3000','http://localhost:3001'],
+    origin: ['https://cbmnp-frontend-nu.vercel.app', 'http://localhost:3000','http://localhost:3001'],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
     allowedHeaders: [
@@ -22,7 +22,7 @@ async function bootstrap() {
       'X-Requested-With',
       'Content-Type',
       'Accept',
-      'Authorization', // ✅ Added Authorization header
+      'Authorization  ',
       'Authentication',
       'Access-Control-Allow-Credentials',
       'Access-Control-Allow-Headers',

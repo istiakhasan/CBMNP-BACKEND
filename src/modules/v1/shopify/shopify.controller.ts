@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
 import { ShopifyWebhookService } from './shopify.service';
 import { Shopify } from './entities/shopify.entity';
-import { catchAsync } from 'src/hoc/createAsync';
-import { IResponse } from 'src/util/sendResponse';
+import { catchAsync } from '../../../hoc/createAsync';
+import { IResponse } from '../../../util/sendResponse';
 
 @Controller('webhook')
 export class WebhookController {

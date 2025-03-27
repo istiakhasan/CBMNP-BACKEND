@@ -6,7 +6,7 @@ import { Supplier } from '../supplier/entities/supplier.entity';
 import { ProcurementItem } from './entities/procurementItem.entity';
 import { Procurement } from './entities/procurement.entity';
 import { InvoiceCounter } from './entities/invoice-counter.entity';
-import paginationHelpers from 'src/helpers/paginationHelpers';
+import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { InventoryService } from '../inventory/inventory.service';
 
@@ -92,6 +92,64 @@ export class ProcurementService {
       total
     }
   }
+  async getReports(organizationId, filterOptions) {
+    const queryBuilder = this.procurementRepo.createQueryBuilder('procurement')
+      .where('procurement.organizationId = :organizationId', { organizationId })
+      .leftJoinAndSelect('procurement.supplier', 'supplier')
+      .leftJoinAndSelect('procurement.items', 'items')
+      .leftJoinAndSelect('items.product', 'product')
+      // .leftJoinAndSelect('product.inventoryItems', 'inventoryItems')
+      // .leftJoinAndSelect('inventoryItems.location', 'warehouse')
+      .orderBy('procurement.createdAt', 'DESC');
+  
+    if (filterOptions?.status) {
+      queryBuilder.andWhere('procurement.status = :status', {
+        status: filterOptions.status,
+      });
+    }
+    console.log(filterOptions,"filter");
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      console.log(filterOptions,"filter");
+      const localStartDate = new Date(filterOptions.startDate);
+      const utcStartDate = new Date(
+        Date.UTC(
+          localStartDate.getFullYear(),
+          localStartDate.getMonth(),
+          localStartDate.getDate(),
+          0, 0, 0, 0 
+        )
+      );
+      
+      const localEndDate = new Date(filterOptions.endDate);
+      const utcEndDate = new Date(
+        Date.UTC(
+          localEndDate.getFullYear(),
+          localEndDate.getMonth(),
+          localEndDate.getDate(),
+          23, 59, 59, 999 
+        )
+      );
+      
+      queryBuilder.andWhere(
+        'procurement.createdAt BETWEEN :startDate AND :endDate',
+        {
+          startDate: utcStartDate.toISOString(),
+          endDate: utcEndDate.toISOString(),
+        }
+      );
+    }
+    
+    
+  
+    const [data, total] = await queryBuilder.getManyAndCount();
+    const modifyData = plainToInstance(Procurement, data);
+    
+    return {
+      data: modifyData,
+      total,
+    };
+  }
+  
 
   async getProcurementById(id: string) {
     const procurement = await this.procurementRepo.findOne({ where: { id }, relations: ['items'] });
@@ -106,13 +164,11 @@ export class ProcurementService {
     });
 
     if (procurements.length === 0) {
-      throw new NotFoundException('No procurements found for given IDs');
+      throw new NotFoundException('No procurements  found for given IDs');
     }
 
 
     const result = await this.procurementRepo.update({ id: In(poIds) }, { status });
-
-    // Check if any records were updated
     if (result.affected === 0) {
       throw new NotFoundException('No procurements found for given IDs');
     }
@@ -124,15 +180,11 @@ export class ProcurementService {
   }
   async receiveOrder(payload, organizationId) {
     const { poIds, stock } = payload;
-
-    // Add products to inventory in parallel
     await Promise.all(
       stock.map(async(item) =>
       await  this.inventoryService.addProductToInventory({ ...item, organizationId })
       )
     );
-    console.log(poIds,"poids");
-    // Update procurement items in parallel
     await Promise.all(
       poIds.map(async({ id, productId, receivedQuantity }) =>
        await this.procurementItemRepo.update({ id, productId }, { receivedQuantity })

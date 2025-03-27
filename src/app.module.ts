@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, OnApplicationBootstrap } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UserModule } from './modules/v1/user/user.module';
@@ -26,6 +26,8 @@ import { ConfigModule } from '@nestjs/config';
 import { ShopifyModule } from './modules/v1/shopify/shopify.module';
 import { SupplierModule } from './modules/v1/supplier/supplier.module';
 import { ProcurementModule } from './modules/v1/procurement/procurement.module';
+import { PermissionService } from './modules/v1/permission/permission.service';
+import { DeliveryPartnerModule } from './modules/v1/delivery-partner/delivery-partner.module';
 
 @Module({
   imports: [
@@ -53,8 +55,9 @@ import { ProcurementModule } from './modules/v1/procurement/procurement.module';
     RequsitionModule,
     ShopifyModule,
     SupplierModule,
-    ProcurementModule
-
+    ProcurementModule,
+    PermissionModule,
+    DeliveryPartnerModule
   ],
   controllers: [AppController],
   providers: [
@@ -65,4 +68,10 @@ import { ProcurementModule } from './modules/v1/procurement/procurement.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements OnApplicationBootstrap {
+  constructor(private readonly permissionService: PermissionService) {}
+
+  async onApplicationBootstrap() {
+    await this.permissionService.seedData();
+  }
+}

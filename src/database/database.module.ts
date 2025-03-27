@@ -20,6 +20,7 @@ import { join } from 'path';
         // dont use synchronize: ture in real projects
         // ssl: { rejectUnauthorized: false },
         synchronize: true,
+        // synchronize: true,
       }),
     }),
   ],

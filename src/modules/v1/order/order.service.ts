@@ -20,6 +20,8 @@ import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { DataSource } from 'typeorm';
 import { RequisitionService } from '../requsition/requsition.service';
+import axios from 'axios';
+import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -46,6 +48,8 @@ export class OrderService {
     private readonly inventoryRepository: Repository<Inventory>,
     @InjectRepository(InventoryItem)
     private readonly InventoryItemItemRepository: Repository<InventoryItem>,
+    @InjectRepository(DeliveryPartner)
+    private readonly deliveryPartnerRepository: Repository<DeliveryPartner>,
 
     private readonly requisitionService: RequisitionService
   ) {}
@@ -486,13 +490,25 @@ export class OrderService {
     if (orders.length !== orderIds.length) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
     }
-    console.log(data,"=================================");
       if(data?.statusId===7){
         const queryRunner = this.dataSource.createQueryRunner();
         await queryRunner.connect();
         await queryRunner.startTransaction();
       
         try {
+          const currierPayload=orders?.map((op:any)=>{
+            console.log;
+            return {
+              invoice: op?.invoiceNumber,
+              recipient_name: op?.receiverName,
+              recipient_phone: op?.receiverPhoneNumber,
+              recipient_address: op?.receiverAddress,
+              cod_amount: op?.totalReceiveAbleAmount,
+              note: op?.deliveryNote || 'N/A'
+            }
+          })
+
+
           const productUpdates = [];
           for (const order of orders) {
             const products = await this.productsRepository.find({
@@ -516,7 +532,6 @@ export class OrderService {
                   })
                 );
               }
-      
               if (inventoryItem) {
                 productUpdates.push(
                   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
@@ -527,9 +542,23 @@ export class OrderService {
               }
             }
           }
-      
+
+        const currierCompany=await this.deliveryPartnerRepository.findOne({
+          where:{organizationId:organizationId,id:orders[0]?.currier}
+        })
+        console.log(currierCompany,"currer company");
+
           await Promise.all(productUpdates);
-      
+          await axios.post(
+            'https://portal.packzy.com/api/v1/create_order/bulk-order',
+            currierPayload,
+            {
+              headers: {
+                "Api-Key": currierCompany.api_key,
+                "Secret-Key": currierCompany.secret_key
+              }
+            }
+          );
           // Commit transaction
           await queryRunner.commitTransaction();
         } catch (error) {

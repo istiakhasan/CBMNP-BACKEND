@@ -15,11 +15,12 @@ import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { RequsitionModule } from '../requsition/requsition.module';
+import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
 
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order,Product,OrderStatus,Customers,Users,Products,PaymentHistory,OrdersLog,Organization,Inventory,InventoryItem]),RequsitionModule
+    TypeOrmModule.forFeature([Order,DeliveryPartner,Product,OrderStatus,Customers,Users,Products,PaymentHistory,OrdersLog,Organization,Inventory,InventoryItem]),RequsitionModule
   ],
   controllers: [OrderController],
   providers: [OrderService],

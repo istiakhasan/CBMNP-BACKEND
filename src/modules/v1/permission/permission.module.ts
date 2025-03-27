@@ -10,6 +10,7 @@ import { Permission } from './entities/permission.entity';
   ],
   controllers: [PermissionController],
   providers: [PermissionService],
+  exports:[PermissionService]
  
 })
 export class PermissionModule {}

@@ -3,8 +3,8 @@ import { SupplierService } from './supplier.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { Supplier } from './entities/supplier.entity';
-import { IResponse } from 'src/util/sendResponse';
-import { catchAsync } from 'src/hoc/createAsync';
+import { IResponse } from '../../../util/sendResponse';
+import { catchAsync } from '../../../hoc/createAsync';
 
 @Controller('v1/supplier')
 export class SupplierController {

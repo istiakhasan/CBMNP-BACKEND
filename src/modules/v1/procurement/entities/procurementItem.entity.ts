@@ -13,8 +13,8 @@ export class ProcurementItem {
   @Column({nullable:true})
   productId: string;
 
-  @ManyToOne(() => Product, (product) => product.procurementItems, { eager: true }) // Define relationship
-  @JoinColumn({ name: 'productId', referencedColumnName: 'id' }) // Explicitly specify foreign key
+  @ManyToOne(() => Product, (product) => product.procurementItems, { eager: true })
+  @JoinColumn({ name: 'productId', referencedColumnName: 'id' })
   product: Product;
   @Column({ type: 'int' })
   orderedQuantity: number;

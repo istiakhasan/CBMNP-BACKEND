@@ -1,11 +1,10 @@
 import { Controller, Post, Get, Body, Param, Req, HttpStatus, Query, Patch } from '@nestjs/common';
 import { ProcurementService } from './procurement.service';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
-import { catchAsync } from 'src/hoc/createAsync';
-import { IResponse } from 'src/util/sendResponse';
+import { catchAsync } from '../../../hoc/createAsync';
+import { IResponse } from '../../../util/sendResponse';
 import { Procurement } from './entities/procurement.entity';
-import { extractOptions } from 'src/helpers/queryHelper';
-import { BulkUpdateDto } from './dto/bulkupdate.dto';
+import { extractOptions } from '../../../helpers/queryHelper';
 
 @Controller('v1/procurements')
 export class ProcurementController {
@@ -42,6 +41,22 @@ export class ProcurementController {
           limit: result?.limit,
           total: result?.total
         }
+      };
+    });
+    
+  }
+  @Get('/reports')
+ async getReports(@Req() req:Request,@Query() query) {
+    const organizationId=req.headers['x-organization-id']
+    return catchAsync(async (): Promise<IResponse<any>> => {
+      console.log(query,"query");
+       const filterOptions = extractOptions(query, ['status','startDate','endDate']);
+       const result=await this.procurementService.getReports( organizationId as string,filterOptions);
+      return {
+        success: true,
+        message: 'Procurement retrieved successfully',
+        statusCode: HttpStatus.OK,
+        data: result?.data,
       };
     });
     

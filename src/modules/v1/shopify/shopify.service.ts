@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import { Products } from '../order/entities/products.entity';
 import { Order } from '../order/entities/order.entity';
 import { Repository } from 'typeorm';
-import { generateUniqueOrderNumber } from 'src/util/genarateUniqueNumber';
+import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Shopify } from './entities/shopify.entity';
 
 @Injectable()
