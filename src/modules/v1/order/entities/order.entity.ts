@@ -81,6 +81,8 @@ export class Order {
   locationId: string;
   @Column({ nullable: true })
   requisitionId: string;
+  @Column({ nullable: true })
+  previousStatus: string;
  
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];

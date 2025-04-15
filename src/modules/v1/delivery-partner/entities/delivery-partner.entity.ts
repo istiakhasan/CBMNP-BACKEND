@@ -8,7 +8,7 @@ import {
 } from 'typeorm';
 
 @Entity({ name: 'delivery_partner' })
-@Unique(['locationId', 'partnerName']) 
+@Unique(['organizationId', 'partnerName']) 
 export class DeliveryPartner {
   @PrimaryGeneratedColumn('uuid')
   id: string;

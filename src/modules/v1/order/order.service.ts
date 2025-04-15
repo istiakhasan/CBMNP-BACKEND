@@ -400,7 +400,7 @@ export class OrderService {
     await this.productsRepository.delete({ orderId });
     if (validatedProducts.length > 0) {
       await this.productsRepository.save(validatedProducts);
-    }
+    } 
   
     // Log the update
     await this.orderLogsRepository.save({
@@ -479,9 +479,9 @@ export class OrderService {
 
 
 
-  async changeStatusBulk(orderIds: number[], data: Order,organizationId:string) {
-
-   
+  async changeStatusBulk(orderIds: number[], mainData: any,organizationId:string) {
+    
+    const {currentStatus,...data}=mainData
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
@@ -497,7 +497,6 @@ export class OrderService {
       
         try {
           const currierPayload=orders?.map((op:any)=>{
-            console.log;
             return {
               invoice: op?.invoiceNumber,
               recipient_name: op?.receiverName,
@@ -546,7 +545,6 @@ export class OrderService {
         const currierCompany=await this.deliveryPartnerRepository.findOne({
           where:{organizationId:organizationId,id:orders[0]?.currier}
         })
-        console.log(currierCompany,"currer company");
 
           await Promise.all(productUpdates);
           await axios.post(
@@ -572,8 +570,342 @@ export class OrderService {
       if(data?.statusId===5){
         this.requisitionService.createRequisition({orderIds,useerId:data?.agentId},organizationId)
       }
+      if(data?.statusId===4 && currentStatus===2){
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) {
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+      
+              if (inventory) {
+                productUpdates.push(
+                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                    orderQue: inventory.orderQue - product.productQuantity
+                  })
+                );
+              }
+              if (inventoryItem) {
+                productUpdates.push(
+                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                    orderQue: inventoryItem.orderQue - product.productQuantity
+                  })
+                );
+              }
+            }
+          }
+
   
-    await this.orderRepository.update({ id: In(orderIds) }, data);
+  
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      }
+     
+      if(data?.statusId===4 && (currentStatus===5 || currentStatus===6)){
+      
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) {
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+      
+              if (inventory) {
+                productUpdates.push(
+                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                    processing: inventory.processing - product.productQuantity
+                  })
+                );
+              }
+              if (inventoryItem) {
+                productUpdates.push(
+                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                    processing: inventoryItem.processing - product.productQuantity
+                  })
+                );
+              }
+            }
+          }
+
+  
+  
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      }
+
+
+      // change hold status  
+
+      if(data?.statusId===3 && currentStatus===2){
+    
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) {
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+      
+              if (inventory) {
+                productUpdates.push(
+                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                    orderQue: inventory.orderQue - product.productQuantity,
+                    hoildQue:inventory.hoildQue+product.productQuantity
+                  })
+                );
+              }
+              if (inventoryItem) {
+                productUpdates.push(
+                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                    orderQue: inventoryItem.orderQue - product.productQuantity,
+                    hoildQue:inventoryItem.hoildQue+product.productQuantity
+                  })
+                );
+              }
+            }
+          }
+
+  
+  
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      }
+     
+      if(data?.statusId===3 && (currentStatus===5 || currentStatus===6)){
+      
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) {
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+      
+              if (inventory) {
+                productUpdates.push(
+                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                    processing: inventory.processing - product.productQuantity,
+                    hoildQue:inventory.hoildQue+product.productQuantity
+                  })
+                );
+              }
+              if (inventoryItem) {
+                productUpdates.push(
+                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                    processing: inventoryItem.processing - product.productQuantity,
+                    hoildQue:inventoryItem.hoildQue+product.productQuantity
+                  })
+                );
+              }
+            }
+          }
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      }
+
+    await this.orderRepository.update({ id: In(orderIds) }, {...data,previousStatus:currentStatus});
+  
+    const updatedOrders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
+  
+    const orderLogs = orders.map((order, index) => ({
+      orderId: order.id,
+      agentId: data.agentId,
+      action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
+      previousValue: null,
+    }));
+  
+    await this.orderLogsRepository.save(orderLogs);
+  
+    return updatedOrders;
+  }
+  // change hold status
+  async changeHoldStatus(orderIds: number[], mainData: any,organizationId:string) {
+   
+    const {currentStatus,...data}=mainData
+    const orders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
+  
+
+
+    if (orders.length !== orderIds.length) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+    }
+        const queryRunner = this.dataSource.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+      
+        try {
+
+          const productUpdates = [];
+          for (const order of orders) {
+            const products = await this.productsRepository.find({
+              where: { orderId: order.id },
+            });
+      
+            for (const product of products) { 
+              const inventory = await this.inventoryRepository.findOne({
+                where: { productId: product.productId },
+              });
+      
+              const inventoryItem = await this.InventoryItemItemRepository.findOne({
+                where: { productId: product.productId, locationId: order.locationId },
+              });
+
+              if(order?.previousStatus==="2" && data?.statusId !== 4){
+                if (inventory) {
+                  productUpdates.push(
+                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                      orderQue: inventory.orderQue + product.productQuantity,
+                      hoildQue:inventory.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+                if (inventoryItem) {
+                  productUpdates.push(
+                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                      orderQue: inventoryItem.orderQue + product.productQuantity,
+                      hoildQue:inventoryItem.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+
+              }
+              if((order?.previousStatus==="5" || order?.previousStatus==="6")  && data?.statusId !== 4){
+                if (inventory) {
+                  productUpdates.push(
+                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                      processing: inventory.processing + product.productQuantity,
+                      hoildQue:inventory.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+                if (inventoryItem) {
+                  productUpdates.push(
+                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                      processing: inventoryItem.processing + product.productQuantity,
+                      hoildQue:inventoryItem.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+
+              }
+              if(data?.statusId === 4){
+                if (inventory) {
+                  productUpdates.push(
+                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                      hoildQue:inventory.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+                if (inventoryItem) {
+                  productUpdates.push(
+                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                      hoildQue:inventoryItem.hoildQue-product.productQuantity
+                    })
+                  );
+                }
+
+              }
+              await this.orderRepository.update({id:order.id},{statusId:+order.previousStatus})
+      
+           
+            }
+          }
+          // Commit transaction
+          await queryRunner.commitTransaction();
+        } catch (error) {
+          await queryRunner.rollbackTransaction();
+          throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to update inventory');
+        } finally {
+          await queryRunner.release();
+        }
+      
+      
+  
+    // await this.orderRepository.update({ id: In(orderIds) }, data);
   
     const updatedOrders = await this.orderRepository.find({
       where: { id: In(orderIds) },
