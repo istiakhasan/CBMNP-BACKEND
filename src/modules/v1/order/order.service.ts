@@ -524,20 +524,29 @@ export class OrderService {
               });
       
               if (inventory) {
-                productUpdates.push(
-                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                    processing: inventory.processing - product.productQuantity,
-                    stock: inventory.stock - product.productQuantity,
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                //     processing: inventory.processing - product.productQuantity,
+                //     stock: inventory.stock - product.productQuantity,
+                //   })
+                // );
+
+                await this.inventoryRepository.update({ productId: product.productId }, {
+                  processing: inventory.processing - product.productQuantity,
+                  stock: inventory.stock - product.productQuantity,
+                })
               }
               if (inventoryItem) {
-                productUpdates.push(
-                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                    processing: inventoryItem.processing - product.productQuantity,
-                    quantity: inventoryItem.quantity - product.productQuantity,
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                //     processing: inventoryItem.processing - product.productQuantity,
+                //     quantity: inventoryItem.quantity - product.productQuantity,
+                //   })
+                // );
+                await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                  processing: inventoryItem.processing - product.productQuantity,
+                  quantity: inventoryItem.quantity - product.productQuantity,
+                })
               }
             }
           }
@@ -568,7 +577,7 @@ export class OrderService {
       }
 
       if(data?.statusId===5){
-        this.requisitionService.createRequisition({orderIds,useerId:data?.agentId},organizationId)
+       await this.requisitionService.createRequisition({orderIds,useerId:data?.agentId},organizationId)
       }
       if(data?.statusId===4 && currentStatus===2){
         const queryRunner = this.dataSource.createQueryRunner();
@@ -593,18 +602,25 @@ export class OrderService {
               });
       
               if (inventory) {
-                productUpdates.push(
-                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                    orderQue: inventory.orderQue - product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                //     orderQue: inventory.orderQue - product.productQuantity
+                //   })
+                // );
+
+                await this.inventoryRepository.update({ productId: product.productId }, {
+                  orderQue: inventory.orderQue - product.productQuantity
+                })
               }
               if (inventoryItem) {
-                productUpdates.push(
-                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                    orderQue: inventoryItem.orderQue - product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                //     orderQue: inventoryItem.orderQue - product.productQuantity
+                //   })
+                // );
+                await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                  orderQue: inventoryItem.orderQue - product.productQuantity
+                })
               }
             }
           }
@@ -645,18 +661,25 @@ export class OrderService {
               });
       
               if (inventory) {
-                productUpdates.push(
-                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                    processing: inventory.processing - product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                //     processing: inventory.processing - product.productQuantity
+                //   })
+                // );
+
+                await this.inventoryRepository.update({ productId: product.productId }, {
+                  processing: inventory.processing - product.productQuantity
+                })
               }
               if (inventoryItem) {
-                productUpdates.push(
-                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                    processing: inventoryItem.processing - product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                //     processing: inventoryItem.processing - product.productQuantity
+                //   })
+                // );
+                await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                  processing: inventoryItem.processing - product.productQuantity
+                })
               }
             }
           }
@@ -700,20 +723,28 @@ export class OrderService {
               });
       
               if (inventory) {
-                productUpdates.push(
-                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                    orderQue: inventory.orderQue - product.productQuantity,
-                    hoildQue:inventory.hoildQue+product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                //     orderQue: inventory.orderQue - product.productQuantity,
+                //     hoildQue:inventory.hoildQue+product.productQuantity
+                //   })
+                // );
+                await this.inventoryRepository.update( { productId: product.productId }, {
+                  orderQue: inventory.orderQue - product.productQuantity,
+                  hoildQue:inventory.hoildQue+product.productQuantity
+                })
               }
               if (inventoryItem) {
-                productUpdates.push(
-                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                    orderQue: inventoryItem.orderQue - product.productQuantity,
-                    hoildQue:inventoryItem.hoildQue+product.productQuantity
-                  })
-                );
+                // productUpdates.push(
+                //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                //     orderQue: inventoryItem.orderQue - product.productQuantity,
+                //     hoildQue:inventoryItem.hoildQue+product.productQuantity
+                //   })
+                // );
+                await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                  orderQue: inventoryItem.orderQue - product.productQuantity,
+                  hoildQue:inventoryItem.hoildQue+product.productQuantity
+                })
               }
             }
           }
@@ -743,8 +774,9 @@ export class OrderService {
             const products = await this.productsRepository.find({
               where: { orderId: order.id },
             });
-      
+       
             for (const product of products) {
+              console.log(product,"product");
               const inventory = await this.inventoryRepository.findOne({
                 where: { productId: product.productId },
               });
@@ -754,20 +786,30 @@ export class OrderService {
               });
       
               if (inventory) {
-                productUpdates.push(
-                  queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                    processing: inventory.processing - product.productQuantity,
-                    hoildQue:inventory.hoildQue+product.productQuantity
-                  })
-                );
+                console.log("++++++++++++++++++++++");
+                // productUpdates.push(
+                //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                //     processing: inventory.processing - product.productQuantity,
+                //     hoildQue:inventory.hoildQue+product.productQuantity
+                //   })
+                // );
+                await this.inventoryRepository.update({ productId: product.productId }, {
+                  processing: inventory.processing - product.productQuantity,
+                  hoildQue:inventory.hoildQue+product.productQuantity
+                })
               }
               if (inventoryItem) {
-                productUpdates.push(
-                  queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                    processing: inventoryItem.processing - product.productQuantity,
-                    hoildQue:inventoryItem.hoildQue+product.productQuantity
-                  })
-                );
+                console.log("_________________________");
+                // productUpdates.push(
+                //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                //     processing: inventoryItem.processing - product.productQuantity,
+                //     hoildQue:inventoryItem.hoildQue+product.productQuantity
+                //   })
+                // );
+                await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                  processing: inventoryItem.processing - product.productQuantity,
+                  hoildQue:inventoryItem.hoildQue+product.productQuantity
+                })
               }
             }
           }
@@ -836,56 +878,82 @@ export class OrderService {
 
               if(order?.previousStatus==="2" && data?.statusId !== 4){
                 if (inventory) {
-                  productUpdates.push(
-                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                      orderQue: inventory.orderQue + product.productQuantity,
-                      hoildQue:inventory.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                  //     orderQue: inventory.orderQue + product.productQuantity,
+                  //     hoildQue:inventory.hoildQue-product.productQuantity
+                  //   })
+                  // );
+
+                  await this.inventoryRepository.update( { productId: product.productId }, {
+                    orderQue: inventory.orderQue + product.productQuantity,
+                    hoildQue:inventory.hoildQue-product.productQuantity
+                  })
                 }
                 if (inventoryItem) {
-                  productUpdates.push(
-                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                      orderQue: inventoryItem.orderQue + product.productQuantity,
-                      hoildQue:inventoryItem.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                  //     orderQue: inventoryItem.orderQue + product.productQuantity,
+                  //     hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  //   })
+                  // );
+
+                  await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                    orderQue: inventoryItem.orderQue + product.productQuantity,
+                    hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  })
                 }
 
               }
               if((order?.previousStatus==="5" || order?.previousStatus==="6")  && data?.statusId !== 4){
                 if (inventory) {
-                  productUpdates.push(
-                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                      processing: inventory.processing + product.productQuantity,
-                      hoildQue:inventory.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                  //     processing: inventory.processing + product.productQuantity,
+                  //     hoildQue:inventory.hoildQue-product.productQuantity
+                  //   })
+                  // );
+
+                  await this.inventoryRepository.update({ productId: product.productId }, {
+                    processing: inventory.processing + product.productQuantity,
+                    hoildQue:inventory.hoildQue-product.productQuantity
+                  })
                 }
                 if (inventoryItem) {
-                  productUpdates.push(
-                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                      processing: inventoryItem.processing + product.productQuantity,
-                      hoildQue:inventoryItem.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                  //     processing: inventoryItem.processing + product.productQuantity,
+                  //     hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  //   })
+                  // );
+                  await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                    processing: inventoryItem.processing + product.productQuantity,
+                    hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  })
                 }
 
               }
               if(data?.statusId === 4){
                 if (inventory) {
-                  productUpdates.push(
-                    queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                      hoildQue:inventory.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
+                  //     hoildQue:inventory.hoildQue-product.productQuantity
+                  //   })
+                  // );
+
+                  await this.inventoryRepository.update( { productId: product.productId }, {
+                    hoildQue:inventory.hoildQue-product.productQuantity
+                  })
                 }
                 if (inventoryItem) {
-                  productUpdates.push(
-                    queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                      hoildQue:inventoryItem.hoildQue-product.productQuantity
-                    })
-                  );
+                  // productUpdates.push(
+                  //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
+                  //     hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  //   })
+                  // );
+                  await this.InventoryItemItemRepository.update({ productId: product.productId, locationId: order.locationId }, {
+                    hoildQue:inventoryItem.hoildQue-product.productQuantity
+                  })
                 }
 
               }

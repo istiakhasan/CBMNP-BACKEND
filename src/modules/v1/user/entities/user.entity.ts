@@ -20,6 +20,7 @@ import { Requisition } from '../../requsition/entities/requsition.entity';
 export enum UserRole {
   ADMIN = 'admin',
   User = 'user',
+  Owner = 'owner',
 }
 
 @Entity({ name: 'users' })

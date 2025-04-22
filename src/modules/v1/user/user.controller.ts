@@ -9,7 +9,7 @@ export class UserController {
   @Post()
  async create(@Body() createUserDto: Users,@Req() req:Request) {
     const organizationId=req.headers['x-organization-id']
-    const result=await this.userService.create(createUserDto);
+    const result=await this.userService.create({...createUserDto,organizationId});
     return {
       success:true,
       statusCode:HttpStatus.OK,

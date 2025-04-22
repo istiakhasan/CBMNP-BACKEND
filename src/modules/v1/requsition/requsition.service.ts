@@ -32,7 +32,7 @@ export class RequisitionService {
     private readonly orderLogsRepository: Repository<OrdersLog>,
   ) {}
 
-  async createRequisition(createRequisitionDto: any,organizationId:string) {
+  async createRequisition(createRequisitionDto: any, organizationId: string) {
     const { orderIds, userId } = createRequisitionDto;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -52,72 +52,108 @@ export class RequisitionService {
   
       if (orders.some(order => !!order.requisitionId)) {
         throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders are already in a requisition');
-      } 
+      }
   
-      const requisition = queryRunner.manager.create(Requisition, {
+      const requisition = await queryRunner.manager.create(Requisition, {
         requisitionNumber,
         orders,
         userId,
-        totalOrders:orderIds?.length || 0,
+        totalOrders: orderIds?.length || 0,
         organizationId,
         orderIds
       });
   
       const savedRequisition = await queryRunner.manager.save(Requisition, requisition);
   
-      const productUpdates = [];
+      // Aggregate product quantities across all orders
+      const productTotals = new Map<
+        string,
+        {
+          totalQty: number;
+          byLocation: Map<string, number>;
+        }
+      >();
+  
       for (const order of orders) {
         const products = await this.productsRepository.find({
           where: { orderId: order.id },
         });
   
         for (const product of products) {
-          const inventory = await this.inventoryRepository.findOne({
-            where: { productId: product.productId },
-          });
+          const productId = product.productId;
+          const qty = product.productQuantity;
+          const locationId = order.locationId;
   
-          const inventoryItem = await this.InventoryItemRepository.findOne({
-            where: { productId: product.productId, locationId: order.locationId },
-          });
-  
-          if (inventory) {
-            productUpdates.push(
-              queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                processing: inventory.processing + product.productQuantity,
-                orderQue: inventory.orderQue - product.productQuantity,
-              })
-            );
+          if (!productTotals.has(productId)) {
+            productTotals.set(productId, {
+              totalQty: 0,
+              byLocation: new Map<string, number>(),
+            });
           }
   
+          const totals = productTotals.get(productId)!;
+          totals.totalQty += qty;
+  
+          const prevQty = totals.byLocation.get(locationId) || 0;
+          totals.byLocation.set(locationId, prevQty + qty);
+        }
+      }
+  
+      // Apply aggregated updates
+      for (const [productId, totals] of productTotals.entries()) {
+        const inventory = await this.inventoryRepository.findOne({
+          where: { productId },
+        });
+  
+        if (inventory) {
+          await queryRunner.manager.update(
+            Inventory,
+            { productId },
+            {
+              processing: inventory.processing + totals.totalQty,
+              orderQue: inventory.orderQue - totals.totalQty,
+            }
+          );
+        }
+  
+        for (const [locationId, qty] of totals.byLocation.entries()) {
+          const inventoryItem = await this.InventoryItemRepository.findOne({
+            where: { productId, locationId },
+          });
+  
           if (inventoryItem) {
-            productUpdates.push(
-              queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                processing: inventoryItem.processing + product.productQuantity,
-                orderQue: inventoryItem.orderQue - product.productQuantity,
-              })
+            await queryRunner.manager.update(
+              InventoryItem,
+              { productId, locationId },
+              {
+                processing: inventoryItem.processing + qty,
+                orderQue: inventoryItem.orderQue - qty,
+              }
             );
           }
         }
       }
   
-      await Promise.all(productUpdates);
-  
       // Explicitly update order status
-      await Promise.all(orders.map(order => 
-        queryRunner.manager.update(Order, { id: order.id }, { statusId: 5,  requisition : savedRequisition })
-      ));
-      const orderLogs = orders.map((order, index) => ({
+      await Promise.all(
+        orders.map(order =>
+          queryRunner.manager.update(Order, { id: order.id }, { statusId: 5, requisition: savedRequisition })
+        )
+      );
+  
+      const orderLogs = orders.map(order => ({
         orderId: order.id,
         agentId: "R-000000001",
         action: `Order Status changed to Packing and create requisition from ${order.status.label}`,
         previousValue: null,
       }));
-    
+  
       await this.orderLogsRepository.save(orderLogs);
   
       // Commit transaction
       await queryRunner.commitTransaction();
       return savedRequisition;
+  
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to create requisition');
@@ -125,6 +161,7 @@ export class RequisitionService {
       await queryRunner.release();
     }
   }
+  
   
 
 
