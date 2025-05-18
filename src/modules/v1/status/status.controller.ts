@@ -23,7 +23,6 @@ export class StatusController {
     }
     @Get()
     async getAllStatus(@Query() query:{label:string}) {
-      console.log(query,"query");
       return  catchAsync(async():Promise<IResponse<OrderStatus[]>>=>{
         const result=await this.statusService.getAllStatus(query);
       return {

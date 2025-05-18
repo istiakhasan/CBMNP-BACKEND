@@ -137,13 +137,13 @@ export class RequisitionService {
       // Explicitly update order status
       await Promise.all(
         orders.map(order =>
-          queryRunner.manager.update(Order, { id: order.id }, { statusId: 5, requisition: savedRequisition })
+          queryRunner.manager.update(Order, { id: order.id }, { statusId: 5, requisition: savedRequisition,storeTime:new Date() })
         )
       );
-  
+
       const orderLogs = orders.map(order => ({
         orderId: order.id,
-        agentId: "R-000000001",
+        agentId: userId,
         action: `Order Status changed to Packing and create requisition from ${order.status.label}`,
         previousValue: null,
       }));

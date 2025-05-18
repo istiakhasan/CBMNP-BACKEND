@@ -47,6 +47,9 @@ export class StatusService {
           label: In(["In-transit", "Hold","Cancel"])
     });
     }
+    if(query?.label==="all"){
+        result = await this.statusRepository.find();
+    }
     return result;
   }
   async getAllOrdersCountByStatus(organizationId) {

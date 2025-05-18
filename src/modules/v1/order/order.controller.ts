@@ -23,7 +23,7 @@ export class OrderController {
       }
     }
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm', 'statusId','locationId'];
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];

@@ -18,15 +18,13 @@ import { Comments } from '../../Comments/entities/orderComment.entity';
 import { OrdersLog } from './orderlog.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
 
-
-
 @Entity({ name: 'orders' })
 export class Order {
   @PrimaryGeneratedColumn()
   id: number;
   @Column({ unique: true, nullable: true })
   orderNumber: string;
-  @Column({ nullable: true,type:'varchar' })
+  @Column({ nullable: true, type: 'varchar' })
   customerId: string;
   @Column({ nullable: true })
   receiverPhoneNumber: string;
@@ -83,35 +81,51 @@ export class Order {
   requisitionId: string;
   @Column({ nullable: true })
   previousStatus: string;
- 
+  // store status change time 
+  // store status change time 
+  // store status change time 
+  // store status change time 
+  // store status change time 
+  @Column({ type: 'timestamp', nullable: true })
+  intransitTime: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  approvedTime: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  packingTime: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  storeTime: Date;
+
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
 
   @ManyToOne(() => Customers, (customer) => customer.orders, { eager: true })
-  @JoinColumn({ name: 'customerId' ,referencedColumnName: 'customer_Id'}) 
+  @JoinColumn({ name: 'customerId', referencedColumnName: 'customer_Id' })
   customer: Customers;
 
   // relation with req
   @ManyToOne(() => Requisition, (requisition) => requisition.orders)
   requisition: Requisition;
-  
+
   @Index()
   @Column({ nullable: true })
   statusId: number;
   @ManyToOne(() => OrderStatus, (status) => status.orders, { eager: true })
-  @JoinColumn({ name: 'statusId' ,referencedColumnName: 'value'}) 
+  @JoinColumn({ name: 'statusId', referencedColumnName: 'value' })
   status: OrderStatus;
-
 
   @Column({ nullable: true })
   agentId: string;
   @ManyToOne(() => Users, (status) => status.orders, { eager: true })
-  @JoinColumn({ name: 'agentId' ,referencedColumnName: 'userId'}) 
+  @JoinColumn({ name: 'agentId', referencedColumnName: 'userId' })
   agent: Users;
 
-  @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, { cascade: true })
+  @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, {
+    cascade: true,
+  })
   paymentHistory: PaymentHistory[];
-  @OneToMany(() => Comments, (comment) => comment.order,{ cascade: true })
+  @OneToMany(() => Comments, (comment) => comment.order, { cascade: true })
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
