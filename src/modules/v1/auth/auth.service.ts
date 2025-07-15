@@ -31,6 +31,9 @@ export class AuthenTicationService {
     if (!isUserExist) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not exist');
     }
+    if(!isUserExist.active){
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'User not active');
+    }
     const { userId, password: savePassword, role, id,organization:{id:organizationId} } = isUserExist;
     console.log(organizationId,"check");
     const isPasswordMatch =await bcryptjs.compare(data.password, savePassword);
@@ -88,11 +91,12 @@ export class AuthenTicationService {
     // console.log(user, 'user');
     let result: Users;
     if (user) {
+      console.log(user,"user");
       result = await this.usersRepository.findOne({
-        where: { userId: user.employeeId },
-        relations: ['employee'],
+        where: { userId: user.userId }
       });
     }
+    console.log(result,"resule");
     return result;
   }
   // changePassword

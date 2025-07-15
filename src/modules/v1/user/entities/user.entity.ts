@@ -17,6 +17,7 @@ import { OrdersLog } from '../../order/entities/orderlog.entity';
 import { PaymentHistory } from '../../order/entities/paymentHistory.entity';
 import { Organization } from '../../organization/entities/organization.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
+import { Procurement } from '../../procurement/entities/procurement.entity';
 export enum UserRole {
   ADMIN = 'admin',
   User = 'user',
@@ -58,6 +59,8 @@ export class Users {
   paymentHistory: PaymentHistory[];
   @OneToMany(() => Requisition, (requisition) =>requisition.user )
   requisition: Requisition[];
+  @OneToMany(() => Procurement, (requisition) =>requisition.createdBy )
+  procurements: Procurement[];
 
   @ManyToOne(() => Organization, (organization) => organization.users)
   @JoinColumn({ name: 'organizationId' }) // This makes Users the owner of the relationship

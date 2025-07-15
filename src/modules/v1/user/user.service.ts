@@ -1,10 +1,11 @@
-import {  Injectable, NotFoundException } from '@nestjs/common';
+import {  HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
 import {  Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import * as bcryptjs from 'bcrypt';
+import { ApiError } from 'src/middleware/ApiError';
 @Injectable()
 export class UserService {
   constructor(
@@ -12,7 +13,16 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-  //  const isEmailExist=await this.userRepository.findOne({where:{email:data?.email}})
+    console.log(data,"data");
+   const isEmailExistInOrganization=await this.userRepository.findOne({where:{email:data?.email,organizationId:data?.organizationId}})
+   console.log(isEmailExistInOrganization,"abcd");
+   if(isEmailExistInOrganization){
+     throw   new ApiError(HttpStatus.BAD_REQUEST,'Email Id already exist')
+   }
+   const isUserIdExist=await this.userRepository.findOne({where:{userId:data?.userId}})
+   if(isUserIdExist){
+    throw   new ApiError(HttpStatus.BAD_REQUEST,'User Id already exist')
+   }
   //  if(isEmailExist){
   //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
   //  }
@@ -33,7 +43,7 @@ export class UserService {
      const {password,...rest}=data
      const hashPassword=await bcryptjs.hash(password,12)
     
-    const result = await this.userRepository.save({...rest,userId:incrementedId,password:hashPassword});
+    const result = await this.userRepository.save({...rest,password:hashPassword});
     return result;
   }
 

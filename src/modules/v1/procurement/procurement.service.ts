@@ -73,6 +73,13 @@ export class ProcurementService {
     const queryBuilder = this.procurementRepo.createQueryBuilder('procurement')
     .where('procurement.organizationId = :organizationId', { organizationId })
     .leftJoinAndSelect('procurement.supplier','supplier')
+    .leftJoin('procurement.createdBy', 'createdBy') // change to leftJoin
+  .addSelect([
+    'createdBy.id',
+    'createdBy.name',
+    'createdBy.email',
+    // add other specific fields you need from createdBy
+  ])
     .leftJoinAndSelect('procurement.items','items')
     .leftJoinAndSelect('items.product','product')
     .take(limit)
@@ -107,9 +114,7 @@ export class ProcurementService {
         status: filterOptions.status,
       });
     }
-    console.log(filterOptions,"filter");
     if (filterOptions?.startDate && filterOptions?.endDate) {
-      console.log(filterOptions,"filter");
       const localStartDate = new Date(filterOptions.startDate);
       const utcStartDate = new Date(
         Date.UTC(

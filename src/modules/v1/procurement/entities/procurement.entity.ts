@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, OneToMany, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm';
 import { Supplier } from '../../supplier/entities/supplier.entity';
 import { ProcurementItem } from './procurementItem.entity';
+import { Users } from '../../user/entities/user.entity';
 
 
 @Entity()
@@ -10,6 +11,8 @@ export class Procurement {
 
   @ManyToOne(() => Supplier, (supplier) => supplier.procurements, { eager: true })
   supplier: Supplier;
+  @ManyToOne(() => Users, (user) => user.procurements, { eager: true })
+  createdBy: Users;
 
   @OneToMany(() => ProcurementItem, (item) => item.procurement, { cascade: true })
   items: ProcurementItem[];
