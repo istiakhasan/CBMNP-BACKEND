@@ -1,16 +1,18 @@
-import { Body, Controller, Get, HttpStatus, Param, Post, Query } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, Param, Post, Query, Req } from "@nestjs/common";
 import { CustomerService } from "./customers.service";
 
 import { CreateCustomerSchema } from "./customer.validation";
 import { catchAsync } from "../../../hoc/createAsync";
 import { ZodPipe } from "../../../middleware/ZodPipe";
+import { Request } from "express";
 
 @Controller('v1/customers')
 export class CustomerController {
     constructor(private readonly customerService: CustomerService) {}
     @Post()
-    async createEmployee(@Body(new ZodPipe(CreateCustomerSchema)) data) {
-      const result=await this.customerService.createCustomer(data);
+    async createEmployee(@Body(new ZodPipe(CreateCustomerSchema)) data,@Req() req:Request) {
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.customerService.createCustomer({...data,organizationId});
       return {
         success:true,
         statusCode:HttpStatus.OK,

@@ -56,8 +56,16 @@ export class UserController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateUserDto: Users) {
-    return this.userService.update(id, updateUserDto);
+  async update(@Param('id') id: number, @Body() updateUserDto: Users,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
+    const result=await this.userService.update(id, {...updateUserDto,organizationId});
+
+   return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'User update successfully',
+      data:result
+   }
   }
 
   @Delete(':id')

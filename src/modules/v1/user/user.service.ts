@@ -1,7 +1,7 @@
-import {  HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Users } from './entities/user.entity';
-import {  Repository } from 'typeorm';
+import { Not, Repository } from 'typeorm';
 import { plainToInstance } from 'class-transformer';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import * as bcryptjs from 'bcrypt';
@@ -13,53 +13,69 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-    console.log(data,"data");
-   const isEmailExistInOrganization=await this.userRepository.findOne({where:{email:data?.email,organizationId:data?.organizationId}})
-   console.log(isEmailExistInOrganization,"abcd");
-   if(isEmailExistInOrganization){
-     throw   new ApiError(HttpStatus.BAD_REQUEST,'Email Id already exist')
-   }
-   const isUserIdExist=await this.userRepository.findOne({where:{userId:data?.userId}})
-   if(isUserIdExist){
-    throw   new ApiError(HttpStatus.BAD_REQUEST,'User Id already exist')
-   }
-  //  if(isEmailExist){
-  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
-  //  }
-  //  const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
-  //  if(isPhoneNumberExist){
-  //   throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
-  //  }
+    const isEmailExistInOrganization = await this.userRepository.findOne({
+      where: { email: data?.email, organizationId: data?.organizationId },
+    });
+    if (isEmailExistInOrganization) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Email Id already exist');
+    }
+    const isUserIdExist = await this.userRepository.findOne({
+      where: { userId: data?.userId },
+    });
+    if (isUserIdExist) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'User Id already exist');
+    }
+    //  if(isEmailExist){
+    //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
+    //  }
+    //  const isPhoneNumberExist=await this.userRepository.findOne({where:{phone:data?.phone}})
+    //  if(isPhoneNumberExist){
+    //   throw new ApiError(HttpStatus.BAD_REQUEST,'Phone Number Already Exist')
+    //  }
 
     const lastCustomer = await this.userRepository
-    .createQueryBuilder('user')
-    .orderBy('user.createdAt', 'DESC') 
-    .getOne();
-    const lastUserId=lastCustomer?.userId?.substring(2)
-     const currentId =lastUserId || (0).toString().padStart(9, '0'); //000000
-     let incrementedId = (parseInt(currentId) + 1).toString().padStart(9, '0');
-     incrementedId = `R-${incrementedId}`;
+      .createQueryBuilder('user')
+      .orderBy('user.createdAt', 'DESC')
+      .getOne();
+    const lastUserId = lastCustomer?.userId?.substring(2);
+    const currentId = lastUserId || (0).toString().padStart(9, '0'); //000000
+    let incrementedId = (parseInt(currentId) + 1).toString().padStart(9, '0');
+    incrementedId = `R-${incrementedId}`;
 
-     const {password,...rest}=data
-     const hashPassword=await bcryptjs.hash(password,12)
-    
-    const result = await this.userRepository.save({...rest,password:hashPassword});
+    const { password, ...rest } = data;
+    const hashPassword = await bcryptjs.hash(password, 12);
+
+    const result = await this.userRepository.save({
+      ...rest,
+      password: hashPassword,
+    });
     return result;
   }
 
-  async findAll(options: any, filterOptions: any,organizationId:any) {
-    const {skip,sortBy,sortOrder,limit,page}=paginationHelpers(options)
+  async findAll(options: any, filterOptions: any, organizationId: any) {
+    const { skip, sortBy, sortOrder, limit, page } = paginationHelpers(options);
 
-    const queryBuilder = this.userRepository.createQueryBuilder('users')
-    .where('users.organizationId = :organizationId', { organizationId });
-    queryBuilder.select(['users.id', 'users.name','users.userId','users.role','users.active','users.phone','users.address','users.email','users.createdAt']);
+    const queryBuilder = this.userRepository
+      .createQueryBuilder('users')
+      .where('users.organizationId = :organizationId', { organizationId });
+    queryBuilder.select([
+      'users.id',
+      'users.name',
+      'users.userId',
+      'users.role',
+      'users.active',
+      'users.phone',
+      'users.address',
+      'users.email',
+      'users.createdAt',
+    ]);
 
     // Search Term Filter
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
       queryBuilder.andWhere(
         '(users.name LIKE :searchTerm OR users.userId LIKE :searchTerm)',
-        { searchTerm }
+        { searchTerm },
       );
     }
 
@@ -70,10 +86,7 @@ export class UserService {
       });
     }
 
-    queryBuilder
-      .orderBy(`users.${sortBy}`, sortOrder) 
-      .skip(skip)
-      .take(limit);
+    queryBuilder.orderBy(`users.${sortBy}`, sortOrder).skip(skip).take(limit);
 
     const [data, total] = await queryBuilder.getManyAndCount();
     const modifyData = plainToInstance(Users, data);
@@ -87,27 +100,24 @@ export class UserService {
     };
   }
 
-
   async findOne(id: string) {
     const result = await this.userRepository.findOne({
-      where: { userId:id },
+      where: { userId: id },
       relations: ['userPermissions', 'userPermissions.permission'],
     });
-  
+
     if (!result) {
       throw new Error(`User with ID ${id} not found`);
     }
-  
+
     // Map the permissions into an array of labels
-    const permissions = result.userPermissions.map(
-      (userPermission) => {
-        return {
-          permissinId:userPermission.permissionId,
-          label:userPermission.permission.label
-        }
-      }
-    );
-  
+    const permissions = result.userPermissions.map((userPermission) => {
+      return {
+        permissinId: userPermission.permissionId,
+        label: userPermission.permission.label,
+      };
+    });
+
     // Return the transformed data
     return {
       id: result.id,
@@ -118,19 +128,49 @@ export class UserService {
       permission: permissions,
     };
   }
-  
 
-  async update(id: string, updateUserDto: Partial<Users>) {
-    const user = await this.userRepository.findOneBy({userId: id });
-    if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
-    }
-    await this.userRepository.update({userId:id}, updateUserDto);
-    return this.userRepository.findOne({
-      where:{userId:id},
-      select:['userId','name','updatedAt','active']
-    });
+ async update(id: number, updateUserDto: Partial<Users>) {
+  const user = await this.userRepository.findOneBy({ id });
+  if (!user) {
+    throw new NotFoundException(`User with ID ${id} not found`);
   }
+
+
+  if (updateUserDto?.email && updateUserDto?.organizationId) {
+    const isEmailExistInOrganization = await this.userRepository.findOne({
+      where: {
+        email: updateUserDto.email,
+        organizationId: updateUserDto.organizationId,
+        id: Not(id),
+      },
+    });
+
+    if (isEmailExistInOrganization) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Email already exists in this organization');
+    }
+  }
+
+
+  if (updateUserDto?.userId) {
+    const isUserIdExist = await this.userRepository.findOne({
+      where: {
+        userId: updateUserDto.userId,
+        id: Not(id), 
+      },
+    });
+
+    if (isUserIdExist) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'User ID already exists');
+    }
+  }
+
+  await this.userRepository.update({ id }, updateUserDto);
+
+  return this.userRepository.findOne({
+    where: { id },
+    select: ['userId', 'name', 'updatedAt', 'active'],
+  });
+}
 
 
   remove(id: number) {

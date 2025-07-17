@@ -49,6 +49,8 @@ export class Customers {
 
   @Column({ nullable: false, unique: true, type: 'varchar' })
   customer_Id: string; 
+  @Column({ nullable: true,type: 'varchar' })
+  organizationId: string; 
 
   @OneToMany(() => Order, (order) => order.customer)
   orders: Order[];

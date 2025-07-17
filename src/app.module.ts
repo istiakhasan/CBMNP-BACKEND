@@ -28,6 +28,7 @@ import { SupplierModule } from './modules/v1/supplier/supplier.module';
 import { ProcurementModule } from './modules/v1/procurement/procurement.module';
 import { PermissionService } from './modules/v1/permission/permission.service';
 import { DeliveryPartnerModule } from './modules/v1/delivery-partner/delivery-partner.module';
+import { DashboardModule } from './modules/v1/dashboard/dashboard.module';
 
 @Module({
   imports: [
@@ -57,7 +58,8 @@ import { DeliveryPartnerModule } from './modules/v1/delivery-partner/delivery-pa
     SupplierModule,
     ProcurementModule,
     PermissionModule,
-    DeliveryPartnerModule
+    DeliveryPartnerModule,
+    DashboardModule
   ],
   controllers: [AppController],
   providers: [
