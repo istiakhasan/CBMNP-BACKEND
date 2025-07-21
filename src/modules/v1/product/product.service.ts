@@ -64,9 +64,9 @@ export class ProductService {
 
     // Search
     if (filterOptions?.searchTerm) {
-      const searchTerm = `%${filterOptions.searchTerm}%`;
+      const searchTerm = `%${filterOptions.searchTerm.toLowerCase()}%`;
       queryBuilder.andWhere(
-        '(product.name LIKE :searchTerm OR CAST(product.id AS text) LIKE :searchTerm)',
+        '(LOWER(product.name) LIKE :searchTerm OR CAST(product.id AS text) LIKE :searchTerm)',
         { searchTerm },
       );
     }
@@ -75,6 +75,12 @@ export class ProductService {
     if (filterOptions?.filterByCustomerType) {
       queryBuilder.andWhere('customers.customerType = :customerType', {
         customerType: filterOptions.filterByCustomerType,
+      });
+    }
+    // Filter by active
+    if (filterOptions?.active) {
+      queryBuilder.andWhere('product.active = :active', {
+        active: filterOptions.active,
       });
     }
 

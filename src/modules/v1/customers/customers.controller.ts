@@ -1,10 +1,11 @@
-import { Body, Controller, Get, HttpStatus, Param, Post, Query, Req } from "@nestjs/common";
+import { Body, Controller, Get, HttpStatus, Param, Patch, Post, Query, Req } from "@nestjs/common";
 import { CustomerService } from "./customers.service";
 
 import { CreateCustomerSchema } from "./customer.validation";
 import { catchAsync } from "../../../hoc/createAsync";
 import { ZodPipe } from "../../../middleware/ZodPipe";
 import { Request } from "express";
+import { Customers } from "./entities/customers.entity";
 
 @Controller('v1/customers')
 export class CustomerController {
@@ -73,6 +74,18 @@ export class CustomerController {
           success:true,
           statusCode:HttpStatus.OK,
           message:'Customers  retrieved successfully',
+          data:result
+       }
+      }) 
+    }
+    @Patch('/:id')
+    async updateCustomerById(@Param('id') id:number,@Body() payload:Customers) {
+      return catchAsync(async()=>{
+        const result=await this.customerService.updateCustomerById(id,payload);
+        return {
+          success:true,
+          statusCode:HttpStatus.OK,
+          message:'Customers  update successfully',
           data:result
        }
       }) 

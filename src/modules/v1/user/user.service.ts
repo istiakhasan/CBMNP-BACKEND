@@ -20,7 +20,7 @@ export class UserService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Email Id already exist');
     }
     const isUserIdExist = await this.userRepository.findOne({
-      where: { userId: data?.userId },
+      where: { userId: data?.userId,organizationId:data?.organizationId },
     });
     if (isUserIdExist) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User Id already exist');

@@ -60,6 +60,7 @@ export class InventoryService {
                 type: type ? 'IN' : 'OUT',
                 inventoryId: inventory.productId,
                 locationId: item.locationId,
+                organizationId
               });
               await queryRunner.manager.save(inventoryItemTransaction);
               return isExist;
@@ -74,6 +75,7 @@ export class InventoryService {
                 type: type ? 'IN' : 'OUT',
                 inventoryId: inventory.productId,
                 locationId: item.locationId,
+                organizationId
               });
               await queryRunner.manager.save(inventoryItemTransaction);
               return {
@@ -93,6 +95,7 @@ export class InventoryService {
       const transaction = queryRunner.manager.create('Transaction', {
         productId,
         quantity,
+        organizationId,
         totalAmount: product.regularPrice * quantity,
         type: type?'IN':'OUT',
         inventoryId:inventory.productId

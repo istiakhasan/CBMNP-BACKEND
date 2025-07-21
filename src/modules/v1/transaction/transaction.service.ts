@@ -15,8 +15,9 @@ export class TransactionService {
     return 'This action adds a new transaction';
   }
 
-  async findAll() {
+  async findAll(organizationId:string) {
     return await this.transactionRepository.find({
+      where:{organizationId:organizationId},
       relations:['product','location']
     })
   }
