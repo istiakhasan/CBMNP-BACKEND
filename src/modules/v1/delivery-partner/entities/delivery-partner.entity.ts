@@ -2,10 +2,12 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  OneToMany,
   PrimaryGeneratedColumn,
   Unique,
   UpdateDateColumn,
 } from 'typeorm';
+import { Order } from '../../order/entities/order.entity';
 
 @Entity({ name: 'delivery_partner' })
 @Unique(['organizationId', 'partnerName']) 
@@ -28,6 +30,8 @@ export class DeliveryPartner {
   api_key: string;
   @Column({ nullable: true })
   partnerName: string;
+  @OneToMany(() => Order, (requisition) =>requisition.partner )
+  orders: Order[];
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

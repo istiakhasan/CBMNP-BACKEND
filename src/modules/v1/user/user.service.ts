@@ -19,11 +19,19 @@ export class UserService {
     if (isEmailExistInOrganization) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Email Id already exist');
     }
-    const isUserIdExist = await this.userRepository.findOne({
-      where: { userId: data?.userId,organizationId:data?.organizationId },
+    const isInternalIdExistInOrganization = await this.userRepository.findOne({
+      where: { internalId: data?.internalId, organizationId: data?.organizationId },
     });
-    if (isUserIdExist) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'User Id already exist');
+    if (isInternalIdExistInOrganization) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Internal Id already exist');
+    }
+    if(data?.userId){
+      const isUserIdExist = await this.userRepository.findOne({
+        where: { userId: data?.userId,organizationId:data?.organizationId },
+      });
+      if (isUserIdExist) {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'User Id already exist');
+      }
     }
     //  if(isEmailExist){
     //   throw new ApiError(HttpStatus.BAD_REQUEST,'Email Already Exist')
@@ -47,6 +55,7 @@ export class UserService {
 
     const result = await this.userRepository.save({
       ...rest,
+      userId:incrementedId,
       password: hashPassword,
     });
     return result;
@@ -61,6 +70,7 @@ export class UserService {
     queryBuilder.select([
       'users.id',
       'users.name',
+      'users.internalId',
       'users.userId',
       'users.role',
       'users.active',

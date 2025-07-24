@@ -35,6 +35,8 @@ export class Users {
   role: UserRole;
   @Column({ nullable: false, type: 'varchar',unique:true })
   userId: string;
+  @Column({ nullable: true, type: 'varchar' })
+  internalId: string;
   @Column({ nullable: false, type: 'varchar' })
   phone: string;
   @Column({ nullable: false, type: 'varchar' })

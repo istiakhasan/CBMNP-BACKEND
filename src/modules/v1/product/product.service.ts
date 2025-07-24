@@ -18,7 +18,11 @@ export class ProductService {
     private readonly dataSource: DataSource,
   ) {}
 
-  async createSimpleProduct(payload: any): Promise<Product> {
+  async createSimpleProduct(payload: Product): Promise<Product> {
+    const isSkuAlreadyExist=await this.productRepository.findOne({where:{organizationId:payload.organizationId,internalId:payload.internalId}})
+    if(!!isSkuAlreadyExist){
+       throw new ApiError(HttpStatus.BAD_REQUEST,'Internal id already exist')
+    }
     return await this.productRepository.save(payload);
   }
 

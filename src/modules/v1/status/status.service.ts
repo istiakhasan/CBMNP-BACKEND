@@ -52,25 +52,123 @@ export class StatusService {
     }
     return result;
   }
-  async getAllOrdersCountByStatus(organizationId) {
-    const queryRunner = await this.statusRepository
-      .createQueryBuilder('status')
-      .leftJoin('status.orders', 'orders')
-      .where('orders.organizationId = :organizationId',{organizationId})
-      .select('status.label', 'label')
-      .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
-      .groupBy('status.value') 
-      .addGroupBy('status.label')
-      .getRawMany();
-      const totalOrders = await this.statusRepository
+ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
+  const queryBuilder = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
-    .where('orders.organizationId = :organizationId',{organizationId})
+    .where('orders.organizationId = :organizationId', { organizationId });
+
+  // Apply filters
+  if (filterOptions.statusId?.length) {
+    queryBuilder.andWhere('orders.statusId IN (:...statusIds)', {
+      statusIds: filterOptions.statusId,
+    });
+  }
+
+  if (filterOptions.currier?.length) {
+    queryBuilder.andWhere('orders.currier IN (:...curriers)', {
+      curriers: filterOptions.currier,
+    });
+  }
+
+  if (filterOptions.locationId?.length) {
+    queryBuilder.andWhere('orders.locationId IN (:...locationIds)', {
+      locationIds: filterOptions.locationId,
+    });
+  }
+
+  // if (filterOptions.startDate) {
+  //   queryBuilder.andWhere('orders.createdAt >= :startDate', {
+  //     startDate: filterOptions.startDate,
+  //   });
+  // }
+
+  // if (filterOptions.endDate) {
+  //   queryBuilder.andWhere('orders.createdAt <= :endDate', {
+  //     endDate: filterOptions.endDate,
+  //   });
+  // }
+   if (filterOptions?.startDate && filterOptions?.endDate) {
+      queryBuilder.andWhere(
+        'orders.intransitTime BETWEEN :startDate AND :endDate',
+        {
+          startDate: new Date(filterOptions.startDate),
+          endDate: new Date(filterOptions.endDate),
+        },
+      );
+    }
+  if (filterOptions.searchTerm) {
+    queryBuilder.andWhere(
+      `(orders.orderNumber ILIKE :searchTerm )`,
+      { searchTerm: `%${filterOptions.searchTerm}%` }
+    );
+  }
+
+  const statusCounts = await queryBuilder
+    .select('status.label', 'label')
+    .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
+    .groupBy('status.value')
+    .addGroupBy('status.label')
+    .getRawMany();
+
+  // Reuse similar filtering for total count
+  const totalQuery = this.statusRepository
+    .createQueryBuilder('status')
+    .leftJoin('status.orders', 'orders')
+    .where('orders.organizationId = :organizationId', { organizationId });
+
+  if (filterOptions.statusId?.length) {
+    totalQuery.andWhere('orders.statusId IN (:...statusIds)', {
+      statusIds: filterOptions.statusId,
+    });
+  }
+
+  if (filterOptions.currier?.length) {
+    totalQuery.andWhere('orders.currier IN (:...curriers)', {
+      curriers: filterOptions.currier,
+    });
+  }
+
+  if (filterOptions.locationId?.length) {
+    totalQuery.andWhere('orders.locationId IN (:...locationIds)', {
+      locationIds: filterOptions.locationId,
+    });
+  }
+
+  // if (filterOptions.startDate) {
+  //   totalQuery.andWhere('orders.createdAt >= :startDate', {
+  //     startDate: filterOptions.startDate,
+  //   });
+  // }
+
+  // if (filterOptions.endDate) {
+  //   totalQuery.andWhere('orders.createdAt <= :endDate', {
+  //     endDate: filterOptions.endDate,
+  //   });
+  // }
+   if (filterOptions?.startDate && filterOptions?.endDate) {
+      totalQuery.andWhere(
+        'orders.intransitTime BETWEEN :startDate AND :endDate',
+        {
+          startDate: new Date(filterOptions.startDate),
+          endDate: new Date(filterOptions.endDate),
+        },
+      );
+    }
+  if (filterOptions.searchTerm) {
+    totalQuery.andWhere(
+      `(orders.orderNumber ILIKE :searchTerm)`,
+      { searchTerm: `%${filterOptions.searchTerm}%` }
+    );
+  }
+
+  const totalOrders = await totalQuery
     .select('COALESCE(COUNT(orders.id), 0)', 'count')
     .getRawOne();
-  
-    return [...queryRunner,{label:"All",count:totalOrders?.count}];
-  }
+
+  return [...statusCounts, { label: 'All', count: totalOrders?.count }];
+}
+
   
 }
 

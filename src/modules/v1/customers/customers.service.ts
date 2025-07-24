@@ -22,9 +22,9 @@ export class CustomerService {
     const existingCustomer = await this.customerRepository.findOne({
       where: { customerPhoneNumber: data.customerPhoneNumber },
     });
-    if (existingCustomer) {
-      throw new ApiError(400, 'Number already exist ');
-    }
+    // if (existingCustomer) {
+    //   throw new ApiError(400, 'Number already exist ');
+    // }
     const lastCustomer = await this.customerRepository
       .createQueryBuilder('customer')
       .orderBy('customer.created_at', 'DESC')
@@ -46,7 +46,7 @@ export class CustomerService {
     return result;
   }
 
-  async getAllCustomers(options, filterOptions) {
+  async getAllCustomers(options, filterOptions,organizationId) {
     const page = Number(options.page || 1);
     const limit = Number(options.limit || 10);
     const skip = (page - 1) * limit;
@@ -69,7 +69,11 @@ export class CustomerService {
       queryBuilder.andWhere('customers.customerType = :customerType', {
         customerType: filterOptions.filterByCustomerType,
       });
+   
     }
+       queryBuilder.andWhere('customers.organizationId = :organizationId', {
+        organizationId: organizationId,
+      });
     const [data, total] = await queryBuilder.getManyAndCount();
     const modifyData = plainToInstance(Customers, data);
 

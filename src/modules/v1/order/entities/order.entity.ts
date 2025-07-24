@@ -17,6 +17,7 @@ import { PaymentHistory } from './paymentHistory.entity';
 import { Comments } from '../../Comments/entities/orderComment.entity';
 import { OrdersLog } from './orderlog.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
+import { DeliveryPartner } from '../../delivery-partner/entities/delivery-partner.entity';
 
 @Entity({ name: 'orders' })
 export class Order {
@@ -129,6 +130,11 @@ export class Order {
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
+
+
+  @ManyToOne(() => DeliveryPartner,(partner)=>partner.orders, { eager: true })
+  @JoinColumn({ name: 'currier' })
+  partner: DeliveryPartner;
 
   @Index()
   @CreateDateColumn({

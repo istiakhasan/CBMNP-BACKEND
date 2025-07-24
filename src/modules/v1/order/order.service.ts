@@ -216,17 +216,28 @@ export class OrderService {
         },
       );
     }
+
+    // filter by products
+    if (filterOptions?.productId) {
+      queryBuilder.leftJoin('orders.products', 'product');
+    }
+    let productIds = filterOptions?.productId;
+    if (productIds) {
+      productIds = Array.isArray(productIds) ? productIds : [productIds];
+      queryBuilder.andWhere('product.productId IN (:...productIds)', {
+        productIds,
+      });
+    }
     // if (filterOptions?.statusId) {
     //   queryBuilder.andWhere('orders.statusId = :statusId', {
     //     statusId: filterOptions.statusId,
     //   });
     // }
     let statusIdss = filterOptions?.statusId;
-
     if (statusIdss) {
       statusIdss = Array.isArray(statusIdss) ? statusIdss : [statusIdss];
+      console.log(statusIdss, 'abcd');
       statusIdss = statusIdss.map(Number); // Convert to number[]
-
       queryBuilder.andWhere('orders.statusId IN (:...statusIdss)', {
         statusIdss,
       });
@@ -244,8 +255,7 @@ export class OrderService {
     //   });
     // }
 
-
-     let locationIds = filterOptions?.locationId;
+    let locationIds = filterOptions?.locationId;
     if (locationIds) {
       locationIds = Array.isArray(locationIds) ? locationIds : [locationIds];
       queryBuilder.andWhere('orders.locationId IN (:...locationIds)', {

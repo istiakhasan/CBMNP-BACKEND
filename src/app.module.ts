@@ -29,6 +29,9 @@ import { ProcurementModule } from './modules/v1/procurement/procurement.module';
 import { PermissionService } from './modules/v1/permission/permission.service';
 import { DeliveryPartnerModule } from './modules/v1/delivery-partner/delivery-partner.module';
 import { DashboardModule } from './modules/v1/dashboard/dashboard.module';
+import { DivisionsModule } from './modules/v1/divisions/divisions.module';
+import { DistrictsModule } from './modules/v1/districts/districts.module';
+import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_charge.module';
 
 @Module({
   imports: [
@@ -59,7 +62,10 @@ import { DashboardModule } from './modules/v1/dashboard/dashboard.module';
     ProcurementModule,
     PermissionModule,
     DeliveryPartnerModule,
-    DashboardModule
+    DashboardModule,
+    DivisionsModule,
+    DistrictsModule,
+    DelivaryChargeModule
   ],
   controllers: [AppController],
   providers: [

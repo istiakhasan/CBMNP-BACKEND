@@ -23,7 +23,7 @@ export class CustomerController {
       
     }
     @Get()
-    async getAllCustomers(@Query() query) {
+    async getAllCustomers(@Query() query,@Req() req:Request) {
       const options = {};
       const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
       for (const key of keys) {
@@ -38,8 +38,9 @@ export class CustomerController {
           searchFilterOptions[key] = query[key];
         }
       }
+       const organizationId=req.headers['x-organization-id']
       const result=await this.customerService.getAllCustomers(options,
-        searchFilterOptions,);
+        searchFilterOptions,organizationId);
         return {
           success:true,
           statusCode:HttpStatus.OK,

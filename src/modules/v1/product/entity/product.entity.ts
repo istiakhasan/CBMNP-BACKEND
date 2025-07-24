@@ -70,6 +70,8 @@ export class Product {
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   purchasePrice: number;
+  @Column({ nullable:true})
+  internalId: string;
 
   @OneToMany(() => Products, (products) => products.product)
   products: Products[];
