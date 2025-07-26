@@ -103,6 +103,19 @@ export class OrderController {
       }
     })
   }
+  @Patch('/return')
+  async returnOrders(@Body() data:any,@Req() req:Request){
+    return  catchAsync(async():Promise<IResponse<Order[]>>=>{
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.orderService.returnOrders(data);
+      return {
+        message:'Order status change  successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
+  }
   @Patch(':id')
   async update(@Param('id') id: number,@Body() data:Order){
     return  catchAsync(async():Promise<IResponse<Order>>=>{

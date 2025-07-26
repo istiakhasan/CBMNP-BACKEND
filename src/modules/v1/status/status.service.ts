@@ -11,7 +11,9 @@ export class StatusService {
   ) {}
 
   async createStatus(data: OrderStatus) {
+    console.log(data,"data");
     const result = await this.statusRepository.save(data);
+    console.log(result,"resutl");
     return result;
   }
 
@@ -22,6 +24,11 @@ export class StatusService {
           label: In(["Approved","Cancel"])
     });
     }
+    if(query?.label==="In-transit"){
+        result = await this.statusRepository.findBy({
+          label: In(["Returned","Delivered"])
+    });
+    }
     if(query?.label==="Pending"){
         result = await this.statusRepository.findBy({
           label: In(["Hold", "Approved","Cancel"])
@@ -29,12 +36,14 @@ export class StatusService {
     }
     if(query?.label==="Approved"){
         result = await this.statusRepository.findBy({
-          label: Not("Approved")
+        // label: Not("Approved")
+        label: In(["Store","Hold","Cancel","Unreachable"])
     });
     }
     if(query?.label==="Cancel"){
+      return
         result = await this.statusRepository.findBy({
-          label: In(["Hold", "Approved","Pending"])
+          label: In(["Approved","Pending"])
     });
     }
     if(query?.label==="Store"){

@@ -64,6 +64,7 @@ export class OrderService {
       shippingCharge = 0,
       ...rest
     } = payload;
+
     if (!products || products.length === 0) {
       throw new Error('Order must include at least one product');
     }
@@ -143,52 +144,103 @@ export class OrderService {
       action: 'The Order created',
       previousValue: null,
     });
-
-    for (const item of products) {
-      const { productId, productQuantity } = item;
-      const existingInventory = await this.inventoryRepository.findOne({
-        where: { productId },
-      });
-      if (!existingInventory?.orderQue) {
-        await this.inventoryRepository.update({ productId }, { orderQue: 0 });
-      }
-      await this.inventoryRepository.increment(
-        { productId },
-        'orderQue',
-        productQuantity,
-      );
-
-      const existingInventoryItem =
-        await this.InventoryItemItemRepository.findOne({
-          where: { productId, locationId: rest?.locationId },
+    // if order status approved then this section will be execute
+    if (payload?.statusId === 2) {
+      for (const item of products) {
+        const { productId, productQuantity } = item;
+        const existingInventory = await this.inventoryRepository.findOne({
+          where: { productId },
         });
-
-      //
-      if (!existingInventoryItem) {
-        const newInventoryItems = await this.InventoryItemItemRepository.create(
-          {
-            locationId: rest?.locationId,
-            productId: productId,
-            quantity: 0,
-            orderQue: productQuantity,
-            inventoryId: existingInventory.id,
-          },
-        );
-
-        await this.InventoryItemItemRepository.save(newInventoryItems);
-      } else {
-        if (!existingInventoryItem?.orderQue) {
-          await this.InventoryItemItemRepository.update(
-            { productId, locationId: rest?.locationId },
-            { orderQue: 0 },
-          );
+        if (!existingInventory?.orderQue) {
+          await this.inventoryRepository.update({ productId }, { orderQue: 0 });
         }
-
-        await this.InventoryItemItemRepository.increment(
-          { productId, locationId: rest?.locationId },
+        await this.inventoryRepository.increment(
+          { productId },
           'orderQue',
           productQuantity,
         );
+
+        const existingInventoryItem =
+          await this.InventoryItemItemRepository.findOne({
+            where: { productId, locationId: rest?.locationId },
+          });
+
+        //
+        if (!existingInventoryItem) {
+          const newInventoryItems =
+            await this.InventoryItemItemRepository.create({
+              locationId: rest?.locationId,
+              productId: productId,
+              quantity: 0,
+              orderQue: productQuantity,
+              inventoryId: existingInventory.id,
+            });
+
+          await this.InventoryItemItemRepository.save(newInventoryItems);
+        } else {
+          if (!existingInventoryItem?.orderQue) {
+            await this.InventoryItemItemRepository.update(
+              { productId, locationId: rest?.locationId },
+              { orderQue: 0 },
+            );
+          }
+
+          await this.InventoryItemItemRepository.increment(
+            { productId, locationId: rest?.locationId },
+            'orderQue',
+            productQuantity,
+          );
+        }
+      }
+    }
+
+    // if order status hold then this section will be execute
+    if (payload?.statusId === 3) {
+      for (const item of products) {
+        const { productId, productQuantity } = item;
+        const existingInventory = await this.inventoryRepository.findOne({
+          where: { productId },
+        });
+        if (!existingInventory?.hoildQue) {
+          await this.inventoryRepository.update({ productId }, { hoildQue: 0 });
+        }
+        await this.inventoryRepository.increment(
+          { productId },
+          'hoildQue',
+          productQuantity,
+        );
+
+        const existingInventoryItem =
+          await this.InventoryItemItemRepository.findOne({
+            where: { productId, locationId: rest?.locationId },
+          });
+
+        //
+        if (!existingInventoryItem) {
+          const newInventoryItems =
+            await this.InventoryItemItemRepository.create({
+              locationId: rest?.locationId,
+              productId: productId,
+              quantity: 0,
+              hoildQue: productQuantity,
+              inventoryId: existingInventory.id,
+            });
+
+          await this.InventoryItemItemRepository.save(newInventoryItems);
+        } else {
+          if (!existingInventoryItem?.hoildQue) {
+            await this.InventoryItemItemRepository.update(
+              { productId, locationId: rest?.locationId },
+              { hoildQue: 0 },
+            );
+          }
+
+          await this.InventoryItemItemRepository.increment(
+            { productId, locationId: rest?.locationId },
+            'hoildQue',
+            productQuantity,
+          );
+        }
       }
     }
     return result;
@@ -775,7 +827,7 @@ export class OrderService {
         await queryRunner.release();
       }
     }
-
+    //  cancel order
     if (data?.statusId === 4 && (currentStatus === 5 || currentStatus === 6)) {
       const queryRunner = this.dataSource.createQueryRunner();
       await queryRunner.connect();
@@ -992,6 +1044,155 @@ export class OrderService {
       }
     }
 
+    if (data?.statusId === 2 && (currentStatus === 1 || currentStatus === 4)) {
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        for (const order of orders) {
+          const products = await this.productsRepository.find({
+            where: { orderId: order.id },
+          });
+
+          for (const item of products) {
+            const { productId, productQuantity } = item;
+            const existingInventory = await this.inventoryRepository.findOne({
+              where: { productId },
+            });
+            if (!existingInventory?.orderQue) {
+              await this.inventoryRepository.update(
+                { productId },
+                { orderQue: 0 },
+              );
+            }
+            await this.inventoryRepository.increment(
+              { productId },
+              'orderQue',
+              productQuantity,
+            );
+
+            const existingInventoryItem =
+              await this.InventoryItemItemRepository.findOne({
+                where: { productId, locationId: order?.locationId },
+              });
+
+            //
+            if (!existingInventoryItem) {
+              const newInventoryItems =
+                await this.InventoryItemItemRepository.create({
+                  locationId: order?.locationId,
+                  productId: productId,
+                  quantity: 0,
+                  orderQue: productQuantity,
+                  inventoryId: existingInventory.id,
+                });
+
+              await this.InventoryItemItemRepository.save(newInventoryItems);
+            } else {
+              if (!existingInventoryItem?.orderQue) {
+                await this.InventoryItemItemRepository.update(
+                  { productId, locationId: order?.locationId },
+                  { orderQue: 0 },
+                );
+              }
+
+              await this.InventoryItemItemRepository.increment(
+                { productId, locationId: order?.locationId },
+                'orderQue',
+                productQuantity,
+              );
+            }
+          }
+        }
+
+        // Commit transaction
+        await queryRunner.commitTransaction();
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        throw new ApiError(
+          HttpStatus.INTERNAL_SERVER_ERROR,
+          error.message || 'Failed to update inventory',
+        );
+      } finally {
+        await queryRunner.release();
+      }
+    }
+    if (data?.statusId === 3 && currentStatus === 1) {
+      const queryRunner = this.dataSource.createQueryRunner();
+      await queryRunner.connect();
+      await queryRunner.startTransaction();
+
+      try {
+        for (const order of orders) {
+          const products = await this.productsRepository.find({
+            where: { orderId: order.id },
+          });
+
+          for (const item of products) {
+            const { productId, productQuantity } = item;
+            const existingInventory = await this.inventoryRepository.findOne({
+              where: { productId },
+            });
+            if (!existingInventory?.hoildQue) {
+              await this.inventoryRepository.update(
+                { productId },
+                { hoildQue: 0 },
+              );
+            }
+            await this.inventoryRepository.increment(
+              { productId },
+              'hoildQue',
+              productQuantity,
+            );
+
+            const existingInventoryItem =
+              await this.InventoryItemItemRepository.findOne({
+                where: { productId, locationId: order?.locationId },
+              });
+
+            //
+            if (!existingInventoryItem) {
+              const newInventoryItems =
+                await this.InventoryItemItemRepository.create({
+                  locationId: order?.locationId,
+                  productId: productId,
+                  quantity: 0,
+                  orderQue: productQuantity,
+                  inventoryId: existingInventory.id,
+                });
+
+              await this.InventoryItemItemRepository.save(newInventoryItems);
+            } else {
+              if (!existingInventoryItem?.orderQue) {
+                await this.InventoryItemItemRepository.update(
+                  { productId, locationId: order?.locationId },
+                  { hoildQue: 0 },
+                );
+              }
+
+              await this.InventoryItemItemRepository.increment(
+                { productId, locationId: order?.locationId },
+                'hoildQue',
+                productQuantity,
+              );
+            }
+          }
+        }
+
+        // Commit transaction
+        await queryRunner.commitTransaction();
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
+        throw new ApiError(
+          HttpStatus.INTERNAL_SERVER_ERROR,
+          error.message || 'Failed to update inventory',
+        );
+      } finally {
+        await queryRunner.release();
+      }
+    }
+
     await this.orderRepository.update(
       { id: In(orderIds) },
       { ...data, previousStatus: currentStatus },
@@ -1010,7 +1211,6 @@ export class OrderService {
     }));
 
     await this.orderLogsRepository.save(orderLogs);
-
     return updatedOrders;
   }
   // change hold status
@@ -1033,7 +1233,6 @@ export class OrderService {
     await queryRunner.startTransaction();
 
     try {
-      const productUpdates = [];
       for (const order of orders) {
         const products = await this.productsRepository.find({
           where: { orderId: order.id },
@@ -1043,7 +1242,6 @@ export class OrderService {
           const inventory = await this.inventoryRepository.findOne({
             where: { productId: product.productId },
           });
-
           const inventoryItem = await this.InventoryItemItemRepository.findOne({
             where: {
               productId: product.productId,
@@ -1051,7 +1249,7 @@ export class OrderService {
             },
           });
 
-          if (order?.previousStatus === '2' && data?.statusId !== 4) {
+          if ((order?.previousStatus === '2' || !order?.previousStatus) && data?.statusId !== 4) {
             if (inventory) {
               // productUpdates.push(
               //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
@@ -1151,10 +1349,17 @@ export class OrderService {
               );
             }
           }
-          await this.orderRepository.update(
-            { id: order.id },
-            { statusId: +order.previousStatus },
-          );
+          if (data?.statusId === 4) {
+            await this.orderRepository.update(
+              { id: order.id },
+              { statusId: data?.statusId },
+            );
+          } else {
+            await this.orderRepository.update(
+              { id: order.id },
+              { statusId: +order.previousStatus?+order.previousStatus:2 },
+            );
+          }
         }
       }
       // Commit transaction
@@ -1206,4 +1411,97 @@ export class OrderService {
       order: { createdAt: 'DESC' },
     });
   }
+
+
+
+  // return order 
+
+  async returnOrders(payload: { orderIds: string[]; agentId: string }) {
+  const { orderIds, agentId } = payload;
+
+  const orders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
+
+ 
+
+  if (orders.length !== orderIds.length) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+  }
+
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    for (const order of orders) {
+      const products = await queryRunner.manager.find(this.productsRepository.target, {
+        where: { orderId: order.id },
+      });
+      console.log(products,"products===================");
+
+      for (const product of products) {
+        const [inventory, inventoryItem] = await Promise.all([
+          queryRunner.manager.findOne(this.inventoryRepository.target, {
+            where: { productId: product.productId },
+          }),
+          queryRunner.manager.findOne(this.InventoryItemItemRepository.target, {
+            where: {
+              productId: product.productId,
+              locationId: order.locationId,
+            },
+          }),
+        ]);
+
+        if (inventory) {
+          inventory.stock += product.productQuantity;
+          await queryRunner.manager.save(this.inventoryRepository.target, inventory);
+        }
+
+        if (inventoryItem) {
+          inventoryItem.quantity += product.productQuantity;
+          await queryRunner.manager.save(this.InventoryItemItemRepository.target, inventoryItem);
+        }
+      }
+
+      await queryRunner.manager.update(
+        this.orderRepository.target,
+        { id: order.id },
+        { statusId: 10 }
+      );
+    }
+
+    // Get updated orders WITH status (inside transaction)
+    const updatedOrders = await queryRunner.manager.find(this.orderRepository.target, {
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
+
+    // Create and save order logs (inside transaction)
+    const orderLogs = updatedOrders.map((updatedOrder) => {
+      const originalOrder = orders.find((o) => o.id === updatedOrder.id);
+      return {
+        orderId: updatedOrder.id,
+        agentId,
+        action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
+        previousValue: null,
+      };
+    });
+
+    await queryRunner.manager.save(this.orderLogsRepository.target, orderLogs);
+
+    await queryRunner.commitTransaction();
+    return updatedOrders;
+  } catch (error) {
+    await queryRunner.rollbackTransaction();
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to return orders'
+    );
+  } finally {
+    await queryRunner.release();
+  }
+}
+
 }
