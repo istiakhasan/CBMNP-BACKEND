@@ -14,7 +14,7 @@ async function bootstrap() {
     }),
   );
   app.enableCors({
-    origin: ['https://cbmnp-frontend-nu.vercel.app', 'http://localhost:3000','http://localhost:3001'],
+    origin: ['https://cbmnp-frontend-nu.vercel.app', 'http://localhost:3000','http://localhost:3001','http://31.97.60.104:3000'],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
     allowedHeaders: [
