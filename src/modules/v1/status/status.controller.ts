@@ -55,7 +55,6 @@ export class StatusController {
     ];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
-        // Ensure array-like query params are treated as arrays
         if (Array.isArray(query[key])) {
           searchFilterOptions[key] = query[key];
         } else if (key === 'statusId' || key === 'currier') {

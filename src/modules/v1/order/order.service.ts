@@ -22,6 +22,7 @@ import { DataSource } from 'typeorm';
 import { RequisitionService } from '../requsition/requsition.service';
 import axios from 'axios';
 import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
+import { OrderProductReturn } from './entities/return_damage.entity';
 @Injectable()
 export class OrderService {
   constructor(
@@ -50,6 +51,8 @@ export class OrderService {
     private readonly InventoryItemItemRepository: Repository<InventoryItem>,
     @InjectRepository(DeliveryPartner)
     private readonly deliveryPartnerRepository: Repository<DeliveryPartner>,
+    @InjectRepository(OrderProductReturn)
+    private readonly orderProductReturnRepository: Repository<OrderProductReturn>,
 
     private readonly requisitionService: RequisitionService,
   ) {}
@@ -374,7 +377,7 @@ export class OrderService {
   async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['paymentHistory', 'comments', 'comments.user'],
+      relations: ['paymentHistory', 'comments', 'comments.user','productReturns','productReturns.product'],
     });
 
     if (!order) {
@@ -1249,7 +1252,10 @@ export class OrderService {
             },
           });
 
-          if ((order?.previousStatus === '2' || !order?.previousStatus) && data?.statusId !== 4) {
+          if (
+            (order?.previousStatus === '2' || !order?.previousStatus) &&
+            data?.statusId !== 4
+          ) {
             if (inventory) {
               // productUpdates.push(
               //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
@@ -1357,7 +1363,7 @@ export class OrderService {
           } else {
             await this.orderRepository.update(
               { id: order.id },
-              { statusId: +order.previousStatus?+order.previousStatus:2 },
+              { statusId: +order.previousStatus ? +order.previousStatus : 2 },
             );
           }
         }
@@ -1412,96 +1418,174 @@ export class OrderService {
     });
   }
 
+  // return order
 
-
-  // return order 
-
-  async returnOrders(payload: { orderIds: string[]; agentId: string }) {
-  const { orderIds, agentId } = payload;
-
-  const orders = await this.orderRepository.find({
-    where: { id: In(orderIds) },
-    relations: ['status'],
-  });
-
- 
-
-  if (orders.length !== orderIds.length) {
-    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-  }
-
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    for (const order of orders) {
-      const products = await queryRunner.manager.find(this.productsRepository.target, {
-        where: { orderId: order.id },
-      });
-      console.log(products,"products===================");
-
-      for (const product of products) {
-        const [inventory, inventoryItem] = await Promise.all([
-          queryRunner.manager.findOne(this.inventoryRepository.target, {
-            where: { productId: product.productId },
-          }),
-          queryRunner.manager.findOne(this.InventoryItemItemRepository.target, {
-            where: {
-              productId: product.productId,
-              locationId: order.locationId,
-            },
-          }),
-        ]);
-
-        if (inventory) {
-          inventory.stock += product.productQuantity;
-          await queryRunner.manager.save(this.inventoryRepository.target, inventory);
-        }
-
-        if (inventoryItem) {
-          inventoryItem.quantity += product.productQuantity;
-          await queryRunner.manager.save(this.InventoryItemItemRepository.target, inventoryItem);
-        }
-      }
-
-      await queryRunner.manager.update(
-        this.orderRepository.target,
-        { id: order.id },
-        { statusId: 10 }
-      );
-    }
-
-    // Get updated orders WITH status (inside transaction)
-    const updatedOrders = await queryRunner.manager.find(this.orderRepository.target, {
+  async returnOrders(payload: {
+    orderIds: string[];
+    agentId: string;
+    statusId: number;
+    warehouse: string;
+    returnableProducts: any;
+  }) {
+    const { orderIds, agentId, statusId, warehouse, returnableProducts } =
+      payload; 
+    // Pre-fetch orders with status
+    const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
     });
 
-    // Create and save order logs (inside transaction)
-    const orderLogs = updatedOrders.map((updatedOrder) => {
-      const originalOrder = orders.find((o) => o.id === updatedOrder.id);
-      return {
-        orderId: updatedOrder.id,
-        agentId,
-        action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
-        previousValue: null,
-      };
-    });
+    if (orders.length !== orderIds.length) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+    }
 
-    await queryRunner.manager.save(this.orderLogsRepository.target, orderLogs);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    await queryRunner.commitTransaction();
-    return updatedOrders;
-  } catch (error) {
-    await queryRunner.rollbackTransaction();
-    throw new ApiError(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      error.message || 'Failed to return orders'
-    );
-  } finally {
-    await queryRunner.release();
+    try {
+      for (const order of orders) {
+        const products = await queryRunner.manager.find(
+          this.productsRepository.target,
+          {
+            where: { orderId: order.id },
+          },
+        );
+        // if full return then execute this part
+        if (statusId === 10) {
+          for (const product of products) {
+            // Fetch inventory and inventoryItem within the transaction
+            const inventory = await queryRunner.manager.findOne(
+              this.inventoryRepository.target,
+              {
+                where: { productId: product.productId },
+              },
+            );
+
+            const inventoryItem = await queryRunner.manager.findOne(
+              this.InventoryItemItemRepository.target,
+              {
+                where: {
+                  productId: product.productId,
+                  locationId: warehouse,
+                },
+              },
+            );
+
+            // Update inventory stock
+            if (inventory) {
+              inventory.stock += product.productQuantity;
+              await queryRunner.manager.save(
+                this.inventoryRepository.target,
+                inventory,
+              );
+            }
+
+            // Update inventory item quantity
+            if (inventoryItem) {
+              inventoryItem.quantity += product.productQuantity;
+              await queryRunner.manager.save(
+                this.InventoryItemItemRepository.target,
+                inventoryItem,
+              );
+            }
+          }
+        }
+
+        //if partial  return then ex ecute this part
+
+        if (statusId === 12) {
+          for (const product of returnableProducts) {
+            const inventory = await queryRunner.manager.findOne(
+              this.inventoryRepository.target,
+              {
+                where: { productId: product.productId },
+              },
+            );
+            const inventoryItem = await queryRunner.manager.findOne(
+              this.InventoryItemItemRepository.target,
+              {
+                where: {
+                  productId: product.productId,
+                  locationId: warehouse,
+                },
+              },
+            );
+
+            if (inventory) {
+              inventory.stock += product.returnQuantity;
+              await queryRunner.manager.save(
+                this.inventoryRepository.target,
+                inventory,
+              );
+            }
+
+            if (inventoryItem) {
+              inventoryItem.quantity += product.returnQuantity;
+              await queryRunner.manager.save(
+                this.InventoryItemItemRepository.target,
+                inventoryItem,
+              );
+            }
+
+            // update return damage table
+
+            const returnDamagePayload = {
+              orderId: Number(orderIds[0]),
+              productId: product?.productId,
+              returnQuantity: product?.returnQuantity,
+              damageQuantity: product?.damageQuantity,
+              reason:
+                'Customer returned due to wrong size and one item was damaged',
+              remarks: 'Item returned via courier on 2025-07-25',
+              returnDate: new Date(),
+            };
+            console.log(returnDamagePayload,"check");
+
+            await this.orderProductReturnRepository.save(returnDamagePayload)
+          }
+        }
+
+        await queryRunner.manager.update(
+          this.orderRepository.target,
+          { id: order.id },
+          { statusId: statusId },
+        );
+      }
+
+      const updatedOrders = await queryRunner.manager.find(
+        this.orderRepository.target,
+        {
+          where: { id: In(orderIds) },
+          relations: ['status'],
+        },
+      );
+      const orderLogs = updatedOrders.map((updatedOrder) => {
+        const originalOrder = orders.find((o) => o.id === updatedOrder.id);
+        return {
+          orderId: updatedOrder.id,
+          agentId,
+          action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
+          previousValue: null,
+        };
+      });
+
+      await queryRunner.manager.save(
+        this.orderLogsRepository.target,
+        orderLogs,
+      );
+
+      await queryRunner.commitTransaction();
+
+      return updatedOrders;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw new ApiError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        error.message || 'Failed to return orders',
+      );
+    } finally {
+      await queryRunner.release();
+    }
   }
-}
-
 }

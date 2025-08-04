@@ -18,6 +18,7 @@ import { Comments } from '../../Comments/entities/orderComment.entity';
 import { OrdersLog } from './orderlog.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
 import { DeliveryPartner } from '../../delivery-partner/entities/delivery-partner.entity';
+import { OrderProductReturn } from './return_damage.entity';
 
 @Entity({ name: 'orders' })
 export class Order {
@@ -130,7 +131,8 @@ export class Order {
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
-
+@OneToMany(() => OrderProductReturn, (returns) => returns.order)
+productReturns: OrderProductReturn[];
 
   @ManyToOne(() => DeliveryPartner,(partner)=>partner.orders, { eager: true })
   @JoinColumn({ name: 'currier' })

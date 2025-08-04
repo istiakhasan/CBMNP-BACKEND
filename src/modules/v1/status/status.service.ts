@@ -11,9 +11,7 @@ export class StatusService {
   ) {}
 
   async createStatus(data: OrderStatus) {
-    console.log(data,"data");
     const result = await this.statusRepository.save(data);
-    console.log(result,"resutl");
     return result;
   }
 
@@ -26,7 +24,16 @@ export class StatusService {
     }
     if(query?.label==="In-transit"){
         result = await this.statusRepository.findBy({
-          label: In(["Returned","Delivered"])
+          label: In(["Pending-Return","Delivered"])
+    });
+    }
+    if(query?.label==="Pending-Return"){
+        result = await this.statusRepository.findBy({
+          label: In([
+            "Returned",
+            "Partial-Return",
+            "Damage"
+          ])
     });
     }
     if(query?.label==="Pending"){
@@ -115,6 +122,7 @@ export class StatusService {
 
   const statusCounts = await queryBuilder
     .select('status.label', 'label')
+    .addSelect('status.value', 'id')
     .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
     .groupBy('status.value')
     .addGroupBy('status.label')

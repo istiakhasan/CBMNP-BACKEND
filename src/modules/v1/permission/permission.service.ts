@@ -12,12 +12,13 @@ export class PermissionService {
     private readonly permissionRepository: Repository<Permission>,
   ) {}
   async create(createPermissionDto: Permission) {
+    console.log(createPermissionDto,"abcd");
     const isexist = await this.permissionRepository.findOne({
       where: {
         label: createPermissionDto.label,
       },
     });
-    if (isexist) {
+    if (!!isexist) {
       throw new ApiError(
         HttpStatus.FORBIDDEN,
         'Permission label already exist',
