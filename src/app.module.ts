@@ -32,6 +32,7 @@ import { DashboardModule } from './modules/v1/dashboard/dashboard.module';
 import { DivisionsModule } from './modules/v1/divisions/divisions.module';
 import { DistrictsModule } from './modules/v1/districts/districts.module';
 import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_charge.module';
+import { OrderModuleV2 } from './modules/v2/order/order.module';
 
 @Module({
   imports: [
@@ -65,7 +66,8 @@ import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_char
     DashboardModule,
     DivisionsModule,
     DistrictsModule,
-    DelivaryChargeModule
+    DelivaryChargeModule,
+    OrderModuleV2
   ],
   controllers: [AppController],
   providers: [

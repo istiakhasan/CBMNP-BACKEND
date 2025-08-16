@@ -248,6 +248,151 @@ export class OrderService {
     }
     return result;
   }
+  async createPosOrder(payload: Order, organizationId: string) {
+    const {
+      customerId,
+      receiverPhoneNumber,
+      products,
+      discount = 0,
+      paymentHistory = [],
+      shippingCharge = 0,
+      ...rest
+    } = payload;
+
+    if (!products || products.length === 0) {
+      throw new Error('Order must include at least one product');
+    }
+
+    if (
+      !organizationId ||
+      !(await this.organizationRepository.findOne({
+        where: { id: organizationId },
+      }))
+    ) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
+    }
+
+    const orderNumber = generateUniqueOrderNumber();
+    const validatedProducts: any[] = [];
+    let productValue = 0;
+
+    for (const product of products) {
+      const existingProduct = await this.productRepository.findOne({
+        where: { id: product.productId },
+      });
+      if (!existingProduct) {
+        throw new NotFoundException(
+          `Product with ID ${product.productId} not found`,
+        );
+      }
+
+      const subtotal = product.productQuantity * existingProduct.salePrice;
+      productValue += subtotal;
+
+      validatedProducts.push({
+        productId: product.productId,
+        productQuantity: product.productQuantity,
+        productPrice: existingProduct.salePrice,
+        subtotal,
+      });
+    }
+    const totalPaidAmount = paymentHistory.reduce(
+      (total, payment) => total + Number(payment.paidAmount),
+      0,
+    );
+    const grandTotal = productValue + Number(shippingCharge) - Number(discount);
+    const totalReceivableAmount = grandTotal - totalPaidAmount;
+
+    // generate invoice number
+    const lastOrder = await this.orderRepository
+      .createQueryBuilder('order')
+      .orderBy('order.createdAt', 'DESC')
+      .take(1)
+      .getOne();
+    const lastUserId = lastOrder?.invoiceNumber?.substring(3);
+    const currentId = lastUserId || (0).toString().padStart(4, '0');
+    let incrementedId = (parseInt(currentId) + 1).toString().padStart(4, '0');
+    incrementedId = `SO-${incrementedId}`;
+    const result = await this.orderRepository.save({
+      orderNumber,
+      paymentHistory: paymentHistory,
+      customerId,
+      receiverPhoneNumber,
+      products: validatedProducts,
+      currier: payload.currier,
+      orderSource: payload.orderSource,
+      shippingCharge,
+      totalPrice: grandTotal,
+      productValue,
+      totalPaidAmount,
+      totalReceiveAbleAmount: totalReceivableAmount,
+      discount,
+      invoiceNumber: incrementedId,
+      organizationId,
+      ...rest,
+    });
+    await this.orderLogsRepository.save({
+      orderId: result.id,
+      agentId: payload.agentId,
+      action: 'The Order created',
+      previousValue: null,
+    });
+    if (payload?.statusId === 8) {
+      for (const item of products) {
+        const { productId, productQuantity } = item;
+        const existingInventory = await this.inventoryRepository.findOne({
+          where: { productId },
+        });
+        if (!existingInventory?.orderQue) {
+          await this.inventoryRepository.update({ productId }, { orderQue: 0 });
+        }
+        await this.inventoryRepository.decrement(
+          { productId },
+          'stock',
+          productQuantity,
+        );
+
+        const existingInventoryItem =
+          await this.InventoryItemItemRepository.findOne({
+            where: { productId, locationId: rest?.locationId },
+          });
+
+        //
+        if (!existingInventoryItem) {
+          const newInventoryItems =
+            await this.InventoryItemItemRepository.create({
+              locationId: rest?.locationId,
+              productId: productId,
+              quantity: 0,
+              inventoryId: existingInventory.id,
+            });
+
+          await this.InventoryItemItemRepository.save(newInventoryItems);
+        } else {
+          if (!existingInventoryItem?.orderQue) {
+            await this.InventoryItemItemRepository.update(
+              { productId, locationId: rest?.locationId },
+              { orderQue: 0 },
+            );
+          }
+
+          await this.InventoryItemItemRepository.decrement(
+            { productId, locationId: rest?.locationId },
+            'quantity',
+            productQuantity,
+          );
+        }
+      }
+    }
+
+
+    return await this.orderRepository.findOne({
+  where: { id: result.id },
+  relations: {
+    products: { product: true }
+  }
+})
+  }
 
   async getOrders(options, filterOptions, organizationId) {
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
@@ -1527,9 +1672,6 @@ export class OrderService {
                 inventoryItem,
               );
             }
-
-            // update return damage table
-
             const returnDamagePayload = {
               orderId: Number(orderIds[0]),
               productId: product?.productId,
@@ -1540,8 +1682,6 @@ export class OrderService {
               remarks: 'Item returned via courier on 2025-07-25',
               returnDate: new Date(),
             };
-            console.log(returnDamagePayload,"check");
-
             await this.orderProductReturnRepository.save(returnDamagePayload)
           }
         }

@@ -48,6 +48,19 @@ export class InventoryController {
           };
         });
   }
+  @Get('/warehouse-wise-stock')
+  wirehouseWiseStock(@Req() req:Request,@Query() query) {
+    const organizationId=req.headers['x-organization-id']
+       return catchAsync(async ():Promise<IResponse<any>> => {
+          const result = await this.inventoryService.getWarehouseWiseStock(organizationId,query?.warehouseId);
+          return {
+            success: true,
+            message: 'stock retrived successfully',
+            statusCode: HttpStatus.OK,
+            data: result,
+          };
+        });
+  }
   @Get('/:productId')
   loadStockByProductId(@Param('productId') productId:string) {
        return catchAsync(async ():Promise<IResponse<Inventory>> => {

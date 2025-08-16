@@ -63,6 +63,11 @@ export class OrderController {
     const organizationId=req.headers['x-organization-id']
     return await this.orderService.createOrder(payload,organizationId as string);
   }
+  @Post('/pos')
+  async createPosOrder(@Body() payload: any,@Req() req:Request): Promise<Order> {
+    const organizationId=req.headers['x-organization-id']
+    return await this.orderService.createPosOrder(payload,organizationId as string);
+  }
   @Post('/payment/:id')
   async updatePayment(@Param('id') id: number,@Body() data:PaymentHistory){
     return  catchAsync(async():Promise<IResponse<any>>=>{

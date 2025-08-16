@@ -1,6 +1,16 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, Req, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Patch,
+  Param,
+  Delete,
+  Req,
+  HttpStatus,
+  Query,
+} from '@nestjs/common';
 import { SupplierService } from './supplier.service';
-import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { Supplier } from './entities/supplier.entity';
 import { IResponse } from '../../../util/sendResponse';
@@ -11,34 +21,77 @@ export class SupplierController {
   constructor(private readonly supplierService: SupplierService) {}
 
   @Post()
-    create(@Body() createSupplierDto: Supplier,@Req() req:Request) {
-      const organizationId=req.headers['x-organization-id']
-      return catchAsync(async (): Promise<IResponse<Supplier>> => {
-        const result = await this.supplierService.create({...createSupplierDto,organizationId});
-        return {
-          success: true,
-          message: 'Supplier created successfully',
-          statusCode: HttpStatus.OK,
-          data: result,
-        };
+  create(@Body() createSupplierDto: Supplier, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
+    return catchAsync(async (): Promise<IResponse<Supplier>> => {
+      const result = await this.supplierService.create({
+        ...createSupplierDto,
+        organizationId,
       });
+      return {
+        success: true,
+        message: 'Supplier created successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    });
+  }
+  @Get('get-all')
+  async getOrders(@Query() query, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
     }
+    const searchFilterOptions = {};
+    const filterKeys = [
+      'searchTerm',
+      'statusId',
+      'locationId',
+      'startDate',
+      'endDate',
+      'currier',
+      'productId',
+    ];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result = await this.supplierService.getAllSupplier(
+      options,
+      searchFilterOptions,
+      organizationId,
+    );
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Order retrieved successfully',
+      data: result?.data,
+      meta: {
+        page: result?.page,
+        limit: result?.limit,
+        total: result?.total,
+      },
+    };
+  }
 
-
-
-    @Get('/options')
-    async warehouseOptions(@Req() req:Request){
-      const organizationId=req.headers['x-organization-id']
-     return catchAsync(async(): Promise<IResponse<Supplier[]>>=>{
+  @Get('/options')
+  async warehouseOptions(@Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
+    return catchAsync(async (): Promise<IResponse<Supplier[]>> => {
       const result = await this.supplierService.loadOptions(organizationId);
       return {
         success: true,
         statusCode: HttpStatus.OK,
-        message: 'Warehouse options retrieved successfully',
-        data: result
+        message: 'Supplier options retrieved successfully',
+        data: result,
       };
-     })
-    }
+    });
+  }
 
   @Get()
   findAll() {
@@ -51,8 +104,19 @@ export class SupplierController {
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() updateSupplierDto: UpdateSupplierDto) {
-    return this.supplierService.update(+id, updateSupplierDto);
+  update(
+    @Param('id') id: string,
+    @Body() updateSupplierDto: UpdateSupplierDto,
+  ) {
+    return catchAsync(async (): Promise<IResponse<Supplier>> => {
+      const result = await this.supplierService.update(id, updateSupplierDto);
+      return {
+        success: true,
+        statusCode: HttpStatus.OK,
+        message: 'Supplier retrieved successfully',
+        data: result,
+      };
+    });
   }
 
   @Delete(':id')
