@@ -2,6 +2,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Like, Not, Repository } from 'typeorm';
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from './entities/status.entity';
+import { Products } from '../order/entities/products.entity';
 
 @Injectable()
 export class StatusService {
@@ -68,7 +69,7 @@ export class StatusService {
     }
     return result;
   }
- async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
+async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
   const queryBuilder = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
@@ -93,42 +94,44 @@ export class StatusService {
     });
   }
 
-  // if (filterOptions.startDate) {
-  //   queryBuilder.andWhere('orders.createdAt >= :startDate', {
-  //     startDate: filterOptions.startDate,
-  //   });
-  // }
-
-  // if (filterOptions.endDate) {
-  //   queryBuilder.andWhere('orders.createdAt <= :endDate', {
-  //     endDate: filterOptions.endDate,
-  //   });
-  // }
-   if (filterOptions?.startDate && filterOptions?.endDate) {
-      queryBuilder.andWhere(
-        'orders.intransitTime BETWEEN :startDate AND :endDate',
-        {
-          startDate: new Date(filterOptions.startDate),
-          endDate: new Date(filterOptions.endDate),
-        },
-      );
-    }
-  if (filterOptions.searchTerm) {
+  if (filterOptions?.startDate && filterOptions?.endDate) {
     queryBuilder.andWhere(
-      `(orders.orderNumber ILIKE :searchTerm )`,
-      { searchTerm: `%${filterOptions.searchTerm}%` }
+      'orders.intransitTime BETWEEN :startDate AND :endDate',
+      {
+        startDate: new Date(filterOptions.startDate),
+        endDate: new Date(filterOptions.endDate),
+      },
     );
   }
 
+  if (filterOptions.searchTerm) {
+    queryBuilder.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
+      searchTerm: `%${filterOptions.searchTerm}%`,
+    });
+  }
+
+  // 🔥 Optimized product filter using subquery
+  if (filterOptions.productIds?.length) {
+    queryBuilder.andWhere(qb => {
+      const subQuery = qb.subQuery()
+        .select('p.orderId')
+        .from(Products, 'p')
+        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .getQuery();
+      return 'orders.id IN ' + subQuery;
+    });
+  }
+
+  // Get counts per status
   const statusCounts = await queryBuilder
     .select('status.label', 'label')
     .addSelect('status.value', 'id')
-    .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
+    .addSelect('COUNT(orders.id)', 'count') // no DISTINCT needed due to subquery
     .groupBy('status.value')
     .addGroupBy('status.label')
     .getRawMany();
 
-  // Reuse similar filtering for total count
+  // -------- Total Count Query --------
   const totalQuery = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
@@ -152,39 +155,42 @@ export class StatusService {
     });
   }
 
-  // if (filterOptions.startDate) {
-  //   totalQuery.andWhere('orders.createdAt >= :startDate', {
-  //     startDate: filterOptions.startDate,
-  //   });
-  // }
-
-  // if (filterOptions.endDate) {
-  //   totalQuery.andWhere('orders.createdAt <= :endDate', {
-  //     endDate: filterOptions.endDate,
-  //   });
-  // }
-   if (filterOptions?.startDate && filterOptions?.endDate) {
-      totalQuery.andWhere(
-        'orders.intransitTime BETWEEN :startDate AND :endDate',
-        {
-          startDate: new Date(filterOptions.startDate),
-          endDate: new Date(filterOptions.endDate),
-        },
-      );
-    }
-  if (filterOptions.searchTerm) {
+  if (filterOptions?.startDate && filterOptions?.endDate) {
     totalQuery.andWhere(
-      `(orders.orderNumber ILIKE :searchTerm)`,
-      { searchTerm: `%${filterOptions.searchTerm}%` }
+      'orders.intransitTime BETWEEN :startDate AND :endDate',
+      {
+        startDate: new Date(filterOptions.startDate),
+        endDate: new Date(filterOptions.endDate),
+      },
     );
   }
 
+  if (filterOptions.searchTerm) {
+    totalQuery.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
+      searchTerm: `%${filterOptions.searchTerm}%`,
+    });
+  }
+
+  // 🔥 Product filter in total count using subquery
+  if (filterOptions.productIds?.length) {
+    totalQuery.andWhere(qb => {
+      const subQuery = qb.subQuery()
+        .select('p.orderId')
+        .from(Products, 'p')
+        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .getQuery();
+      return 'orders.id IN ' + subQuery;
+    });
+  }
+
   const totalOrders = await totalQuery
-    .select('COALESCE(COUNT(orders.id), 0)', 'count')
+    .select('COUNT(orders.id)', 'count')
     .getRawOne();
 
   return [...statusCounts, { label: 'All', count: totalOrders?.count }];
 }
+
+
 
   
 }

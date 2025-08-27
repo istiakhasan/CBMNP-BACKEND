@@ -20,14 +20,17 @@ export class UserService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Email Id already exist');
     }
     const isInternalIdExistInOrganization = await this.userRepository.findOne({
-      where: { internalId: data?.internalId, organizationId: data?.organizationId },
+      where: {
+        internalId: data?.internalId,
+        organizationId: data?.organizationId,
+      },
     });
     if (isInternalIdExistInOrganization) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Internal Id already exist');
     }
-    if(data?.userId){
+    if (data?.userId) {
       const isUserIdExist = await this.userRepository.findOne({
-        where: { userId: data?.userId,organizationId:data?.organizationId },
+        where: { userId: data?.userId, organizationId: data?.organizationId },
       });
       if (isUserIdExist) {
         throw new ApiError(HttpStatus.BAD_REQUEST, 'User Id already exist');
@@ -55,7 +58,7 @@ export class UserService {
 
     const result = await this.userRepository.save({
       ...rest,
-      userId:incrementedId,
+      userId: incrementedId,
       password: hashPassword,
     });
     return result;
@@ -109,6 +112,14 @@ export class UserService {
       limit,
     };
   }
+  async findAllUserOptions(organizationId: any) {
+    const option = await this.userRepository
+      .createQueryBuilder('user')
+      .where('user.organizationId = :organizationId', { organizationId })
+      .select(['user.userId AS value', 'user.name AS label'])
+      .getRawMany();
+    return option;
+  }
 
   async findOne(id: string) {
     const result = await this.userRepository.findOne({
@@ -139,49 +150,49 @@ export class UserService {
     };
   }
 
- async update(id: number, updateUserDto: Partial<Users>) {
-  const user = await this.userRepository.findOneBy({ id });
-  if (!user) {
-    throw new NotFoundException(`User with ID ${id} not found`);
-  }
-
-
-  if (updateUserDto?.email && updateUserDto?.organizationId) {
-    const isEmailExistInOrganization = await this.userRepository.findOne({
-      where: {
-        email: updateUserDto.email,
-        organizationId: updateUserDto.organizationId,
-        id: Not(id),
-      },
-    });
-
-    if (isEmailExistInOrganization) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Email already exists in this organization');
+  async update(id: number, updateUserDto: Partial<Users>) {
+    const user = await this.userRepository.findOneBy({ id });
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
     }
-  }
 
+    if (updateUserDto?.email && updateUserDto?.organizationId) {
+      const isEmailExistInOrganization = await this.userRepository.findOne({
+        where: {
+          email: updateUserDto.email,
+          organizationId: updateUserDto.organizationId,
+          id: Not(id),
+        },
+      });
 
-  if (updateUserDto?.userId) {
-    const isUserIdExist = await this.userRepository.findOne({
-      where: {
-        userId: updateUserDto.userId,
-        id: Not(id), 
-      },
-    });
-
-    if (isUserIdExist) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'User ID already exists');
+      if (isEmailExistInOrganization) {
+        throw new ApiError(
+          HttpStatus.BAD_REQUEST,
+          'Email already exists in this organization',
+        );
+      }
     }
+
+    if (updateUserDto?.userId) {
+      const isUserIdExist = await this.userRepository.findOne({
+        where: {
+          userId: updateUserDto.userId,
+          id: Not(id),
+        },
+      });
+
+      if (isUserIdExist) {
+        throw new ApiError(HttpStatus.BAD_REQUEST, 'User ID already exists');
+      }
+    }
+
+    await this.userRepository.update({ id }, updateUserDto);
+
+    return this.userRepository.findOne({
+      where: { id },
+      select: ['userId', 'name', 'updatedAt', 'active'],
+    });
   }
-
-  await this.userRepository.update({ id }, updateUserDto);
-
-  return this.userRepository.findOne({
-    where: { id },
-    select: ['userId', 'name', 'updatedAt', 'active'],
-  });
-}
-
 
   remove(id: number) {
     return `This action removes a #${id} user`;

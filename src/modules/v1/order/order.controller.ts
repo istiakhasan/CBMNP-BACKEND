@@ -1,10 +1,10 @@
-import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req, Res } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
 import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { PaymentHistory } from './entities/paymentHistory.entity';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 
 @Controller('v1/orders')
 export class OrderController {  
@@ -42,6 +42,55 @@ export class OrderController {
       }
    }
   }
+  @Get('/reports')
+  async getOrdersReports(@Query() query,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getOrdersReports(options,searchFilterOptions,organizationId);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Order retrieved successfully',
+      data:result?.data,
+      meta: {
+        total: result?.total,
+        page: result?.page,
+        limit: result?.limit,
+        totalAmount:result?.totalAmount,
+        damageQuantity:result?.damageQuantity,
+        totalReturnQty:result?.totalReturnQty,
+        totalPaidAmount:result?.totalPaidAmount,
+      }
+   }
+  }
+@Get('/download-reports')
+async downloadReports(@Query() query, @Req() req: Request, @Res() res: Response) {
+  const organizationId: any = req.headers['x-organization-id'];
+
+  const searchFilterOptions = {};
+  const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds'];
+  for (const key of filterKeys) {
+    if (query && Object.hasOwnProperty.call(query, key)) {
+      searchFilterOptions[key] = query[key];
+    }
+  }
+
+  return this.orderService.downloadOrdersExcel(searchFilterOptions, organizationId, res);
+}
+
   @Get('/logs/:id')
   async getOrdersLogs(@Param('id') id:number){
 

@@ -83,11 +83,11 @@ export class Order {
   requisitionId: string;
   @Column({ nullable: true })
   previousStatus: string;
-  // store status change time 
-  // store status change time 
-  // store status change time 
-  // store status change time 
-  // store status change time 
+  // store status change time
+  // store status change time
+  // store status change time
+  // store status change time
+  // store status change time
   @Column({ type: 'timestamp', nullable: true })
   intransitTime: Date;
 
@@ -131,10 +131,12 @@ export class Order {
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
-@OneToMany(() => OrderProductReturn, (returns) => returns.order)
-productReturns: OrderProductReturn[];
+  @OneToMany(() => OrderProductReturn, (returns) => returns.order)
+  productReturns: OrderProductReturn[];
 
-  @ManyToOne(() => DeliveryPartner,(partner)=>partner.orders, { eager: true })
+  @ManyToOne(() => DeliveryPartner, (partner) => partner.orders, {
+    eager: true,
+  })
   @JoinColumn({ name: 'currier' })
   partner: DeliveryPartner;
 

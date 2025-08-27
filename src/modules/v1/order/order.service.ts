@@ -2,7 +2,7 @@ import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
-
+import * as ExcelJS from 'exceljs';
 import { Products } from './entities/products.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
@@ -23,6 +23,8 @@ import { RequisitionService } from '../requsition/requsition.service';
 import axios from 'axios';
 import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
 import { OrderProductReturn } from './entities/return_damage.entity';
+import { Warehouse } from '../warehouse/entities/warehouse.entity';
+import { Response } from 'express';
 @Injectable()
 export class OrderService {
   constructor(
@@ -53,6 +55,8 @@ export class OrderService {
     private readonly deliveryPartnerRepository: Repository<DeliveryPartner>,
     @InjectRepository(OrderProductReturn)
     private readonly orderProductReturnRepository: Repository<OrderProductReturn>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepository: Repository<Warehouse>,
 
     private readonly requisitionService: RequisitionService,
   ) {}
@@ -516,6 +520,166 @@ export class OrderService {
       total,
       page,
       limit,
+    };
+  }
+  // get order reports
+  async getOrdersReports(options, filterOptions, organizationId) {
+    const { sortBy, sortOrder,limit,page,skip } = paginationHelpers(options);
+    const queryBuilder = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId });
+
+    if (filterOptions?.searchTerm) {
+      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+      queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', {
+        searchTerm,
+      });
+    }
+
+     if (filterOptions?.startDate && filterOptions?.endDate) {
+      const localStartDate = new Date(filterOptions.startDate);
+      const utcStartDate = new Date(
+        Date.UTC(
+          localStartDate.getFullYear(),
+          localStartDate.getMonth(),
+          localStartDate.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+
+      const localEndDate = new Date(filterOptions.endDate);
+      const utcEndDate = new Date(
+        Date.UTC(
+          localEndDate.getFullYear(),
+          localEndDate.getMonth(),
+          localEndDate.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+
+      queryBuilder.andWhere(
+        'orders.createdAt BETWEEN :startDate AND :endDate',
+        {
+          startDate: utcStartDate.toISOString(),
+          endDate: utcEndDate.toISOString(),
+        },
+      );
+    }
+
+     let statusIdss = filterOptions?.statusId;
+    if (statusIdss) {
+      statusIdss = Array.isArray(statusIdss) ? statusIdss : [statusIdss];
+      statusIdss = statusIdss.map(Number);
+      queryBuilder.andWhere('orders.statusId IN (:...statusIdss)', {
+        statusIdss,
+      });
+    }
+     let selesAgentIds = filterOptions?.agentIds;
+     if (selesAgentIds) {
+      selesAgentIds = Array.isArray(selesAgentIds) ? selesAgentIds : [selesAgentIds];
+      console.log(selesAgentIds,"check");
+      queryBuilder.andWhere('orders.agentId IN (:...selesAgentIds)', {
+        selesAgentIds,
+      });
+    }
+   const sumQuery = queryBuilder.clone();
+     const { totalAmount,damageQuantity,totalReturnQty,totalPaidAmount } = await sumQuery
+    .leftJoin('orders.productReturns','returnProducts')
+    .select('SUM(orders.totalPrice)', 'totalAmount')
+    .addSelect('SUM(orders.totalPaidAmount)', 'totalPaidAmount')
+    .addSelect('SUM(returnProducts.returnQuantity)', 'totalReturnQty')
+    .addSelect('SUM(returnProducts.damageQuantity)', 'damageQuantity')
+    .getRawOne();
+    // filter by products
+    if (filterOptions?.productId) {
+      queryBuilder.leftJoin('orders.products', 'product');
+    }
+    let productIds = filterOptions?.productId;
+    if (productIds) {
+      productIds = Array.isArray(productIds) ? productIds : [productIds];
+      queryBuilder.andWhere('product.productId IN (:...productIds)', {
+        productIds,
+      });
+    }
+
+    let curierIds = filterOptions?.currier;
+    if (curierIds) {
+      curierIds = Array.isArray(curierIds) ? curierIds : [curierIds];
+      queryBuilder.andWhere('orders.currier IN (:...curierIds)', {
+        curierIds,
+      });
+    }
+    let locationIds = filterOptions?.locationId;
+    if (locationIds) {
+      locationIds = Array.isArray(locationIds) ? locationIds : [locationIds];
+      queryBuilder.andWhere('orders.locationId IN (:...locationIds)', {
+        locationIds,
+      });
+    }
+
+
+    queryBuilder.orderBy(`orders.${sortBy}`, sortOrder).skip(skip).take(limit);
+
+    const [orders, total] = await queryBuilder.getManyAndCount();
+    const statusIds = [...new Set(orders.map((order) => order.statusId))];
+    const warehouseIds = [...new Set(orders.map((order) => order.locationId))];
+    const warehouses = await this.warehouseRepository.findBy({
+      id: In(warehouseIds),
+    });
+    const statuses = await this.statusRepository.findBy({
+      value: In(statusIds),
+    });
+    const deliveryPartnerIds = [
+      ...new Set(orders.map((order) => order.currier)),
+    ];
+    const deliveryPartner = await this.deliveryPartnerRepository.findBy({
+      id: In(deliveryPartnerIds),
+    });
+    const currierMap = new Map(
+      deliveryPartner.map(({ secret_key, api_key, ...partner }) => [
+        partner.id,
+        partner,
+      ]),
+    );
+    const customerIds = [...new Set(orders.map((order) => order.customerId))];
+    const customers = await this.customerRepository.findBy({
+      customer_Id: In(customerIds),
+    });
+
+    const agentIds = [...new Set(orders.map((order) => order.agentId))];
+    const agents = await this.usersRepository.findBy({
+      userId: In(agentIds),
+    });
+    const statusMap = new Map(statuses.map((status) => [status.value, status]));
+    const customerMap = new Map(
+      customers.map((customer) => [customer.customer_Id, customer]),
+    );
+    const warehouseMap = new Map(
+      warehouses.map((customer) => [customer.id, customer]),
+    );
+    const agentMap = new Map(agents.map((order) => [order.userId, order]));
+    const modifiedData = orders.map((order) => ({
+      ...order,
+      status: statusMap.get(order.statusId),
+      customer: customerMap.get(order.customerId as any),
+      agent: agentMap.get(order.agentId as any),
+      partner: currierMap.get(order.currier as any),
+    }));
+    return {
+      data: plainToInstance(Order, modifiedData),
+      total,
+      page,
+      limit,
+      totalAmount,
+      damageQuantity,
+      totalReturnQty,
+      totalPaidAmount
     };
   }
 
@@ -1728,4 +1892,138 @@ export class OrderService {
       await queryRunner.release();
     }
   }
+
+
+
+
+  // download excel 
+
+ async downloadOrdersExcel(filterOptions: any, organizationId: string, res: Response) {
+
+    // ---- First, count total orders
+    const countQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId });
+
+    if (filterOptions?.searchTerm) {
+      countQb.andWhere('orders.orderNumber LIKE :searchTerm', {
+        searchTerm: `%${filterOptions.searchTerm}%`,
+      });
+    }
+
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      countQb.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: new Date(filterOptions.startDate),
+        endDate: new Date(filterOptions.endDate),
+      });
+    }
+     let curierIds = filterOptions?.currier;
+    if (curierIds) {
+      curierIds = Array.isArray(curierIds) ? curierIds : [curierIds];
+      countQb.andWhere('orders.currier IN (:...curierIds)', {
+        curierIds,
+      });
+    }
+
+    let statusIdss = filterOptions?.statusId;
+    if (statusIdss) {
+      statusIdss = Array.isArray(statusIdss) ? statusIdss : [statusIdss];
+      statusIdss = statusIdss.map(Number);
+      countQb.andWhere('orders.statusId IN (:...statusIdss)', { statusIdss });
+    }
+
+    const totalOrders = await countQb.getCount();
+
+    // ---- Check row limit
+    if (totalOrders > 100000) {
+      throw new ApiError(HttpStatus.BAD_REQUEST,`Too many records (${totalOrders}). Please refine your filters to less than 100,000 rows.`,)
+    }
+
+    // ---- Set headers
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', 'attachment; filename=orders-report.xlsx');
+
+    // ---- Streaming workbook
+    const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
+      stream: res,
+      useSharedStrings: false,
+      useStyles: false,
+    });
+    const worksheet = workbook.addWorksheet('Orders Report');
+
+    worksheet.columns = [
+      { header: 'Order ID', key: 'id', width: 20 },
+      { header: 'Order Number', key: 'orderNumber', width: 20 },
+      { header: 'Customer ID', key: 'customerId', width: 20 },
+      { header: 'Status', key: 'statusId', width: 15 },
+      { header: 'Total Price', key: 'totalPrice', width: 15 },
+      { header: 'Agent ID', key: 'agentId', width: 15 },
+      { header: 'Created At', key: 'createdAt', width: 25 },
+    ];
+
+    // ---- Pagination (keyset style)
+    const BATCH_SIZE = 5000;
+    let lastId = 0;
+    let hasMore = true;
+
+    while (hasMore) {
+      const qb = this.orderRepository
+        .createQueryBuilder('orders')
+        .where('orders.organizationId = :organizationId', { organizationId });
+
+      if (filterOptions?.searchTerm) {
+        qb.andWhere('orders.orderNumber LIKE :searchTerm', {
+          searchTerm: `%${filterOptions.searchTerm}%`,
+        });
+      }
+
+      if (filterOptions?.startDate && filterOptions?.endDate) {
+        qb.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
+          startDate: new Date(filterOptions.startDate),
+          endDate: new Date(filterOptions.endDate),
+        });
+      }
+
+      if (filterOptions?.statusId) {
+        let statusIds = Array.isArray(filterOptions.statusId)
+          ? filterOptions.statusId
+          : [filterOptions.statusId];
+        statusIds = statusIds.map(Number);
+        qb.andWhere('orders.statusId IN (:...statusIds)', { statusIds });
+      }
+
+      if (lastId > 0) {
+        qb.andWhere('orders.id > :lastId', { lastId });
+      }
+
+      qb.orderBy('orders.id', 'ASC').limit(BATCH_SIZE);
+
+      const orders = await qb.getMany();
+      if (!orders.length) {
+        hasMore = false;
+        break;
+      }
+
+      for (const order of orders) {
+        worksheet.addRow({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          customerId: order.customerId,
+          statusId: order.statusId,
+          totalPrice: order.totalPrice,
+          agentId: order.agentId,
+          createdAt: order.createdAt,
+        }).commit();
+        lastId = order.id;
+      }
+    }
+
+    await workbook.commit();
+
+}
+
+  
 }

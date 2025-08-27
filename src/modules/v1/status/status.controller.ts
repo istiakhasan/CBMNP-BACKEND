@@ -52,6 +52,7 @@ export class StatusController {
       'startDate',
       'endDate',
       'currier',
+      'productIds',
     ];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {

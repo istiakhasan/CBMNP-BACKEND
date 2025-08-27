@@ -49,6 +49,17 @@ export class UserController {
       }
    }
   }
+  @Get('/options')
+  async findAllUserOptions(@Query() query,@Req() req:Request) {
+    const organizationId=req.headers['x-organization-id']
+    const result:any=await this.userService.findAllUserOptions(organizationId);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'User options retrived successfully',
+      data:result
+   }
+  }
 
   @Get(':id')
   findOne(@Param('id') id: string) {
