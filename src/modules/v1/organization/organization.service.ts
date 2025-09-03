@@ -1,6 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import { CreateOrganizationDto } from './dto/create-organization.dto';
-import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Organization } from './entities/organization.entity';
 import { Repository } from 'typeorm';
@@ -11,7 +9,7 @@ export class OrganizationService {
       @InjectRepository(Organization)
       private readonly organizationRepository: Repository<Organization>,
     ) {}
- async create(data: CreateOrganizationDto) {
+ async create(data: Organization) {
     
     return await this.organizationRepository.save(data)
   }
@@ -26,7 +24,7 @@ export class OrganizationService {
     return result
   }
 
-  update(id: number, updateOrganizationDto: UpdateOrganizationDto) {
+  update(id: number, updateOrganizationDto: Organization) {
     return `This action updates a #${id} organization`;
   }
 

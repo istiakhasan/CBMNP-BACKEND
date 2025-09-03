@@ -3,9 +3,22 @@ import { AppModule } from './app.module';
 import { ZodFilter } from './middleware/ZodFilter';
 import { ValidationPipe } from '@nestjs/common';
 import * as express from 'express'; // 
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+    const config = new DocumentBuilder()
+    .setTitle('My API Documentation')
+    .setDescription('API documentation for my NestJS project')
+    .setVersion('1.0')
+    .addBearerAuth() // If you use JWT Auth
+    .addApiKey(
+      { type: 'apiKey', name: 'x-organization-id', in: 'header' },
+      'x-organization-id',
+    )
+    .build();
+    const document = SwaggerModule.createDocument(app, config);
+     SwaggerModule.setup('api-docs', app, document);
   app.use(
     express.json({
       verify: (req: any, res, buf) => {
