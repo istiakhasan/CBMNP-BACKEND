@@ -53,7 +53,7 @@ export class OrderController {
       }
     }
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds'];
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];
@@ -73,6 +73,38 @@ export class OrderController {
         damageQuantity:result?.damageQuantity,
         totalReturnQty:result?.totalReturnQty,
         totalPaidAmount:result?.totalPaidAmount,
+      }
+   }
+  }
+   @Get('/product-sales-report')
+  async getProductWiseSalesReports(@Query() query,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getProductSalesReport(options,searchFilterOptions,organizationId);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Order retrieved successfully',
+        data:result?.data,
+      meta: {
+        total: result?.total,
+        page: result?.page,
+        limit: result?.limit,
+        startDate:result?.startDate,
+        endDate:result?.endDate,
       }
    }
   }

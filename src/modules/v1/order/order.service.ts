@@ -389,13 +389,12 @@ export class OrderService {
       }
     }
 
-
     return await this.orderRepository.findOne({
-  where: { id: result.id },
-  relations: {
-    products: { product: true }
-  }
-})
+      where: { id: result.id },
+      relations: {
+        products: { product: true },
+      },
+    });
   }
 
   async getOrders(options, filterOptions, organizationId) {
@@ -524,7 +523,7 @@ export class OrderService {
   }
   // get order reports
   async getOrdersReports(options, filterOptions, organizationId) {
-    const { sortBy, sortOrder,limit,page,skip } = paginationHelpers(options);
+    const { sortBy, sortOrder, limit, page, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
       .where('orders.organizationId = :organizationId', { organizationId });
@@ -536,7 +535,7 @@ export class OrderService {
       });
     }
 
-     if (filterOptions?.startDate && filterOptions?.endDate) {
+    if (filterOptions?.startDate && filterOptions?.endDate) {
       const localStartDate = new Date(filterOptions.startDate);
       const utcStartDate = new Date(
         Date.UTC(
@@ -572,7 +571,7 @@ export class OrderService {
       );
     }
 
-     let statusIdss = filterOptions?.statusId;
+    let statusIdss = filterOptions?.statusId;
     if (statusIdss) {
       statusIdss = Array.isArray(statusIdss) ? statusIdss : [statusIdss];
       statusIdss = statusIdss.map(Number);
@@ -580,28 +579,32 @@ export class OrderService {
         statusIdss,
       });
     }
-     let selesAgentIds = filterOptions?.agentIds;
-     if (selesAgentIds) {
-      selesAgentIds = Array.isArray(selesAgentIds) ? selesAgentIds : [selesAgentIds];
-      console.log(selesAgentIds,"check");
+    let orderSources = filterOptions?.orderSources;
+    if (orderSources) {
+      orderSources = Array.isArray(orderSources)
+        ? orderSources
+        : [orderSources];
+      queryBuilder.andWhere('orders.orderSource IN (:...orderSources)', {
+        orderSources,
+      });
+    }
+    let selesAgentIds = filterOptions?.agentIds;
+    if (selesAgentIds) {
+      selesAgentIds = Array.isArray(selesAgentIds)
+        ? selesAgentIds
+        : [selesAgentIds];
+      console.log(selesAgentIds, 'check');
       queryBuilder.andWhere('orders.agentId IN (:...selesAgentIds)', {
         selesAgentIds,
       });
     }
-   const sumQuery = queryBuilder.clone();
-     const { totalAmount,damageQuantity,totalReturnQty,totalPaidAmount } = await sumQuery
-    .leftJoin('orders.productReturns','returnProducts')
-    .select('SUM(orders.totalPrice)', 'totalAmount')
-    .addSelect('SUM(orders.totalPaidAmount)', 'totalPaidAmount')
-    .addSelect('SUM(returnProducts.returnQuantity)', 'totalReturnQty')
-    .addSelect('SUM(returnProducts.damageQuantity)', 'damageQuantity')
-    .getRawOne();
-    // filter by products
+
     if (filterOptions?.productId) {
       queryBuilder.leftJoin('orders.products', 'product');
     }
     let productIds = filterOptions?.productId;
     if (productIds) {
+      console.log(productIds, 'product ids');
       productIds = Array.isArray(productIds) ? productIds : [productIds];
       queryBuilder.andWhere('product.productId IN (:...productIds)', {
         productIds,
@@ -622,8 +625,25 @@ export class OrderService {
         locationIds,
       });
     }
+    let paymentMethodIds = filterOptions?.paymentMethodIds;
+    if (paymentMethodIds) {
+      locationIds = Array.isArray(paymentMethodIds)
+        ? paymentMethodIds
+        : [paymentMethodIds];
+      queryBuilder.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
+        paymentMethodIds,
+      });
+    }
 
-
+    const sumQuery = queryBuilder.clone();
+    const { totalAmount, damageQuantity, totalReturnQty, totalPaidAmount } =
+      await sumQuery
+        .leftJoin('orders.productReturns', 'returnProducts')
+        .select('SUM(orders.totalPrice)', 'totalAmount')
+        .addSelect('SUM(orders.totalPaidAmount)', 'totalPaidAmount')
+        .addSelect('SUM(returnProducts.returnQuantity)', 'totalReturnQty')
+        .addSelect('SUM(returnProducts.damageQuantity)', 'damageQuantity')
+        .getRawOne();
     queryBuilder.orderBy(`orders.${sortBy}`, sortOrder).skip(skip).take(limit);
 
     const [orders, total] = await queryBuilder.getManyAndCount();
@@ -679,14 +699,20 @@ export class OrderService {
       totalAmount,
       damageQuantity,
       totalReturnQty,
-      totalPaidAmount
+      totalPaidAmount,
     };
   }
 
   async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['paymentHistory', 'comments', 'comments.user','productReturns','productReturns.product'],
+      relations: [
+        'paymentHistory',
+        'comments',
+        'comments.user',
+        'productReturns',
+        'productReturns.product',
+      ],
     });
 
     if (!order) {
@@ -1737,7 +1763,7 @@ export class OrderService {
     returnableProducts: any;
   }) {
     const { orderIds, agentId, statusId, warehouse, returnableProducts } =
-      payload; 
+      payload;
     // Pre-fetch orders with status
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
@@ -1846,7 +1872,7 @@ export class OrderService {
               remarks: 'Item returned via courier on 2025-07-25',
               returnDate: new Date(),
             };
-            await this.orderProductReturnRepository.save(returnDamagePayload)
+            await this.orderProductReturnRepository.save(returnDamagePayload);
           }
         }
 
@@ -1893,13 +1919,13 @@ export class OrderService {
     }
   }
 
+  // download excel
 
-
-
-  // download excel 
-
- async downloadOrdersExcel(filterOptions: any, organizationId: string, res: Response) {
-
+  async downloadOrdersExcel(
+    filterOptions: any,
+    organizationId: string,
+    res: Response,
+  ) {
     // ---- First, count total orders
     const countQb = this.orderRepository
       .createQueryBuilder('orders')
@@ -1917,7 +1943,7 @@ export class OrderService {
         endDate: new Date(filterOptions.endDate),
       });
     }
-     let curierIds = filterOptions?.currier;
+    let curierIds = filterOptions?.currier;
     if (curierIds) {
       curierIds = Array.isArray(curierIds) ? curierIds : [curierIds];
       countQb.andWhere('orders.currier IN (:...curierIds)', {
@@ -1936,7 +1962,10 @@ export class OrderService {
 
     // ---- Check row limit
     if (totalOrders > 100000) {
-      throw new ApiError(HttpStatus.BAD_REQUEST,`Too many records (${totalOrders}). Please refine your filters to less than 100,000 rows.`,)
+      throw new ApiError(
+        HttpStatus.BAD_REQUEST,
+        `Too many records (${totalOrders}). Please refine your filters to less than 100,000 rows.`,
+      );
     }
 
     // ---- Set headers
@@ -1944,7 +1973,10 @@ export class OrderService {
       'Content-Type',
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     );
-    res.setHeader('Content-Disposition', 'attachment; filename=orders-report.xlsx');
+    res.setHeader(
+      'Content-Disposition',
+      'attachment; filename=orders-report.xlsx',
+    );
 
     // ---- Streaming workbook
     const workbook = new ExcelJS.stream.xlsx.WorkbookWriter({
@@ -2008,22 +2040,157 @@ export class OrderService {
       }
 
       for (const order of orders) {
-        worksheet.addRow({
-          id: order.id,
-          orderNumber: order.orderNumber,
-          customerId: order.customerId,
-          statusId: order.statusId,
-          totalPrice: order.totalPrice,
-          agentId: order.agentId,
-          createdAt: order.createdAt,
-        }).commit();
+        worksheet
+          .addRow({
+            id: order.id,
+            orderNumber: order.orderNumber,
+            customerId: order.customerId,
+            statusId: order.statusId,
+            totalPrice: order.totalPrice,
+            agentId: order.agentId,
+            createdAt: order.createdAt,
+          })
+          .commit();
         lastId = order.id;
       }
     }
 
     await workbook.commit();
+  }
+
+async getProductSalesReport(options, filterOptions, organizationId) {
+  const { sortBy, sortOrder, limit, skip, page } = paginationHelpers(options);
+
+  const baseQuery = this.orderRepository
+    .createQueryBuilder('orders')
+    .innerJoin('orders.products', 'prod')
+    .innerJoin('prod.product', 'p')
+    .where('orders.organizationId = :organizationId', { organizationId });
+
+  let utcStartDate: string;
+  let utcEndDate: string;
+
+  // ✅ Handle date filter or fallback to current date
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+    const localStartDate = new Date(filterOptions.startDate);
+    utcStartDate = new Date(
+      Date.UTC(
+        localStartDate.getFullYear(),
+        localStartDate.getMonth(),
+        localStartDate.getDate(),
+        0, 0, 0, 0
+      )
+    ).toISOString();
+
+    const localEndDate = new Date(filterOptions.endDate);
+    utcEndDate = new Date(
+      Date.UTC(
+        localEndDate.getFullYear(),
+        localEndDate.getMonth(),
+        localEndDate.getDate(),
+        23, 59, 59, 999
+      )
+    ).toISOString();
+  } else {
+    const today = new Date();
+    utcStartDate = new Date(
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
+    ).toISOString();
+    utcEndDate = new Date(
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+    ).toISOString();
+  }
+
+  baseQuery.andWhere(
+    'orders.createdAt BETWEEN :startDate AND :endDate',
+    { startDate: utcStartDate, endDate: utcEndDate }
+  );
+
+  // ✅ Filter by products
+  if (filterOptions?.productId) {
+    const productIds = Array.isArray(filterOptions.productId)
+      ? filterOptions.productId
+      : [filterOptions.productId];
+    baseQuery.andWhere('prod.productId IN (:...productIds)', { productIds });
+  }
+
+  // ✅ Filter by payment methods
+  let paymentMethodIds = filterOptions?.paymentMethodIds;
+  if (paymentMethodIds) {
+    paymentMethodIds = Array.isArray(paymentMethodIds)
+      ? paymentMethodIds
+      : [paymentMethodIds];
+    baseQuery.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
+      paymentMethodIds,
+    });
+  }
+
+  // ✅ Filter by sources
+  let orderSources = filterOptions?.orderSources;
+  if (orderSources) {
+    orderSources = Array.isArray(orderSources) ? orderSources : [orderSources];
+    baseQuery.andWhere('orders.orderSource IN (:...orderSources)', {
+      orderSources,
+    });
+  }
+
+  // ✅ Query for paginated data
+  const queryBuilder = baseQuery.clone();
+
+  queryBuilder
+    .select('prod.productId', 'productId')
+    .addSelect('p.name', 'productName')
+    .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
+    .addSelect('SUM(prod.productQuantity)', 'totalOrderQuantity')
+    .addSelect('prod.productPrice', 'productPrice')
+    .addSelect('orders.orderSource', 'orderSource')
+    .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
+    .groupBy('prod.productId')
+    .addGroupBy('p.name')
+    .addGroupBy('prod.productPrice')
+    .addGroupBy('orders.orderSource');
+
+  if (sortBy) {
+    if (
+      [
+        'productName',
+        'productId',
+        'productPrice',
+        'totalSaleAmount',
+        'totalOrderQuantity',
+        'orderSource',
+        'orderCount',
+      ].includes(sortBy)
+    ) {
+      queryBuilder.orderBy(sortBy, sortOrder);
+    }
+  }
+
+  const result = await queryBuilder.getRawMany();
+
+  const data = result.map((r) => ({
+    productId: r.productId,
+    productName: r.productName,
+    totalSaleAmount: Number(r.totalSaleAmount),
+    totalOrderQuantity: Number(r.totalOrderQuantity),
+    price: Number(r.productPrice),
+    orderSource: r.orderSource,
+    orderCount: Number(r.orderCount),
+  }));
+
+  const countQuery = baseQuery.clone().select('COUNT(DISTINCT prod.productId)', 'cnt');
+  const totalResult = await countQuery.getRawOne();
+  const total = Number(totalResult.cnt);
+
+  return {
+    data,
+    total,
+    page,
+    limit,
+    startDate: utcStartDate,
+    endDate: utcEndDate,
+  };
+}
 
 }
 
-  
-}
