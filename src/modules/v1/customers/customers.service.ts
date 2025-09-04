@@ -1,11 +1,12 @@
 import { InjectRepository } from '@nestjs/typeorm';
-import { Like, Repository } from 'typeorm';
+import { ILike, In, Like, Repository } from 'typeorm';
 import { HttpStatus, Injectable } from '@nestjs/common';
 import { Customers } from './entities/customers.entity';
 import { plainToInstance } from 'class-transformer';
 import { ApiError } from '../../../middleware/ApiError';
 import { Order } from '../order/entities/order.entity';
 import { OrderStatus } from '../status/entities/status.entity';
+import paginationHelpers from 'src/helpers/paginationHelpers';
 
 @Injectable()
 export class CustomerService {
@@ -27,7 +28,7 @@ export class CustomerService {
     // }
     const lastCustomer = await this.customerRepository
       .createQueryBuilder('customer')
-      .orderBy('customer.created_at', 'DESC')
+      .orderBy('customer.createdAt', 'DESC')
       .getOne();
     const lastCustomerId = lastCustomer?.customer_Id?.substring(2);
     const currentId = lastCustomerId || (0).toString().padStart(9, '0'); //000000
@@ -50,7 +51,7 @@ export class CustomerService {
     const page = Number(options.page || 1);
     const limit = Number(options.limit || 10);
     const skip = (page - 1) * limit;
-    const sortBy = options.sortBy || 'created_at';
+    const sortBy = options.sortBy || 'createdAt';
     const sortOrder = (options.sortOrder || 'DESC').toUpperCase();
     const queryBuilder = this.customerRepository
       .createQueryBuilder('customers')
@@ -129,4 +130,117 @@ export class CustomerService {
       where: { id },
     });
   }
+
+async getCustomerRetentionReports(options, filterOptions, organizationId) {
+  const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
+  let utcStartDate: Date;
+  let utcEndDate: Date;
+
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+    const localStartDate = new Date(filterOptions.startDate);
+    utcStartDate = new Date(
+      Date.UTC(
+        localStartDate.getFullYear(),
+        localStartDate.getMonth(),
+        localStartDate.getDate(),
+        0,
+        0,
+        0,
+        0
+      )
+    );
+
+    const localEndDate = new Date(filterOptions.endDate);
+    utcEndDate = new Date(
+      Date.UTC(
+        localEndDate.getFullYear(),
+        localEndDate.getMonth(),
+        localEndDate.getDate(),
+        23,
+        59,
+        59,
+        999
+      )
+    );
+  } else {
+    const today = new Date();
+    utcStartDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0));
+    utcEndDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999));
+  }
+
+  let curierIds = filterOptions?.currier;
+  if (curierIds && !Array.isArray(curierIds)) {
+    curierIds = [curierIds];
+  }
+
+  // Main customer query
+  const query = this.customerRepository
+    .createQueryBuilder('customer')
+    .leftJoin(
+      'customer.orders',
+      'o',
+      'o.createdAt BETWEEN :startDate AND :endDate',
+      { startDate: utcStartDate, endDate: utcEndDate }
+    )
+    .where('customer.organizationId = :organizationId', { organizationId });
+
+  // Apply courier filter if provided
+  if (curierIds?.length) {
+    query.andWhere('o.currier IN (:...curierIds)', { curierIds });
+  }
+
+  query
+    .groupBy('customer.id')
+    .select([
+      'customer.id AS id',
+      'customer.customer_Id AS customerId',
+      'customer.customerPhoneNumber AS customerPhoneNumber',
+      'customer.customerType AS customerType',
+      'customer.customerName AS customerName',
+      'COUNT(o.id) AS orderCount',
+      'COALESCE(SUM(o.totalPrice), 0) AS totalSpent',
+      'MIN(o.createdAt) AS firstOrderDate',
+      'MAX(o.createdAt) AS lastOrderDate',
+    ])
+    .orderBy(
+      sortBy ? `customer.${sortBy}` : 'customer.createdAt',
+      sortOrder?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC'
+    )
+    .offset(skip)
+    .limit(limit);
+
+  const data = await query.getRawMany();
+
+  // Calculate overall totals with the same date and courier filters, excluding orders without a customer
+  const overallTotalsQuery = this.ordersRepository
+    .createQueryBuilder('o')
+    .select('COUNT(o.id)', 'overallTotalOrders')
+    .addSelect('COALESCE(SUM(o.totalPrice), 0)', 'overallTotalSpent')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .andWhere('o.customerId IS NOT NULL')
+    .andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate: utcStartDate, endDate: utcEndDate });
+
+  // Apply courier filter to overall totals as well
+  if (curierIds?.length) {
+    overallTotalsQuery.andWhere('o.currier IN (:...curierIds)', { curierIds });
+  }
+
+  const overallTotals = await overallTotalsQuery.getRawOne();
+
+  return {
+    data,
+    total: data.length,
+    page,
+    limit,
+    overallTotalOrders: Number(overallTotals.overallTotalOrders),
+    overallTotalSpent: Number(overallTotals.overallTotalSpent),
+  };
+}
+
+
+
+
+
+
+
 }

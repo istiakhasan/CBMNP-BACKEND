@@ -140,7 +140,7 @@ export class Order {
   @JoinColumn({ name: 'currier' })
   partner: DeliveryPartner;
 
-  @Index()
+   @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
