@@ -47,7 +47,7 @@ export class CustomerService {
     return result;
   }
 
-  async getAllCustomers(options, filterOptions,organizationId) {
+  async getAllCustomers(options, filterOptions, organizationId) {
     const page = Number(options.page || 1);
     const limit = Number(options.limit || 10);
     const skip = (page - 1) * limit;
@@ -70,11 +70,10 @@ export class CustomerService {
       queryBuilder.andWhere('customers.customerType = :customerType', {
         customerType: filterOptions.filterByCustomerType,
       });
-   
     }
-       queryBuilder.andWhere('customers.organizationId = :organizationId', {
-        organizationId: organizationId,
-      });
+    queryBuilder.andWhere('customers.organizationId = :organizationId', {
+      organizationId: organizationId,
+    });
     const [data, total] = await queryBuilder.getManyAndCount();
     const modifyData = plainToInstance(Customers, data);
 
@@ -131,116 +130,213 @@ export class CustomerService {
     });
   }
 
-async getCustomerRetentionReports(options, filterOptions, organizationId) {
-  const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
-  let utcStartDate: Date;
-  let utcEndDate: Date;
+  async getCustomerRetentionReports(options, filterOptions, organizationId) {
+    const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
+    let utcStartDate: Date;
+    let utcEndDate: Date;
+
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      const localStartDate = new Date(filterOptions.startDate);
+      utcStartDate = new Date(
+        Date.UTC(
+          localStartDate.getFullYear(),
+          localStartDate.getMonth(),
+          localStartDate.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+
+      const localEndDate = new Date(filterOptions.endDate);
+      utcEndDate = new Date(
+        Date.UTC(
+          localEndDate.getFullYear(),
+          localEndDate.getMonth(),
+          localEndDate.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+    } else {
+      const today = new Date();
+      utcStartDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      );
+      utcEndDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      );
+    }
+
+    let curierIds = filterOptions?.currier;
+    if (curierIds && !Array.isArray(curierIds)) {
+      curierIds = [curierIds];
+    }
+
+    // Main customer query
+    const query = this.customerRepository
+      .createQueryBuilder('customer')
+      .leftJoin(
+        'customer.orders',
+        'o',
+        'o.createdAt BETWEEN :startDate AND :endDate',
+        { startDate: utcStartDate, endDate: utcEndDate },
+      )
+      .where('customer.organizationId = :organizationId', { organizationId });
+
+    // Apply courier filter if provided
+    if (curierIds?.length) {
+      query.andWhere('o.currier IN (:...curierIds)', { curierIds });
+    }
+
+    query
+      .groupBy('customer.id')
+      .select([
+        'customer.id AS id',
+        'customer.customer_Id AS customerId',
+        'customer.customerPhoneNumber AS customerPhoneNumber',
+        'customer.customerType AS customerType',
+        'customer.customerName AS customerName',
+        'COUNT(o.id) AS orderCount',
+        'COALESCE(SUM(o.totalPrice), 0) AS totalSpent',
+        'MIN(o.createdAt) AS firstOrderDate',
+        'MAX(o.createdAt) AS lastOrderDate',
+      ])
+      .orderBy(
+        sortBy ? `customer.${sortBy}` : 'customer.createdAt',
+        sortOrder?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC',
+      )
+      .offset(skip)
+      .limit(limit);
+
+    const data = await query.getRawMany();
+
+    // Calculate overall totals with the same date and courier filters, excluding orders without a customer
+    const overallTotalsQuery = this.ordersRepository
+      .createQueryBuilder('o')
+      .select('COUNT(o.id)', 'overallTotalOrders')
+      .addSelect('COALESCE(SUM(o.totalPrice), 0)', 'overallTotalSpent')
+      .where('o.organizationId = :organizationId', { organizationId })
+      .andWhere('o.customerId IS NOT NULL')
+      .andWhere('o.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: utcStartDate,
+        endDate: utcEndDate,
+      });
+
+    // Apply courier filter to overall totals as well
+    if (curierIds?.length) {
+      overallTotalsQuery.andWhere('o.currier IN (:...curierIds)', {
+        curierIds,
+      });
+    }
+
+    const overallTotals = await overallTotalsQuery.getRawOne();
+
+    return {
+      data,
+      total: data.length,
+      page,
+      limit,
+      overallTotalOrders: Number(overallTotals.overallTotalOrders),
+      overallTotalSpent: Number(overallTotals.overallTotalSpent),
+    };
+  }
+  async topCustomersReports(
+  options,
+  filterOptions: { startDate?: string; endDate?: string },
+  organizationId: string,
+) {
+  const { page, limit, skip } = paginationHelpers(options);
+  let utcStartDate: Date | undefined;
+  let utcEndDate: Date | undefined;
 
   if (filterOptions?.startDate && filterOptions?.endDate) {
-    const localStartDate = new Date(filterOptions.startDate);
-    utcStartDate = new Date(
-      Date.UTC(
-        localStartDate.getFullYear(),
-        localStartDate.getMonth(),
-        localStartDate.getDate(),
-        0,
-        0,
-        0,
-        0
-      )
-    );
-
-    const localEndDate = new Date(filterOptions.endDate);
-    utcEndDate = new Date(
-      Date.UTC(
-        localEndDate.getFullYear(),
-        localEndDate.getMonth(),
-        localEndDate.getDate(),
-        23,
-        59,
-        59,
-        999
-      )
-    );
-  } else {
-    const today = new Date();
-    utcStartDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0));
-    utcEndDate = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999));
+    utcStartDate = new Date(filterOptions.startDate);
+    utcEndDate = new Date(filterOptions.endDate);
   }
 
-  let curierIds = filterOptions?.currier;
-  if (curierIds && !Array.isArray(curierIds)) {
-    curierIds = [curierIds];
-  }
-
-  // Main customer query
-  const query = this.customerRepository
+  const [customers, total] = await this.customerRepository
     .createQueryBuilder('customer')
-    .leftJoin(
-      'customer.orders',
-      'o',
-      'o.createdAt BETWEEN :startDate AND :endDate',
-      { startDate: utcStartDate, endDate: utcEndDate }
-    )
-    .where('customer.organizationId = :organizationId', { organizationId });
+    .where('customer.organizationId = :organizationId', { organizationId })
+    .skip(skip)
+    .take(limit)
+    .getManyAndCount();
 
-  // Apply courier filter if provided
-  if (curierIds?.length) {
-    query.andWhere('o.currier IN (:...curierIds)', { curierIds });
+  const customerIds = customers.map(c => c.customer_Id);
+
+  let orderStatsMap: Record<string, { count: number; totalPrice: number }> = {};
+
+  if (customerIds.length > 0) {
+    const orderStats = await this.ordersRepository
+      .createQueryBuilder('orders')
+      .select('orders.customerId', 'customerId')
+      .addSelect('COUNT(orders.id)', 'count')
+      .addSelect('SUM(orders.totalPrice)', 'totalPrice')
+      .where('orders.customerId IN (:...customerIds)', { customerIds });
+
+    if (utcStartDate && utcEndDate) {
+      orderStats.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
+        startDate: utcStartDate,
+        endDate: utcEndDate,
+      });
+    }
+
+    const rawStats = await orderStats.groupBy('orders.customerId').getRawMany();
+
+    orderStatsMap = rawStats.reduce((acc, cur) => {
+      acc[cur.customerId] = {
+        count: Number(cur.count),
+        totalPrice: Number(cur.totalPrice) || 0,
+      };
+      return acc;
+    }, {} as Record<string, { count: number; totalPrice: number }>);
   }
 
-  query
-    .groupBy('customer.id')
-    .select([
-      'customer.id AS id',
-      'customer.customer_Id AS customerId',
-      'customer.customerPhoneNumber AS customerPhoneNumber',
-      'customer.customerType AS customerType',
-      'customer.customerName AS customerName',
-      'COUNT(o.id) AS orderCount',
-      'COALESCE(SUM(o.totalPrice), 0) AS totalSpent',
-      'MIN(o.createdAt) AS firstOrderDate',
-      'MAX(o.createdAt) AS lastOrderDate',
-    ])
-    .orderBy(
-      sortBy ? `customer.${sortBy}` : 'customer.createdAt',
-      sortOrder?.toUpperCase() === 'DESC' ? 'DESC' : 'ASC'
-    )
-    .offset(skip)
-    .limit(limit);
-
-  const data = await query.getRawMany();
-
-  // Calculate overall totals with the same date and courier filters, excluding orders without a customer
-  const overallTotalsQuery = this.ordersRepository
+  const ordersQueryBuilder = this.ordersRepository
     .createQueryBuilder('o')
-    .select('COUNT(o.id)', 'overallTotalOrders')
-    .addSelect('COALESCE(SUM(o.totalPrice), 0)', 'overallTotalSpent')
-    .where('o.organizationId = :organizationId', { organizationId })
-    .andWhere('o.customerId IS NOT NULL')
-    .andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate: utcStartDate, endDate: utcEndDate });
+    .where('o.organizationId = :organizationId', { organizationId });
 
-  // Apply courier filter to overall totals as well
-  if (curierIds?.length) {
-    overallTotalsQuery.andWhere('o.currier IN (:...curierIds)', { curierIds });
+  if (utcStartDate && utcEndDate) {
+    ordersQueryBuilder.andWhere('o.createdAt BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
   }
 
-  const overallTotals = await overallTotalsQuery.getRawOne();
+  const { totalOrderValue } = await ordersQueryBuilder
+    .select('COALESCE(SUM(o.totalPrice), 0)', 'totalOrderValue')
+    .getRawOne();
 
   return {
-    data,
-    total: data.length,
+    data: customers.map(customer => ({
+      ...customer,
+      ordersCount: orderStatsMap[customer.customer_Id]?.count || 0,
+      totalPrice: orderStatsMap[customer.customer_Id]?.totalPrice || 0,
+    })),
+    total,
     page,
     limit,
-    overallTotalOrders: Number(overallTotals.overallTotalOrders),
-    overallTotalSpent: Number(overallTotals.overallTotalSpent),
+    totalOrderValue: Number(totalOrderValue),
   };
-}
-
-
-
-
-
-
+  }
 
 }

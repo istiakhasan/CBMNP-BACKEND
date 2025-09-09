@@ -88,6 +88,40 @@ export class CustomerController {
        }
       
     }
+    @Get('top-customers-reports')
+    async topCustomersReprots(@Query() query,@Req() req:Request) {
+      const options = {};
+      const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+      for (const key of keys) {
+        if (query && Object.hasOwnProperty.call(query, key)) {
+          options[key] = query[key];
+        }
+      }
+      const searchFilterOptions = {};
+      const filterKeys = ['searchTerm', 'filterByCustomerType','startDate','endDate','currier'];
+      for (const key of filterKeys) {
+        if (query && Object.hasOwnProperty.call(query, key)) {
+          searchFilterOptions[key] = query[key];
+        }
+      }
+       const organizationId:any=req.headers['x-organization-id']
+      const result=await this.customerService.topCustomersReports(options,
+        searchFilterOptions,organizationId);
+        return  {
+          success:true,
+          statusCode:HttpStatus.OK,
+          message:'Customers retrieved successfully',
+          data:result?.data,
+          meta: {
+            page: result?.page,
+            limit: result?.limit,
+            total: result?.total,
+            // overallTotalOrders:result?.overallTotalOrders,
+            overallTotalSpent:result?.totalOrderValue,
+          }
+       }
+      
+    }
     @Get('/orders-count/:id')
     async getOrdersCount(@Param('id') customerId) {
       return catchAsync(async()=>{
