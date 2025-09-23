@@ -6,14 +6,15 @@ import { catchAsync } from "../../../hoc/createAsync";
 import { ZodPipe } from "../../../middleware/ZodPipe";
 import { Request } from "express";
 import { Customers } from "./entities/customers.entity";
+import { AddressBook } from "./entities/addressbook.entity";
 
 @Controller('v1/customers')
 export class CustomerController {
     constructor(private readonly customerService: CustomerService) {}
     @Post()
-    async createEmployee(@Body(new ZodPipe(CreateCustomerSchema)) data,@Req() req:Request) {
+    async createEmployee(@Body(new ZodPipe(CreateCustomerSchema)) data,@Req() req:Request,@Query() query) {
       const organizationId=req.headers['x-organization-id']
-      const result=await this.customerService.createCustomer({...data,organizationId});
+      const result=await this.customerService.createCustomer({...data,organizationId},query);
       return {
         success:true,
         statusCode:HttpStatus.OK,
@@ -88,6 +89,16 @@ export class CustomerController {
        }
       
     }
+    @Post('create-adress')
+    async createAddressBook(@Body() data:AddressBook){
+      const result=await this.customerService.createAddressBook(data)
+      return {
+          success:true,
+          statusCode:HttpStatus.OK,
+          message:'Customers retrieved successfully',
+          data:result
+    }
+  }
     @Get('top-customers-reports')
     async topCustomersReprots(@Query() query,@Req() req:Request) {
       const options = {};
@@ -98,15 +109,14 @@ export class CustomerController {
         }
       }
       const searchFilterOptions = {};
-      const filterKeys = ['searchTerm', 'filterByCustomerType','startDate','endDate','currier'];
+      const filterKeys = ['searchTerm', 'filterByCustomerType','startDate','endDate','statusId'];
       for (const key of filterKeys) {
         if (query && Object.hasOwnProperty.call(query, key)) {
           searchFilterOptions[key] = query[key];
         }
       }
        const organizationId:any=req.headers['x-organization-id']
-      const result=await this.customerService.topCustomersReports(options,
-        searchFilterOptions,organizationId);
+      const result=await this.customerService.topCustomersReports(organizationId,options,searchFilterOptions);
         return  {
           success:true,
           statusCode:HttpStatus.OK,
@@ -115,9 +125,9 @@ export class CustomerController {
           meta: {
             page: result?.page,
             limit: result?.limit,
-            total: result?.total,
-            // overallTotalOrders:result?.overallTotalOrders,
-            overallTotalSpent:result?.totalOrderValue,
+            total: result?.totalCustomers,
+            overallTotalOrders:result?.grandTotalOrders,
+            overallTotalSpent:result?.grandTotalValue,
           }
        }
       

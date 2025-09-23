@@ -19,6 +19,8 @@ import { OrdersLog } from './orderlog.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
 import { DeliveryPartner } from '../../delivery-partner/entities/delivery-partner.entity';
 import { OrderProductReturn } from './return_damage.entity';
+import { AddressBook } from '../../customers/entities/addressbook.entity';
+import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'orders' })
 export class Order {
@@ -116,6 +118,9 @@ export class Order {
   @ManyToOne(() => OrderStatus, (status) => status.orders, { eager: true })
   @JoinColumn({ name: 'statusId', referencedColumnName: 'value' })
   status: OrderStatus;
+  @ManyToOne(() => Warehouse, (status) => status.orders, { eager: true })
+  @JoinColumn({ name: 'locationId', referencedColumnName: 'id' })
+  warehouse: Warehouse;
 
   @Column({ nullable: true })
   agentId: string;
@@ -139,8 +144,14 @@ export class Order {
   })
   @JoinColumn({ name: 'currier' })
   partner: DeliveryPartner;
+  @Column({ nullable: true })
+  addressId: number;
 
-   @Index()
+  @ManyToOne(() => AddressBook, { eager: true })
+  @JoinColumn({ name: 'addressId' })
+  address: AddressBook;
+
+  @Index()
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',

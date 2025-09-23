@@ -6,8 +6,9 @@ import { CustomerController } from './customers.controller';
 import { CustomerService } from './customers.service';
 import { Order } from '../order/entities/order.entity';
 import { OrderStatus } from '../status/entities/status.entity';
+import { AddressBook } from './entities/addressbook.entity';
 @Module({
-   imports: [TypeOrmModule.forFeature([Customers,Order,OrderStatus])],
+  imports: [TypeOrmModule.forFeature([Customers,Order,OrderStatus,AddressBook])],
   controllers: [CustomerController],
   providers: [CustomerService],
   exports: [CustomerService],

@@ -23,7 +23,7 @@ export class OrderController {
       }
     }
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId'];
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','paymentStatus'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];
@@ -106,6 +106,32 @@ export class OrderController {
         startDate:result?.startDate,
         endDate:result?.endDate,
       }
+   }
+  }
+   @Get('/delivery-partner-report')
+  async getDeliveryPartnerShipmentReport(@Query() query,@Req() req:Request){
+    const organizationId:any=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getDeliveryPartnerShipmentReport(organizationId,searchFilterOptions);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Delivery partner shipment reports retrieved successfully',
+        data:result,
+
    }
   }
 @Get('/download-reports')

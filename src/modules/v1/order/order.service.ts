@@ -465,6 +465,11 @@ export class OrderService {
         locationIds,
       });
     }
+    if (filterOptions?.paymentStatus) {
+      queryBuilder.andWhere('orders.paymentStatus = :paymentStatus', {
+        paymentStatus:filterOptions?.paymentStatus,
+      });
+    }
     // if (filterOptions?.locationId) {
     //   queryBuilder.andWhere('orders.locationId = :locationId', {
     //     locationId: filterOptions.locationId,
@@ -712,6 +717,7 @@ export class OrderService {
         'comments.user',
         'productReturns',
         'productReturns.product',
+        'warehouse',
       ],
     });
 
@@ -2058,15 +2064,171 @@ export class OrderService {
     await workbook.commit();
   }
 
-async getProductSalesReport(options, filterOptions, organizationId) {
-  const { sortBy, sortOrder, limit, skip, page } = paginationHelpers(options);
+  async getProductSalesReport(options, filterOptions, organizationId) {
+    const { sortBy, sortOrder, limit, skip, page } = paginationHelpers(options);
 
-  const baseQuery = this.orderRepository
-    .createQueryBuilder('orders')
-    .innerJoin('orders.products', 'prod')
-    .innerJoin('prod.product', 'p')
-    .where('orders.organizationId = :organizationId', { organizationId });
+    const baseQuery = this.orderRepository
+      .createQueryBuilder('orders')
+      .innerJoin('orders.products', 'prod')
+      .innerJoin('prod.product', 'p')
+      .where('orders.organizationId = :organizationId', { organizationId });
 
+    let utcStartDate: string;
+    let utcEndDate: string;
+
+    // ✅ Handle date filter or fallback to current date
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      const localStartDate = new Date(filterOptions.startDate);
+      utcStartDate = new Date(
+        Date.UTC(
+          localStartDate.getFullYear(),
+          localStartDate.getMonth(),
+          localStartDate.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      ).toISOString();
+
+      const localEndDate = new Date(filterOptions.endDate);
+      utcEndDate = new Date(
+        Date.UTC(
+          localEndDate.getFullYear(),
+          localEndDate.getMonth(),
+          localEndDate.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      ).toISOString();
+    } else {
+      const today = new Date();
+      utcStartDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      ).toISOString();
+      utcEndDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      ).toISOString();
+    }
+
+    baseQuery.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
+
+    // ✅ Filter by products
+    if (filterOptions?.productId) {
+      const productIds = Array.isArray(filterOptions.productId)
+        ? filterOptions.productId
+        : [filterOptions.productId];
+      baseQuery.andWhere('prod.productId IN (:...productIds)', { productIds });
+    }
+
+    // ✅ Filter by payment methods
+    let paymentMethodIds = filterOptions?.paymentMethodIds;
+    if (paymentMethodIds) {
+      paymentMethodIds = Array.isArray(paymentMethodIds)
+        ? paymentMethodIds
+        : [paymentMethodIds];
+      baseQuery.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
+        paymentMethodIds,
+      });
+    }
+
+    // ✅ Filter by sources
+    let orderSources = filterOptions?.orderSources;
+    if (orderSources) {
+      orderSources = Array.isArray(orderSources)
+        ? orderSources
+        : [orderSources];
+      baseQuery.andWhere('orders.orderSource IN (:...orderSources)', {
+        orderSources,
+      });
+    }
+
+    // ✅ Query for paginated data
+    const queryBuilder = baseQuery.clone();
+
+    queryBuilder
+      .select('prod.productId', 'productId')
+      .addSelect('p.name', 'productName')
+      .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
+      .addSelect('SUM(prod.productQuantity)', 'totalOrderQuantity')
+      .addSelect('prod.productPrice', 'productPrice')
+      .addSelect('orders.orderSource', 'orderSource')
+      .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
+      .groupBy('prod.productId')
+      .addGroupBy('p.name')
+      .addGroupBy('prod.productPrice')
+      .addGroupBy('orders.orderSource');
+
+    if (sortBy) {
+      if (
+        [
+          'productName',
+          'productId',
+          'productPrice',
+          'totalSaleAmount',
+          'totalOrderQuantity',
+          'orderSource',
+          'orderCount',
+        ].includes(sortBy)
+      ) {
+        queryBuilder.orderBy(sortBy, sortOrder);
+      }
+    }
+
+    const result = await queryBuilder.getRawMany();
+
+    const data = result.map((r) => ({
+      productId: r.productId,
+      productName: r.productName,
+      totalSaleAmount: Number(r.totalSaleAmount),
+      totalOrderQuantity: Number(r.totalOrderQuantity),
+      price: Number(r.productPrice),
+      orderSource: r.orderSource,
+      orderCount: Number(r.orderCount),
+    }));
+
+    const countQuery = baseQuery
+      .clone()
+      .select('COUNT(DISTINCT prod.productId)', 'cnt');
+    const totalResult = await countQuery.getRawOne();
+    const total = Number(totalResult.cnt);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    };
+  }
+
+
+async getDeliveryPartnerShipmentReport(
+  organizationId: string,
+  filterOptions: any,
+) {
   let utcStartDate: string;
   let utcEndDate: string;
 
@@ -2078,8 +2240,8 @@ async getProductSalesReport(options, filterOptions, organizationId) {
         localStartDate.getFullYear(),
         localStartDate.getMonth(),
         localStartDate.getDate(),
-        0, 0, 0, 0
-      )
+        0, 0, 0, 0,
+      ),
     ).toISOString();
 
     const localEndDate = new Date(filterOptions.endDate);
@@ -2088,109 +2250,151 @@ async getProductSalesReport(options, filterOptions, organizationId) {
         localEndDate.getFullYear(),
         localEndDate.getMonth(),
         localEndDate.getDate(),
-        23, 59, 59, 999
-      )
+        23, 59, 59, 999,
+      ),
     ).toISOString();
   } else {
     const today = new Date();
     utcStartDate = new Date(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0),
     ).toISOString();
     utcEndDate = new Date(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999),
     ).toISOString();
   }
 
-  baseQuery.andWhere(
-    'orders.createdAt BETWEEN :startDate AND :endDate',
-    { startDate: utcStartDate, endDate: utcEndDate }
+  /** 1) Orders aggregation */
+  const ordersQb = this.orderRepository
+    .createQueryBuilder('o')
+    .leftJoin('o.partner', 'dp')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
+
+  const partnerIds = filterOptions?.currier?.length
+    ? filterOptions.currier
+    : null;
+  if (partnerIds) {
+    ordersQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+  }
+
+  const locationId = filterOptions?.locationId?.length
+    ? filterOptions.locationId
+    : null;
+  if (locationId) {
+    ordersQb.andWhere('o.locationId IN (:...locationId)', { locationId });
+  }
+
+  const ordersAgg = await ordersQb
+    .select('dp.id', 'partnerId')
+    .addSelect('dp.partnerName', 'deliveryPartner')
+    .addSelect('MIN(o.intransitTime)', 'inTransitStartDate')
+    .addSelect('MAX(o.intransitTime)', 'inTransitEndDate')
+    .addSelect('SUM(o.shippingCharge)', 'deliveryCharge')
+    .addSelect('COUNT(DISTINCT o.id)', 'orderQty')
+    .addSelect('SUM(o.totalPaidAmount)', 'advancePaid')
+    .groupBy('dp.id')
+    .addGroupBy('dp.partnerName')
+    .getRawMany();
+
+  /** 2) Products aggregation */
+  const prodRepo =
+    this.productsRepository ??
+    this.orderRepository.manager.getRepository(Products);
+
+  const productsQb = prodRepo
+    .createQueryBuilder('p')
+    .leftJoin('p.order', 'o')
+    .leftJoin('o.partner', 'dp')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
+
+  if (partnerIds) {
+    productsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+  }
+
+  const productsAgg = await productsQb
+    .select('dp.id', 'partnerId')
+    .addSelect('SUM(p.productQuantity)', 'productQty')
+    .addSelect('SUM(p.productPrice)', 'productPrice')
+    .addSelect('SUM(p.subtotal)', 'totalProductPrice')
+    .groupBy('dp.id')
+    .getRawMany();
+
+  /** 3) Payments aggregation */
+  const paymentsQb = this.orderRepository.manager
+    .getRepository(PaymentHistory)
+    .createQueryBuilder('ph')
+    .leftJoin('ph.order', 'o')
+    .leftJoin('o.partner', 'dp')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
+
+  if (partnerIds) {
+    paymentsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+  }
+
+  const paymentsAgg = await paymentsQb
+    .select('dp.id', 'partnerId')
+    .addSelect('ph.paymentMethod', 'paymentMethod')
+    .addSelect('SUM(ph.paidAmount)', 'paidAmount')
+    .groupBy('dp.id')
+    .addGroupBy('ph.paymentMethod')
+    .getRawMany();
+
+  /** 4) Merge results */
+  const prodMap = new Map(
+    productsAgg.map((r) => [String(r.partnerId), r]),
   );
 
-  // ✅ Filter by products
-  if (filterOptions?.productId) {
-    const productIds = Array.isArray(filterOptions.productId)
-      ? filterOptions.productId
-      : [filterOptions.productId];
-    baseQuery.andWhere('prod.productId IN (:...productIds)', { productIds });
-  }
-
-  // ✅ Filter by payment methods
-  let paymentMethodIds = filterOptions?.paymentMethodIds;
-  if (paymentMethodIds) {
-    paymentMethodIds = Array.isArray(paymentMethodIds)
-      ? paymentMethodIds
-      : [paymentMethodIds];
-    baseQuery.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
-      paymentMethodIds,
-    });
-  }
-
-  // ✅ Filter by sources
-  let orderSources = filterOptions?.orderSources;
-  if (orderSources) {
-    orderSources = Array.isArray(orderSources) ? orderSources : [orderSources];
-    baseQuery.andWhere('orders.orderSource IN (:...orderSources)', {
-      orderSources,
-    });
-  }
-
-  // ✅ Query for paginated data
-  const queryBuilder = baseQuery.clone();
-
-  queryBuilder
-    .select('prod.productId', 'productId')
-    .addSelect('p.name', 'productName')
-    .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
-    .addSelect('SUM(prod.productQuantity)', 'totalOrderQuantity')
-    .addSelect('prod.productPrice', 'productPrice')
-    .addSelect('orders.orderSource', 'orderSource')
-    .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
-    .groupBy('prod.productId')
-    .addGroupBy('p.name')
-    .addGroupBy('prod.productPrice')
-    .addGroupBy('orders.orderSource');
-
-  if (sortBy) {
-    if (
-      [
-        'productName',
-        'productId',
-        'productPrice',
-        'totalSaleAmount',
-        'totalOrderQuantity',
-        'orderSource',
-        'orderCount',
-      ].includes(sortBy)
-    ) {
-      queryBuilder.orderBy(sortBy, sortOrder);
+  const payMap = new Map<string, any[]>();
+  for (const r of paymentsAgg) {
+    if (!payMap.has(String(r.partnerId))) {
+      payMap.set(String(r.partnerId), []);
     }
+    payMap.get(String(r.partnerId))?.push({
+      method: r.paymentMethod,
+      amount: Number(r.paidAmount) || 0,
+    });
   }
 
-  const result = await queryBuilder.getRawMany();
+  const result = ordersAgg.map((r) => {
+    const prod = prodMap.get(String(r.partnerId)) || {};
+    const payments = payMap.get(String(r.partnerId)) || [];
+    const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
 
-  const data = result.map((r) => ({
-    productId: r.productId,
-    productName: r.productName,
-    totalSaleAmount: Number(r.totalSaleAmount),
-    totalOrderQuantity: Number(r.totalOrderQuantity),
-    price: Number(r.productPrice),
-    orderSource: r.orderSource,
-    orderCount: Number(r.orderCount),
-  }));
+    const deliveryCharge = Number(r.deliveryCharge) || 0;
+    const productPrice = Number(prod.totalProductPrice) || 0;
+    const total = deliveryCharge + productPrice;
 
-  const countQuery = baseQuery.clone().select('COUNT(DISTINCT prod.productId)', 'cnt');
-  const totalResult = await countQuery.getRawOne();
-  const total = Number(totalResult.cnt);
+    return {
+      inTransitDate: `${r.inTransitStartDate} - ${r.inTransitEndDate}`,
+      deliveryPartner: r.deliveryPartner,
+      deliveryCharge,
+      orderQty: Number(r.orderQty) || 0,
+      productQty: Number(prod.productQty) || 0,
+      productPrice: Number(prod.totalProductPrice) || 0,
+      total,
+      advancePaid: Number(r.advancePaid) || 0,
+      payments,
+      totalPaid,
+      dueAmount: total - totalPaid,
+    };
+  });
 
-  return {
-    data,
-    total,
-    page,
-    limit,
-    startDate: utcStartDate,
-    endDate: utcEndDate,
-  };
+  return result;
 }
 
-}
 
+
+
+
+}

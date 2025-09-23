@@ -7,8 +7,10 @@ import {
   UpdateDateColumn,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { Order } from '../../order/entities/order.entity';
+import { AddressBook } from './addressbook.entity';
 
 export enum CustomerType {
   Probashi = 'PROBASHI',
@@ -48,10 +50,15 @@ export class Customers {
   country: string;
 
   @Column({ nullable: false, unique: true, type: 'varchar' })
-  customer_Id: string; 
-  @Column({ nullable: true,type: 'varchar' })
-  organizationId: string; 
+  customer_Id: string;
 
+  @Index('idx_customers_organization')
+  @Column({ nullable: true, type: 'varchar' })
+  organizationId: string;
+  @OneToMany(() => AddressBook, (address) => address.customer, {
+    cascade: true,
+  })
+  addresses: AddressBook[];
   @OneToMany(() => Order, (order) => order.customer)
   orders: Order[];
 
@@ -59,12 +66,12 @@ export class Customers {
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
   })
-   createdAt: Date;
+  createdAt: Date;
 
   @UpdateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
     onUpdate: 'CURRENT_TIMESTAMP(6)',
   })
-   updatedAt: Date;
+  updatedAt: Date;
 }
