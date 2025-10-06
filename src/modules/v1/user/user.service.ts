@@ -54,7 +54,7 @@ export class UserService {
     incrementedId = `R-${incrementedId}`;
 
     const { password, ...rest } = data;
-    const hashPassword = await bcryptjs.hash(password, 12);
+    const hashPassword = await bcryptjs.hash(password.trim(), 12);
 
     const result = await this.userRepository.save({
       ...rest,

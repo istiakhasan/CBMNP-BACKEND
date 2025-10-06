@@ -25,7 +25,7 @@ export class AuthenTicationService {
     data: any,
   ): Promise<{ refreshToken: string; accessToken: string }> {
     const isUserExist = await this.usersRepository.findOne({
-      where: { userId: data?.email },
+      where: { email: data?.userId },
       relations:['organization']
     });
     if (!isUserExist) {
@@ -35,8 +35,9 @@ export class AuthenTicationService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not active');
     }
     const { userId, password: savePassword, role, id,organization:{id:organizationId} } = isUserExist;
-    console.log(organizationId,"check");
-    const isPasswordMatch =await bcryptjs.compare(data.password, savePassword);
+    console.log(savePassword,data?.password,"check",isUserExist,"abcd");
+    const isPasswordMatch = await bcryptjs.compare(data.password.trim(), savePassword);
+    console.log(isPasswordMatch,"check match");
     if (!isPasswordMatch) {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'Password is incorrect');
     }
