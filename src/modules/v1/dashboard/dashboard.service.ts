@@ -242,45 +242,32 @@ export class DashboardService {
 
 
 async getTopSellingItems(organizationId: string) {
-  const cacheDuration = 5 * 60 * 1000; // 5 minutes
+  const cacheDuration = 5 * 60 * 1000;
   const now = Date.now();
-
-  // ✅ Return from cache if valid
   const cached = topSellingCache[organizationId];
-  // if (cached && now - cached.timestamp < cacheDuration) {
-  //   return cached.data;
-  // } 
-
-  // ✅ Query top selling product info
   const result = await this.orderproductsRepository
-    .createQueryBuilder('orderProduct')
-    .leftJoin('orderProduct.product', 'product')
-    .leftJoin('orderProduct.order', 'order')
-    .where('order.organizationId = :organizationId', { organizationId })
-    .select('product.name', 'label')
-    .addSelect('COUNT(DISTINCT order.id)', 'orders')
-    .addSelect('orderProduct.productId', 'productId')
-    .addSelect('SUM(orderProduct.subtotal)', 'totalSales')
-    .groupBy('product.name')
-    .addGroupBy('orderProduct.productId')
-    .orderBy('SUM(orderProduct.subtotal)', 'DESC')
+    .createQueryBuilder('op')
+    .innerJoin('op.order', 'o')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .select('op.productId', 'productId')
+    .addSelect('COUNT(op.orderId)', 'orders')
+    .addSelect('SUM(op.subtotal)', 'totalSales')
+    .groupBy('op.productId')
+    .orderBy('SUM(op.subtotal)', 'DESC')
     .limit(5)
     .getRawMany();
 
-  // ✅ Fetch all products in one query to avoid multiple DB calls
   const productIds = result.map(item => item.productId);
   const products = await this.productRepository.findBy({ id: In(productIds) });
-
   const productMap = new Map(products.map(p => [p.id, p]));
 
   const mapped = result.map(item => ({
-    label: item.label,
+    label: productMap.get(item.productId)?.name ?? "Unknown",
     orders: +item.orders,
     totalSales: parseFloat(item.totalSales).toFixed(2),
-    url: productMap.get(item.productId)?.images[0]?.url,
+    url: productMap.get(item.productId)?.images?.[0]?.url ?? null,
   }));
 
-  // ✅ Cache the resolved data
   topSellingCache[organizationId] = {
     data: mapped,
     timestamp: now,

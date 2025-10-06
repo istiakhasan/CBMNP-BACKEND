@@ -51,7 +51,7 @@ export class CustomerService {
 
   const lastCustomer = await this.customerRepository
     .createQueryBuilder('customer')
-    .where('customer.organizationId = :orgId', { orgId: data.organizationId })
+    // .where('customer.organizationId = :orgId', { orgId: data.organizationId })
     .andWhere('customer.customer_Id LIKE :prefix', { prefix: `${prefix}%` })
     .orderBy('customer.customer_Id', 'DESC')
     .getOne();
