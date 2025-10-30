@@ -152,7 +152,7 @@ export class RequisitionService {
     const orderLogs = orders.map(order => ({
       orderId: order.id,
       agentId: userId,
-      action: `Order Status changed to Packing and create requisition from ${order.status?.label || ''}`,
+      action: `Order Status changed to Store and create requisition from ${order.status?.label || ''}`,
       previousValue: null,
     }));
     await this.orderLogsRepository.save(orderLogs);

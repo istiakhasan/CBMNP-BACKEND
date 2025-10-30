@@ -33,6 +33,7 @@ import { DivisionsModule } from './modules/v1/divisions/divisions.module';
 import { DistrictsModule } from './modules/v1/districts/districts.module';
 import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_charge.module';
 import { OrderModuleV2 } from './modules/v2/order/order.module';
+import { ChatModule } from './modules/v2/chat/chat.module';
 
 @Module({
   imports: [
@@ -67,7 +68,8 @@ import { OrderModuleV2 } from './modules/v2/order/order.module';
     DivisionsModule,
     DistrictsModule,
     DelivaryChargeModule,
-    OrderModuleV2
+    OrderModuleV2,
+    ChatModule
   ],
   controllers: [AppController],
   providers: [

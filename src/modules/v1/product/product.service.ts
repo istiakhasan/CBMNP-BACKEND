@@ -45,6 +45,7 @@ export class ProductService {
         ...baseProductData,
         isBaseProduct: true,
         variants: savedVariants,
+        organizationId
       });
       const savedBaseProduct = await manager.save(baseProduct);
 
