@@ -10,8 +10,6 @@ import { Request, Response } from 'express';
 export class OrderController {  
   constructor(private readonly orderService: OrderService) {}
 
- 
-
   @Get()
   async getOrders(@Query() query,@Req() req:Request){
     const organizationId=req.headers['x-organization-id']
@@ -22,6 +20,7 @@ export class OrderController {
         options[key] = query[key];
       }
     }
+    const includeProducts = query.includeProducts === 'true';
     const searchFilterOptions = {};
     const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','paymentStatus'];
     for (const key of filterKeys) {
@@ -29,7 +28,7 @@ export class OrderController {
         searchFilterOptions[key] = query[key];
       }
     }
-    const result= await this.orderService.getOrders(options,searchFilterOptions,organizationId);
+    const result= await this.orderService.getOrders(options,searchFilterOptions,organizationId,includeProducts);
     return {
       success:true,
       statusCode:HttpStatus.OK,
@@ -160,6 +159,10 @@ async downloadReports(@Query() query, @Req() req: Request, @Res() res: Response)
       message:'Order retrieved successfully',
       data:result,
    }
+  }
+  @Get('/scan/:id')
+  async getScanOrderByOrderNumber(@Param('id') orderNumber: string): Promise<Order> {
+    return await this.orderService.getScanOrderById(orderNumber);
   }
   @Get(':id')
   async getOrderById(@Param('id') id: number): Promise<Order> {

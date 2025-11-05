@@ -8,6 +8,15 @@ import { extractOptions } from '../../../helpers/queryHelper';
 @Controller('v1/requisition')
 export class RequsitionController {
   constructor(private readonly requsitionService: RequisitionService) {}
+// v1/requisition/preview?orderIds=1,2,3&locationId=abc
+@Get('preview')
+async getPreview(
+  @Query('orderIds') orderIds: string,
+  @Query('locationId') locationId: string,
+) {
+  const ids = orderIds.split(',').map(id => Number(id));
+  return this.requsitionService.generatePreview(ids, locationId);
+}
 
   @Post()
   create(@Body() createRequsitionDto: CreateRequsitionDto,@Req() req:Request) {

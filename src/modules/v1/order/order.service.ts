@@ -6,7 +6,6 @@ import * as ExcelJS from 'exceljs';
 import { Products } from './entities/products.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
-import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Product } from '../product/entity/product.entity';
 import { OrderStatus } from '../status/entities/status.entity';
 import { Customers } from '../customers/entities/customers.entity';
@@ -25,6 +24,7 @@ import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.e
 import { OrderProductReturn } from './entities/return_damage.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { Response } from 'express';
+import * as _ from 'lodash';
 @Injectable()
 export class OrderService {
   constructor(
@@ -60,6 +60,20 @@ export class OrderService {
 
     private readonly requisitionService: RequisitionService,
   ) {}
+  async generateOrderNumber(organizationId: string): Promise<string> {
+    const lastOrder = await this.orderRepository.findOne({
+      where: { organizationId },
+      order: { createdAt: 'DESC' },
+    });
+    console.log(lastOrder, 'hhhhhhhhhhhhhhhhh');
+    if (!lastOrder || !lastOrder.orderNumber) {
+      return 'ORD-10000';
+    }
+
+    const lastNumber = parseInt(lastOrder.orderNumber.replace('ORD-', ''), 10);
+    const newNumber = lastNumber + 1;
+    return `ORD-${newNumber}`;
+  }
 
   async createOrder(payload: Order, organizationId: string) {
     const {
@@ -85,7 +99,7 @@ export class OrderService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
     }
 
-    const orderNumber = generateUniqueOrderNumber();
+    const orderNumber = await this.generateOrderNumber(organizationId);
     const validatedProducts: any[] = [];
     let productValue = 0;
 
@@ -276,7 +290,7 @@ export class OrderService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
     }
 
-    const orderNumber = generateUniqueOrderNumber();
+    const orderNumber = this.generateOrderNumber(organizationId);
     const validatedProducts: any[] = [];
     let productValue = 0;
 
@@ -397,12 +411,16 @@ export class OrderService {
     });
   }
 
-  async getOrders(options, filterOptions, organizationId) {
+  async getOrders(options, filterOptions, organizationId,includeProducts = false) {
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId });
-
+      .where('orders.organizationId = :organizationId', { organizationId })
+  
+  if (includeProducts) {
+    queryBuilder.leftJoinAndSelect('orders.products', 'products');
+    queryBuilder.leftJoinAndSelect('products.product', 'product');
+  }
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
       queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', {
@@ -467,7 +485,7 @@ export class OrderService {
     }
     if (filterOptions?.paymentStatus) {
       queryBuilder.andWhere('orders.paymentStatus = :paymentStatus', {
-        paymentStatus:filterOptions?.paymentStatus,
+        paymentStatus: filterOptions?.paymentStatus,
       });
     }
     // if (filterOptions?.locationId) {
@@ -757,6 +775,23 @@ export class OrderService {
       }),
     };
   }
+  async getScanOrderById(orderNumber: string): Promise<Order & { partner: any }> {
+    console.log(orderNumber,"order number");
+    const order = await this.orderRepository.findOne({
+      where: { orderNumber:orderNumber }
+    });
+   console.log(order,"check");
+    if (!order) {
+      throw new NotFoundException(`Order with ID ${orderNumber} not found`);
+    }
+    if (order.status.label !== 'Packing') {
+      throw new ApiError(HttpStatus.BAD_REQUEST,`Order with ID ${orderNumber} not in packing`);
+    }
+
+
+
+    return order;
+  }
 
   /**
    * Delete an order by its ID.
@@ -985,7 +1020,32 @@ export class OrderService {
     mainData: any,
     organizationId: string,
   ) {
+    const MAX_CHUNK = 100; // 100 orders per batch
+    const chunkedOrders = _.chunk(orderIds, MAX_CHUNK);
+    let finalUpdatedOrders: any[] = [];
+
+    for (const chunk of chunkedOrders) {
+      const updatedOrders = await this.processOrdersChunk(
+        chunk,
+        mainData,
+        organizationId,
+      );
+      finalUpdatedOrders = finalUpdatedOrders.concat(updatedOrders);
+    }
+
+    return finalUpdatedOrders;
+  }
+
+  // ===============================
+  // ✅ Process Single Chunk of Orders
+  // ===============================
+  private async processOrdersChunk(
+    orderIds: number[],
+    mainData: any,
+    organizationId: string,
+  ) {
     const { currentStatus, ...data } = mainData;
+
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
@@ -995,553 +1055,302 @@ export class OrderService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
     }
 
-    //status change to intransit , in-transit order status===7
-    if (data?.statusId === 7) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-      try {
-        const currierPayload = orders?.map((op: any) => {
-          return {
-            invoice: op?.invoiceNumber,
-            recipient_name: op?.receiverName,
-            recipient_phone: op?.receiverPhoneNumber,
-            recipient_address: op?.receiverAddress,
-            cod_amount: op?.totalReceiveAbleAmount,
-            note: op?.deliveryNote || 'N/A',
-          };
+    try {
+      const allProducts = await this.productsRepository.find({
+        where: { orderId: In(orderIds) },
+      });
+
+      // Bulk inventory updates
+      const inventoryUpdatePromises: Promise<any>[] = [];
+
+      for (const product of allProducts) {
+        const { productId, productQuantity } = product;
+        const order = orders.find((o) => o.id === product.orderId);
+
+        const inventory = await this.inventoryRepository.findOne({
+          where: { productId },
+        });
+        const inventoryItem = await this.InventoryItemItemRepository.findOne({
+          where: { productId, locationId: order?.locationId },
         });
 
-        const productUpdates = [];
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
+        // ========== STATUS 7: IN-TRANSIT ===========
+        if (data.statusId === 7) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'processing',
+                productQuantity,
+              ),
+            );
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'stock',
+                productQuantity,
+              ),
+            );
+          }
 
-          for (const product of products) {
-            const inventory = await this.inventoryRepository.findOne({
-              where: { productId: product.productId },
-            });
-
-            const inventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: {
-                  productId: product.productId,
-                  locationId: order.locationId,
-                },
-              });
-
-            if (inventory) {
-              await this.inventoryRepository.update(
-                { productId: product.productId },
-                {
-                  processing: inventory.processing - product.productQuantity,
-                  stock: inventory.stock - product.productQuantity,
-                },
-              );
-            }
-            if (inventoryItem) {
-              await this.InventoryItemItemRepository.update(
-                { productId: product.productId, locationId: order.locationId },
-                {
-                  processing:
-                    inventoryItem.processing - product.productQuantity,
-                  quantity: inventoryItem.quantity - product.productQuantity,
-                },
-              );
-            }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'processing',
+                productQuantity,
+              ),
+            );
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'quantity',
+                productQuantity,
+              ),
+            );
           }
         }
 
-        const currierCompany = await this.deliveryPartnerRepository.findOne({
-          where: { organizationId: organizationId, id: orders[0]?.currier },
-        });
+        // ========== STATUS 4: CANCEL ===========
+        if (
+          data.statusId === 4 &&
+          (currentStatus === 5 || currentStatus === 6)
+        ) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'processing',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'processing',
+                productQuantity,
+              ),
+            );
+          }
+        }
 
-        if (currierCompany?.partnerName === 'SteadFast') {
-          await Promise.all(productUpdates);
-          await axios.post(
-            'https://portal.packzy.com/api/v1/create_order/bulk-order',
-            currierPayload,
-            {
-              headers: {
-                'Api-Key': currierCompany.api_key,
-                'Secret-Key': currierCompany.secret_key,
-              },
-            },
+        // ========== STATUS 4: RETURN / ORDER QUE ===========
+        if (data.statusId === 4 && currentStatus === 2) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
+        }
+
+        // ========== STATUS 3: HOLD ===========
+        // ========== STATUS 3: HOLD ===========
+        if (data.statusId === 3 && currentStatus === 2) {
+          console.log(
+            'this block is execute properly=========================',
+          );
+
+          // ensure productQuantity is a number
+          const qty = Number(productQuantity) || 0;
+
+          if (inventory) {
+            // update Inventory table (use parameterized query, COALESCE to handle NULLs)
+            inventoryUpdatePromises.push(
+              queryRunner.manager.query(
+                `UPDATE "inventory"
+         SET "orderQue" = COALESCE("orderQue", 0) - $1,
+             "hoildQue" = COALESCE("hoildQue", 0) + $1,
+             "updatedAt" = now()
+         WHERE "productId" = $2`,
+                [qty, productId],
+              ),
+            );
+          }
+
+          if (inventoryItem) {
+            // inventoryItems table name from your entity: 'inventoryItems'
+            inventoryUpdatePromises.push(
+              queryRunner.manager.query(
+                `UPDATE "inventoryItems"
+         SET "orderQue" = COALESCE("orderQue", 0) - $1,
+             "hoildQue" = COALESCE("hoildQue", 0) + $1,
+             "updatedAt" = now()
+         WHERE "productId" = $2 AND "locationId" = $3`,
+                [qty, productId, order.locationId],
+              ),
+            );
+          }
+        }
+
+        // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
+        if (
+          data.statusId === 2 &&
+          (currentStatus === 1 || currentStatus === 4)
+        ) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.increment(
+                { productId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.increment(
+                { productId, locationId: order.locationId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          } else if (inventory) {
+            // create new inventory item if missing
+            const newItem = this.InventoryItemItemRepository.create({
+              locationId: order.locationId,
+              productId,
+              quantity: 0,
+              orderQue: productQuantity,
+              inventoryId: inventory.id,
+            });
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.save(newItem),
+            );
+          }
+        }
+
+        // ========== STATUS 3 from 1 → HOLD QUE ===========
+        if (data.statusId === 3 && currentStatus === 1) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.increment(
+                { productId },
+                'hoildQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.increment(
+                { productId, locationId: order.locationId },
+                'hoildQue',
+                productQuantity,
+              ),
+            );
+          } else if (inventory) {
+            const newItem = this.InventoryItemItemRepository.create({
+              locationId: order.locationId,
+              productId,
+              quantity: 0,
+              orderQue: 0,
+              hoildQue: productQuantity,
+              inventoryId: inventory.id,
+            });
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.save(newItem),
+            );
+          }
+        }
+
+        // ========== STATUS 5: STORE ===========
+        if (data.statusId === 5) {
+          await this.requisitionService.createRequisition(
+            { orderIds, userId: data?.userId },
+            organizationId,
+          );
+          await this.orderRepository.update(
+            { id: In(orderIds) },
+            { storeTime: new Date() },
           );
         }
+
+        // ========== STATUS 6: PACKING ===========
+        if (data.statusId === 6) {
+          await this.orderRepository.update(
+            { id: In(orderIds) },
+            { packingTime: new Date() },
+          );
+        }
+      }
+
+      // Execute all bulk updates in parallel
+      await Promise.all(inventoryUpdatePromises);
+
+      // Update orders with new status & timestamps
+      if (data.statusId === 7) {
         await this.orderRepository.update(
           { id: In(orderIds) },
           { intransitTime: new Date() },
         );
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
       }
-    }
-    //status change to store , store order status===5
-    if (data?.statusId === 5) {
-      await this.requisitionService.createRequisition(
-        { orderIds, userId: data?.userId },
-        organizationId,
-      );
+
+      // Finally, update orders general status & previousStatus
       await this.orderRepository.update(
         { id: In(orderIds) },
-        { storeTime: new Date() },
+        { ...data, previousStatus: currentStatus },
       );
-    }
-    if (data?.statusId === 6) {
-      await this.orderRepository.update(
-        { id: In(orderIds) },
-        { packingTime: new Date() },
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw new ApiError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        error.message || 'Failed to update inventory',
       );
+    } finally {
+      await queryRunner.release();
     }
-    if (data?.statusId === 4 && currentStatus === 2) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
 
-      try {
-        const productUpdates = [];
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
+    // ✅ Courier API call outside transaction
+    if (data.statusId === 7) {
+      const currierCompany = await this.deliveryPartnerRepository.findOne({
+        where: { organizationId, id: orders[0]?.currier },
+      });
 
-          for (const product of products) {
-            const inventory = await this.inventoryRepository.findOne({
-              where: { productId: product.productId },
-            });
+      if (currierCompany?.partnerName === 'SteadFast') {
+        const courierPayload = orders.map((op) => ({
+          invoice: op.invoiceNumber,
+          recipient_name: op.receiverName,
+          recipient_phone: op.receiverPhoneNumber,
+          recipient_address: op.receiverAddress,
+          cod_amount: op.totalReceiveAbleAmount,
+          note: op.deliveryNote || 'N/A',
+        }));
 
-            const inventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: {
-                  productId: product.productId,
-                  locationId: order.locationId,
-                },
-              });
-
-            if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     orderQue: inventory.orderQue - product.productQuantity
-              //   })
-              // );
-
-              await this.inventoryRepository.update(
-                { productId: product.productId },
-                {
-                  orderQue: inventory.orderQue - product.productQuantity,
-                },
-              );
-            }
-            if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     orderQue: inventoryItem.orderQue - product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
-                { productId: product.productId, locationId: order.locationId },
-                {
-                  orderQue: inventoryItem.orderQue - product.productQuantity,
-                },
-              );
-            }
-          }
-        }
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
+        await axios.post(
+          'https://portal.packzy.com/api/v1/create_order/bulk-order',
+          courierPayload,
+          {
+            headers: {
+              'Api-Key': currierCompany.api_key,
+              'Secret-Key': currierCompany.secret_key,
+            },
+          },
         );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-    //  cancel order
-    if (data?.statusId === 4 && (currentStatus === 5 || currentStatus === 6)) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        const productUpdates = [];
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
-
-          for (const product of products) {
-            const inventory = await this.inventoryRepository.findOne({
-              where: { productId: product.productId },
-            });
-
-            const inventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: {
-                  productId: product.productId,
-                  locationId: order.locationId,
-                },
-              });
-
-            if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     processing: inventory.processing - product.productQuantity
-              //   })
-              // );
-
-              await this.inventoryRepository.update(
-                { productId: product.productId },
-                {
-                  processing: inventory.processing - product.productQuantity,
-                },
-              );
-            }
-            if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     processing: inventoryItem.processing - product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
-                { productId: product.productId, locationId: order.locationId },
-                {
-                  processing:
-                    inventoryItem.processing - product.productQuantity,
-                },
-              );
-            }
-          }
-        }
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
       }
     }
 
-    // change hold status
-
-    if (data?.statusId === 3 && currentStatus === 2) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        const productUpdates = [];
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
-
-          for (const product of products) {
-            const inventory = await this.inventoryRepository.findOne({
-              where: { productId: product.productId },
-            });
-
-            const inventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: {
-                  productId: product.productId,
-                  locationId: order.locationId,
-                },
-              });
-
-            if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     orderQue: inventory.orderQue - product.productQuantity,
-              //     hoildQue:inventory.hoildQue+product.productQuantity
-              //   })
-              // );
-              await this.inventoryRepository.update(
-                { productId: product.productId },
-                {
-                  orderQue: inventory.orderQue - product.productQuantity,
-                  hoildQue: inventory.hoildQue + product.productQuantity,
-                },
-              );
-            }
-            if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     orderQue: inventoryItem.orderQue - product.productQuantity,
-              //     hoildQue:inventoryItem.hoildQue+product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
-                { productId: product.productId, locationId: order.locationId },
-                {
-                  orderQue: inventoryItem.orderQue - product.productQuantity,
-                  hoildQue: inventoryItem.hoildQue + product.productQuantity,
-                },
-              );
-            }
-          }
-        }
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-
-    if (data?.statusId === 3 && (currentStatus === 5 || currentStatus === 6)) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        const productUpdates = [];
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
-
-          for (const product of products) {
-            console.log(product, 'product');
-            const inventory = await this.inventoryRepository.findOne({
-              where: { productId: product.productId },
-            });
-
-            const inventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: {
-                  productId: product.productId,
-                  locationId: order.locationId,
-                },
-              });
-
-            if (inventory) {
-              console.log('++++++++++++++++++++++');
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     processing: inventory.processing - product.productQuantity,
-              //     hoildQue:inventory.hoildQue+product.productQuantity
-              //   })
-              // );
-              await this.inventoryRepository.update(
-                { productId: product.productId },
-                {
-                  processing: inventory.processing - product.productQuantity,
-                  hoildQue: inventory.hoildQue + product.productQuantity,
-                },
-              );
-            }
-            if (inventoryItem) {
-              console.log('_________________________');
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     processing: inventoryItem.processing - product.productQuantity,
-              //     hoildQue:inventoryItem.hoildQue+product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
-                { productId: product.productId, locationId: order.locationId },
-                {
-                  processing:
-                    inventoryItem.processing - product.productQuantity,
-                  hoildQue: inventoryItem.hoildQue + product.productQuantity,
-                },
-              );
-            }
-          }
-        }
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-
-    if (data?.statusId === 2 && (currentStatus === 1 || currentStatus === 4)) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
-
-          for (const item of products) {
-            const { productId, productQuantity } = item;
-            const existingInventory = await this.inventoryRepository.findOne({
-              where: { productId },
-            });
-            if (!existingInventory?.orderQue) {
-              await this.inventoryRepository.update(
-                { productId },
-                { orderQue: 0 },
-              );
-            }
-            await this.inventoryRepository.increment(
-              { productId },
-              'orderQue',
-              productQuantity,
-            );
-
-            const existingInventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: { productId, locationId: order?.locationId },
-              });
-
-            //
-            if (!existingInventoryItem) {
-              const newInventoryItems =
-                await this.InventoryItemItemRepository.create({
-                  locationId: order?.locationId,
-                  productId: productId,
-                  quantity: 0,
-                  orderQue: productQuantity,
-                  inventoryId: existingInventory.id,
-                });
-
-              await this.InventoryItemItemRepository.save(newInventoryItems);
-            } else {
-              if (!existingInventoryItem?.orderQue) {
-                await this.InventoryItemItemRepository.update(
-                  { productId, locationId: order?.locationId },
-                  { orderQue: 0 },
-                );
-              }
-
-              await this.InventoryItemItemRepository.increment(
-                { productId, locationId: order?.locationId },
-                'orderQue',
-                productQuantity,
-              );
-            }
-          }
-        }
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-    if (data?.statusId === 3 && currentStatus === 1) {
-      const queryRunner = this.dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
-
-      try {
-        for (const order of orders) {
-          const products = await this.productsRepository.find({
-            where: { orderId: order.id },
-          });
-
-          for (const item of products) {
-            const { productId, productQuantity } = item;
-            const existingInventory = await this.inventoryRepository.findOne({
-              where: { productId },
-            });
-            if (!existingInventory?.hoildQue) {
-              await this.inventoryRepository.update(
-                { productId },
-                { hoildQue: 0 },
-              );
-            }
-            await this.inventoryRepository.increment(
-              { productId },
-              'hoildQue',
-              productQuantity,
-            );
-
-            const existingInventoryItem =
-              await this.InventoryItemItemRepository.findOne({
-                where: { productId, locationId: order?.locationId },
-              });
-
-            //
-            if (!existingInventoryItem) {
-              const newInventoryItems =
-                await this.InventoryItemItemRepository.create({
-                  locationId: order?.locationId,
-                  productId: productId,
-                  quantity: 0,
-                  orderQue: productQuantity,
-                  inventoryId: existingInventory.id,
-                });
-
-              await this.InventoryItemItemRepository.save(newInventoryItems);
-            } else {
-              if (!existingInventoryItem?.orderQue) {
-                await this.InventoryItemItemRepository.update(
-                  { productId, locationId: order?.locationId },
-                  { hoildQue: 0 },
-                );
-              }
-
-              await this.InventoryItemItemRepository.increment(
-                { productId, locationId: order?.locationId },
-                'hoildQue',
-                productQuantity,
-              );
-            }
-          }
-        }
-
-        // Commit transaction
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
-        throw new ApiError(
-          HttpStatus.INTERNAL_SERVER_ERROR,
-          error.message || 'Failed to update inventory',
-        );
-      } finally {
-        await queryRunner.release();
-      }
-    }
-
-    await this.orderRepository.update(
-      { id: In(orderIds) },
-      { ...data, previousStatus: currentStatus },
-    );
-
+    // Save order logs
     const updatedOrders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
@@ -1555,6 +1364,7 @@ export class OrderService {
     }));
 
     await this.orderLogsRepository.save(orderLogs);
+
     return updatedOrders;
   }
   // change hold status
@@ -1564,6 +1374,8 @@ export class OrderService {
     organizationId: string,
   ) {
     const { currentStatus, ...data } = mainData;
+
+    // Fetch all orders with status
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
@@ -1572,40 +1384,56 @@ export class OrderService {
     if (orders.length !== orderIds.length) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
     }
+
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
+      // Fetch all products for these orders
+      const products = await this.productsRepository.find({
+        where: { orderId: In(orderIds) },
+      });
+
+      const productIds = products.map((p) => p.productId);
+      const locationIds = [...new Set(orders.map((o) => o.locationId))];
+
+      // Fetch inventories in batch
+      const inventories = await this.inventoryRepository.find({
+        where: { productId: In(productIds) },
+      });
+
+      const inventoryItems = await this.InventoryItemItemRepository.find({
+        where: {
+          productId: In(productIds),
+          locationId: In(locationIds),
+        },
+      });
+
+      // Convert to Map for quick access
+      const inventoryMap = new Map(inventories.map((i) => [i.productId, i]));
+      const inventoryItemMap = new Map(
+        inventoryItems.map((i) => [`${i.productId}-${i.locationId}`, i]),
+      );
+
+      // Process each order
       for (const order of orders) {
-        const products = await this.productsRepository.find({
-          where: { orderId: order.id },
-        });
+        const orderProducts = products.filter((p) => p.orderId === order.id);
 
-        for (const product of products) {
-          const inventory = await this.inventoryRepository.findOne({
-            where: { productId: product.productId },
-          });
-          const inventoryItem = await this.InventoryItemItemRepository.findOne({
-            where: {
-              productId: product.productId,
-              locationId: order.locationId,
-            },
-          });
+        for (const product of orderProducts) {
+          const inventory = inventoryMap.get(product.productId);
+          const inventoryItem = inventoryItemMap.get(
+            `${product.productId}-${order.locationId}`,
+          );
 
+          // Previous status 2 or null, and new status is not 4
           if (
             (order?.previousStatus === '2' || !order?.previousStatus) &&
             data?.statusId !== 4
           ) {
             if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     orderQue: inventory.orderQue + product.productQuantity,
-              //     hoildQue:inventory.hoildQue-product.productQuantity
-              //   })
-              // );
-
-              await this.inventoryRepository.update(
+              await queryRunner.manager.update(
+                Inventory,
                 { productId: product.productId },
                 {
                   orderQue: inventory.orderQue + product.productQuantity,
@@ -1613,15 +1441,10 @@ export class OrderService {
                 },
               );
             }
-            if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     orderQue: inventoryItem.orderQue + product.productQuantity,
-              //     hoildQue:inventoryItem.hoildQue-product.productQuantity
-              //   })
-              // );
 
-              await this.InventoryItemItemRepository.update(
+            if (inventoryItem) {
+              await queryRunner.manager.update(
+                InventoryItem,
                 { productId: product.productId, locationId: order.locationId },
                 {
                   orderQue: inventoryItem.orderQue + product.productQuantity,
@@ -1630,19 +1453,15 @@ export class OrderService {
               );
             }
           }
+
+          // Previous status 5 or 6, and new status is not 4
           if (
             (order?.previousStatus === '5' || order?.previousStatus === '6') &&
             data?.statusId !== 4
           ) {
             if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     processing: inventory.processing + product.productQuantity,
-              //     hoildQue:inventory.hoildQue-product.productQuantity
-              //   })
-              // );
-
-              await this.inventoryRepository.update(
+              await queryRunner.manager.update(
+                Inventory,
                 { productId: product.productId },
                 {
                   processing: inventory.processing + product.productQuantity,
@@ -1650,14 +1469,10 @@ export class OrderService {
                 },
               );
             }
+
             if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     processing: inventoryItem.processing + product.productQuantity,
-              //     hoildQue:inventoryItem.hoildQue-product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
+              await queryRunner.manager.update(
+                InventoryItem,
                 { productId: product.productId, locationId: order.locationId },
                 {
                   processing:
@@ -1667,48 +1482,42 @@ export class OrderService {
               );
             }
           }
+
+          // New status is 4
           if (data?.statusId === 4) {
             if (inventory) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(Inventory, { productId: product.productId }, {
-              //     hoildQue:inventory.hoildQue-product.productQuantity
-              //   })
-              // );
-
-              await this.inventoryRepository.update(
+              await queryRunner.manager.update(
+                Inventory,
                 { productId: product.productId },
-                {
-                  hoildQue: inventory.hoildQue - product.productQuantity,
-                },
+                { hoildQue: inventory.hoildQue - product.productQuantity },
               );
             }
+
             if (inventoryItem) {
-              // productUpdates.push(
-              //   queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-              //     hoildQue:inventoryItem.hoildQue-product.productQuantity
-              //   })
-              // );
-              await this.InventoryItemItemRepository.update(
+              await queryRunner.manager.update(
+                InventoryItem,
                 { productId: product.productId, locationId: order.locationId },
-                {
-                  hoildQue: inventoryItem.hoildQue - product.productQuantity,
-                },
+                { hoildQue: inventoryItem.hoildQue - product.productQuantity },
               );
             }
-          }
-          if (data?.statusId === 4) {
-            await this.orderRepository.update(
+
+            // Update order status to 4
+            await queryRunner.manager.update(
+              Order,
               { id: order.id },
               { statusId: data?.statusId },
             );
           } else {
-            await this.orderRepository.update(
+            // Otherwise, revert to previous status or default 2
+            await queryRunner.manager.update(
+              Order,
               { id: order.id },
               { statusId: +order.previousStatus ? +order.previousStatus : 2 },
             );
           }
         }
       }
+
       // Commit transaction
       await queryRunner.commitTransaction();
     } catch (error) {
@@ -1721,13 +1530,13 @@ export class OrderService {
       await queryRunner.release();
     }
 
-    // await this.orderRepository.update({ id: In(orderIds) }, data);
-
+    // Fetch updated orders with status
     const updatedOrders = await this.orderRepository.find({
       where: { id: In(orderIds) },
       relations: ['status'],
     });
 
+    // Save order logs
     const orderLogs = orders.map((order, index) => ({
       orderId: order.id,
       agentId: data.agentId,
@@ -2224,177 +2033,191 @@ export class OrderService {
     };
   }
 
+  async getDeliveryPartnerShipmentReport(
+    organizationId: string,
+    filterOptions: any,
+  ) {
+    let utcStartDate: string;
+    let utcEndDate: string;
 
-async getDeliveryPartnerShipmentReport(
-  organizationId: string,
-  filterOptions: any,
-) {
-  let utcStartDate: string;
-  let utcEndDate: string;
+    // ✅ Handle date filter or fallback to current date
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      const localStartDate = new Date(filterOptions.startDate);
+      utcStartDate = new Date(
+        Date.UTC(
+          localStartDate.getFullYear(),
+          localStartDate.getMonth(),
+          localStartDate.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      ).toISOString();
 
-  // ✅ Handle date filter or fallback to current date
-  if (filterOptions?.startDate && filterOptions?.endDate) {
-    const localStartDate = new Date(filterOptions.startDate);
-    utcStartDate = new Date(
-      Date.UTC(
-        localStartDate.getFullYear(),
-        localStartDate.getMonth(),
-        localStartDate.getDate(),
-        0, 0, 0, 0,
-      ),
-    ).toISOString();
-
-    const localEndDate = new Date(filterOptions.endDate);
-    utcEndDate = new Date(
-      Date.UTC(
-        localEndDate.getFullYear(),
-        localEndDate.getMonth(),
-        localEndDate.getDate(),
-        23, 59, 59, 999,
-      ),
-    ).toISOString();
-  } else {
-    const today = new Date();
-    utcStartDate = new Date(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0),
-    ).toISOString();
-    utcEndDate = new Date(
-      Date.UTC(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999),
-    ).toISOString();
-  }
-
-  /** 1) Orders aggregation */
-  const ordersQb = this.orderRepository
-    .createQueryBuilder('o')
-    .leftJoin('o.partner', 'dp')
-    .where('o.organizationId = :organizationId', { organizationId })
-    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
-      startDate: utcStartDate,
-      endDate: utcEndDate,
-    });
-
-  const partnerIds = filterOptions?.currier?.length
-    ? filterOptions.currier
-    : null;
-  if (partnerIds) {
-    ordersQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
-  }
-
-  const locationId = filterOptions?.locationId?.length
-    ? filterOptions.locationId
-    : null;
-  if (locationId) {
-    ordersQb.andWhere('o.locationId IN (:...locationId)', { locationId });
-  }
-
-  const ordersAgg = await ordersQb
-    .select('dp.id', 'partnerId')
-    .addSelect('dp.partnerName', 'deliveryPartner')
-    .addSelect('MIN(o.intransitTime)', 'inTransitStartDate')
-    .addSelect('MAX(o.intransitTime)', 'inTransitEndDate')
-    .addSelect('SUM(o.shippingCharge)', 'deliveryCharge')
-    .addSelect('COUNT(DISTINCT o.id)', 'orderQty')
-    .addSelect('SUM(o.totalPaidAmount)', 'advancePaid')
-    .groupBy('dp.id')
-    .addGroupBy('dp.partnerName')
-    .getRawMany();
-
-  /** 2) Products aggregation */
-  const prodRepo =
-    this.productsRepository ??
-    this.orderRepository.manager.getRepository(Products);
-
-  const productsQb = prodRepo
-    .createQueryBuilder('p')
-    .leftJoin('p.order', 'o')
-    .leftJoin('o.partner', 'dp')
-    .where('o.organizationId = :organizationId', { organizationId })
-    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
-      startDate: utcStartDate,
-      endDate: utcEndDate,
-    });
-
-  if (partnerIds) {
-    productsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
-  }
-
-  const productsAgg = await productsQb
-    .select('dp.id', 'partnerId')
-    .addSelect('SUM(p.productQuantity)', 'productQty')
-    .addSelect('SUM(p.productPrice)', 'productPrice')
-    .addSelect('SUM(p.subtotal)', 'totalProductPrice')
-    .groupBy('dp.id')
-    .getRawMany();
-
-  /** 3) Payments aggregation */
-  const paymentsQb = this.orderRepository.manager
-    .getRepository(PaymentHistory)
-    .createQueryBuilder('ph')
-    .leftJoin('ph.order', 'o')
-    .leftJoin('o.partner', 'dp')
-    .where('o.organizationId = :organizationId', { organizationId })
-    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
-      startDate: utcStartDate,
-      endDate: utcEndDate,
-    });
-
-  if (partnerIds) {
-    paymentsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
-  }
-
-  const paymentsAgg = await paymentsQb
-    .select('dp.id', 'partnerId')
-    .addSelect('ph.paymentMethod', 'paymentMethod')
-    .addSelect('SUM(ph.paidAmount)', 'paidAmount')
-    .groupBy('dp.id')
-    .addGroupBy('ph.paymentMethod')
-    .getRawMany();
-
-  /** 4) Merge results */
-  const prodMap = new Map(
-    productsAgg.map((r) => [String(r.partnerId), r]),
-  );
-
-  const payMap = new Map<string, any[]>();
-  for (const r of paymentsAgg) {
-    if (!payMap.has(String(r.partnerId))) {
-      payMap.set(String(r.partnerId), []);
+      const localEndDate = new Date(filterOptions.endDate);
+      utcEndDate = new Date(
+        Date.UTC(
+          localEndDate.getFullYear(),
+          localEndDate.getMonth(),
+          localEndDate.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      ).toISOString();
+    } else {
+      const today = new Date();
+      utcStartDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          0,
+          0,
+          0,
+          0,
+        ),
+      ).toISOString();
+      utcEndDate = new Date(
+        Date.UTC(
+          today.getFullYear(),
+          today.getMonth(),
+          today.getDate(),
+          23,
+          59,
+          59,
+          999,
+        ),
+      ).toISOString();
     }
-    payMap.get(String(r.partnerId))?.push({
-      method: r.paymentMethod,
-      amount: Number(r.paidAmount) || 0,
+
+    /** 1) Orders aggregation */
+    const ordersQb = this.orderRepository
+      .createQueryBuilder('o')
+      .leftJoin('o.partner', 'dp')
+      .where('o.organizationId = :organizationId', { organizationId })
+      .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+        startDate: utcStartDate,
+        endDate: utcEndDate,
+      });
+
+    const partnerIds = filterOptions?.currier?.length
+      ? filterOptions.currier
+      : null;
+    if (partnerIds) {
+      ordersQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+    }
+
+    const locationId = filterOptions?.locationId?.length
+      ? filterOptions.locationId
+      : null;
+    if (locationId) {
+      ordersQb.andWhere('o.locationId IN (:...locationId)', { locationId });
+    }
+
+    const ordersAgg = await ordersQb
+      .select('dp.id', 'partnerId')
+      .addSelect('dp.partnerName', 'deliveryPartner')
+      .addSelect('MIN(o.intransitTime)', 'inTransitStartDate')
+      .addSelect('MAX(o.intransitTime)', 'inTransitEndDate')
+      .addSelect('SUM(o.shippingCharge)', 'deliveryCharge')
+      .addSelect('COUNT(DISTINCT o.id)', 'orderQty')
+      .addSelect('SUM(o.totalPaidAmount)', 'advancePaid')
+      .groupBy('dp.id')
+      .addGroupBy('dp.partnerName')
+      .getRawMany();
+
+    /** 2) Products aggregation */
+    const prodRepo =
+      this.productsRepository ??
+      this.orderRepository.manager.getRepository(Products);
+
+    const productsQb = prodRepo
+      .createQueryBuilder('p')
+      .leftJoin('p.order', 'o')
+      .leftJoin('o.partner', 'dp')
+      .where('o.organizationId = :organizationId', { organizationId })
+      .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+        startDate: utcStartDate,
+        endDate: utcEndDate,
+      });
+
+    if (partnerIds) {
+      productsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+    }
+
+    const productsAgg = await productsQb
+      .select('dp.id', 'partnerId')
+      .addSelect('SUM(p.productQuantity)', 'productQty')
+      .addSelect('SUM(p.productPrice)', 'productPrice')
+      .addSelect('SUM(p.subtotal)', 'totalProductPrice')
+      .groupBy('dp.id')
+      .getRawMany();
+
+    /** 3) Payments aggregation */
+    const paymentsQb = this.orderRepository.manager
+      .getRepository(PaymentHistory)
+      .createQueryBuilder('ph')
+      .leftJoin('ph.order', 'o')
+      .leftJoin('o.partner', 'dp')
+      .where('o.organizationId = :organizationId', { organizationId })
+      .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+        startDate: utcStartDate,
+        endDate: utcEndDate,
+      });
+
+    if (partnerIds) {
+      paymentsQb.andWhere('dp.id IN (:...partnerIds)', { partnerIds });
+    }
+
+    const paymentsAgg = await paymentsQb
+      .select('dp.id', 'partnerId')
+      .addSelect('ph.paymentMethod', 'paymentMethod')
+      .addSelect('SUM(ph.paidAmount)', 'paidAmount')
+      .groupBy('dp.id')
+      .addGroupBy('ph.paymentMethod')
+      .getRawMany();
+
+    /** 4) Merge results */
+    const prodMap = new Map(productsAgg.map((r) => [String(r.partnerId), r]));
+
+    const payMap = new Map<string, any[]>();
+    for (const r of paymentsAgg) {
+      if (!payMap.has(String(r.partnerId))) {
+        payMap.set(String(r.partnerId), []);
+      }
+      payMap.get(String(r.partnerId))?.push({
+        method: r.paymentMethod,
+        amount: Number(r.paidAmount) || 0,
+      });
+    }
+
+    const result = ordersAgg.map((r) => {
+      const prod = prodMap.get(String(r.partnerId)) || {};
+      const payments = payMap.get(String(r.partnerId)) || [];
+      const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
+
+      const deliveryCharge = Number(r.deliveryCharge) || 0;
+      const productPrice = Number(prod.totalProductPrice) || 0;
+      const total = deliveryCharge + productPrice;
+
+      return {
+        inTransitDate: `${r.inTransitStartDate} - ${r.inTransitEndDate}`,
+        deliveryPartner: r.deliveryPartner,
+        deliveryCharge,
+        orderQty: Number(r.orderQty) || 0,
+        productQty: Number(prod.productQty) || 0,
+        productPrice: Number(prod.totalProductPrice) || 0,
+        total,
+        advancePaid: Number(r.advancePaid) || 0,
+        payments,
+        totalPaid,
+        dueAmount: total - totalPaid,
+      };
     });
+
+    return result;
   }
-
-  const result = ordersAgg.map((r) => {
-    const prod = prodMap.get(String(r.partnerId)) || {};
-    const payments = payMap.get(String(r.partnerId)) || [];
-    const totalPaid = payments.reduce((s, p) => s + p.amount, 0);
-
-    const deliveryCharge = Number(r.deliveryCharge) || 0;
-    const productPrice = Number(prod.totalProductPrice) || 0;
-    const total = deliveryCharge + productPrice;
-
-    return {
-      inTransitDate: `${r.inTransitStartDate} - ${r.inTransitEndDate}`,
-      deliveryPartner: r.deliveryPartner,
-      deliveryCharge,
-      orderQty: Number(r.orderQty) || 0,
-      productQty: Number(prod.productQty) || 0,
-      productPrice: Number(prod.totalProductPrice) || 0,
-      total,
-      advancePaid: Number(r.advancePaid) || 0,
-      payments,
-      totalPaid,
-      dueAmount: total - totalPaid,
-    };
-  });
-
-  return result;
-}
-
-
-
-
-
 }

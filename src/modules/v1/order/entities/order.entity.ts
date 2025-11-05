@@ -8,6 +8,7 @@ import {
   JoinColumn,
   ManyToOne,
   Index,
+  Unique,
 } from 'typeorm';
 import { Products } from './products.entity';
 import { Customers } from '../../customers/entities/customers.entity';
@@ -23,10 +24,11 @@ import { AddressBook } from '../../customers/entities/addressbook.entity';
 import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'orders' })
+@Unique(['organizationId', 'orderNumber']) 
 export class Order {
   @PrimaryGeneratedColumn()
   id: number;
-  @Column({ unique: true, nullable: true })
+  @Column({  nullable: true })
   orderNumber: string;
   @Column({ nullable: true, type: 'varchar' })
   customerId: string;
@@ -104,7 +106,7 @@ export class Order {
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
 
-  @ManyToOne(() => Customers, (customer) => customer.orders, { eager: true })
+  @ManyToOne(() => Customers, (customer) => customer.orders)
   @JoinColumn({ name: 'customerId', referencedColumnName: 'customer_Id' })
   customer: Customers;
 
