@@ -19,7 +19,8 @@ export class Transaction {
   location: Warehouse;
   @Column('int')
   quantity: number;
-
+  @Column({ nullable: true})
+  organizationId: string;
   @Column('decimal', { precision: 10, scale: 2 })
   totalAmount: number;
 

@@ -1,9 +1,9 @@
-import { Module } from '@nestjs/common';
+import { Module, OnApplicationBootstrap } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UserModule } from './modules/v1/user/user.module';
 import { PermissionModule } from './modules/v1/permission/permission.module';
-import { DatabaseModule } from './modules/database/database.module';
+// import { DatabaseModule } from './modules/database/database.module';
 import { GlobalExceptionFilter } from './middleware/globalErrorHandler';
 import { APP_FILTER } from '@nestjs/core';
 import { UserpermissionModule } from './modules/v1/userpermission/userpermission.module';
@@ -21,6 +21,19 @@ import { AuthModule } from './modules/v1/auth/auth.module';
 import { CommentModule } from './modules/v1/Comments/comment.module';
 import { OrganizationModule } from './modules/v1/organization/organization.module';
 import { RequsitionModule } from './modules/v1/requsition/requsition.module';
+import { DatabaseModule } from './database/database.module';
+import { ConfigModule } from '@nestjs/config';
+import { ShopifyModule } from './modules/v1/shopify/shopify.module';
+import { SupplierModule } from './modules/v1/supplier/supplier.module';
+import { ProcurementModule } from './modules/v1/procurement/procurement.module';
+import { PermissionService } from './modules/v1/permission/permission.service';
+import { DeliveryPartnerModule } from './modules/v1/delivery-partner/delivery-partner.module';
+import { DashboardModule } from './modules/v1/dashboard/dashboard.module';
+import { DivisionsModule } from './modules/v1/divisions/divisions.module';
+import { DistrictsModule } from './modules/v1/districts/districts.module';
+import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_charge.module';
+import { OrderModuleV2 } from './modules/v2/order/order.module';
+import { ChatModule } from './modules/v2/chat/chat.module';
 
 @Module({
   imports: [
@@ -28,6 +41,7 @@ import { RequsitionModule } from './modules/v1/requsition/requsition.module';
       rootPath: join(__dirname, '..', 'uploads'),
       serveRoot: '/api/v1/images/',
     }),
+    ConfigModule.forRoot({ isGlobal: true }),
     UserModule,
     PermissionModule,
     DatabaseModule,
@@ -44,8 +58,18 @@ import { RequsitionModule } from './modules/v1/requsition/requsition.module';
     CommentModule,
     OrganizationModule,
     OrganizationModule,
-    RequsitionModule
-
+    RequsitionModule,
+    ShopifyModule,
+    SupplierModule,
+    ProcurementModule,
+    PermissionModule,
+    DeliveryPartnerModule,
+    DashboardModule,
+    DivisionsModule,
+    DistrictsModule,
+    DelivaryChargeModule,
+    OrderModuleV2,
+    ChatModule
   ],
   controllers: [AppController],
   providers: [
@@ -56,4 +80,10 @@ import { RequsitionModule } from './modules/v1/requsition/requsition.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements OnApplicationBootstrap {
+  constructor(private readonly permissionService: PermissionService) {}
+
+  async onApplicationBootstrap() {
+    await this.permissionService.seedData();
+  }
+}

@@ -9,7 +9,6 @@ export default function paginationHelpers(options: {
     const skip = (page - 1) * limit;
     const sortBy = options.sortBy || 'createdAt';
     const sortOrder: 'DESC' | 'ASC' = options.sortOrder || 'DESC'; // Default to 'DESC'
-  
     return {
       page,
       limit,

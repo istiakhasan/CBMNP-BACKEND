@@ -113,7 +113,7 @@ export class ProductController {
     const organizationId=req.headers['x-organization-id']
     return catchAsync(async ():Promise<IResponse<Product[]>> => {
       const paginationOptions = extractOptions(query, ['limit', 'page', 'sortBy', 'sortOrder']);
-      const filterOptions = extractOptions(query, ['searchTerm', 'filterByCustomerType']);
+      const filterOptions = extractOptions(query, ['searchTerm', 'filterByCustomerType','active']);
       const result = await this.productService.getProducts(paginationOptions, filterOptions,organizationId);
       return {
         success: true,

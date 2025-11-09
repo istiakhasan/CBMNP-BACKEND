@@ -13,7 +13,7 @@ export class Permission {
   @PrimaryGeneratedColumn('increment')
   id: number;
 
-  @Column({ unique: true, nullable: false, type: 'varchar' })
+  @Column({  type: 'varchar' })
   label: string;
   @Column({ nullable: true, type: 'varchar' })
   base: string;
@@ -22,7 +22,8 @@ export class Permission {
     (userPermission) => userPermission.permission,
   )
   userPermissions: UserPermission[];
-
+  
+  
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   createdAt: Date;
 

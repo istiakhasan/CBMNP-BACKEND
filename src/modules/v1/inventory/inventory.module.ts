@@ -11,6 +11,7 @@ import { InventoryItem } from './entities/inventoryitem.entity';
 @Module({
   imports: [TypeOrmModule.forFeature([Product,Transaction,Inventory,InventoryItem])],
   controllers: [InventoryController],
-  providers: [InventoryService]
+  providers: [InventoryService],
+   exports: [InventoryService],
 })
 export class InventoryModule {}

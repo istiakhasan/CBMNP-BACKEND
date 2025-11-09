@@ -30,6 +30,16 @@ export class AuthenTicationController {
       data: result,
     });
   }
+  @Post('/super/log-in')
+  async adminLogin(@Body(new ZodPipe(loginSchema)) data, @Res() res: Response) {
+    const result = await this.authenTicationService.adminLogin(data);
+    res.status(HttpStatus.OK).json({
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Super Admin signed in successfully',
+      data: result,
+    });
+  }
 
   @Post('/refresh-token')
   async refreshToken(@Res() res: Response, @Req() req: Request) {

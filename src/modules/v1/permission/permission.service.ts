@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { ApiError } from '../../../middleware/ApiError';
 import { v4 as uuidv4 } from 'uuid';
+import { permissionData } from '../../../util/permission';
 @Injectable()
 export class PermissionService {
   constructor(
@@ -11,12 +12,13 @@ export class PermissionService {
     private readonly permissionRepository: Repository<Permission>,
   ) {}
   async create(createPermissionDto: Permission) {
+    console.log(createPermissionDto,"abcd");
     const isexist = await this.permissionRepository.findOne({
       where: {
         label: createPermissionDto.label,
       },
     });
-    if (isexist) {
+    if (!!isexist) {
       throw new ApiError(
         HttpStatus.FORBIDDEN,
         'Permission label already exist',
@@ -63,4 +65,16 @@ export class PermissionService {
   remove(id: number) {
     return `This action removes a #${id} permission`;
   }
+
+  async seedData() {
+   
+
+    // for (const item of permissionData) {
+    //   const existing = await this.permissionRepository.findOne({ where: { id: item.id } });
+    //   if (!existing) {
+    //     await this.permissionRepository.save(item);
+    //   }
+    // }
+  
+}
 }

@@ -87,9 +87,17 @@ export class WarehouseController {
   @Patch(':id')
   update(
     @Param('id') id: string,
-    @Body() updateWarehouseDto: UpdateWarehouseDto,
+    @Body() updateWarehouseDto: Warehouse,
+    @Req() req:any
   ) {
-    return this.warehouseService.update(+id, updateWarehouseDto);
+    const organizationId=req.headers['x-organization-id']
+    const result=  this.warehouseService.update(id, updateWarehouseDto);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Warehouse update successfully',
+      data:result
+   }
   }
 
   @Delete(':id')

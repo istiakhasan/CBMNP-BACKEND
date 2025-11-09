@@ -16,5 +16,6 @@ import { OrdersLog } from '../order/entities/orderlog.entity';
   ],
   controllers: [RequsitionController],
   providers: [RequisitionService],
+  exports:[RequisitionService]
 })
 export class RequsitionModule {}

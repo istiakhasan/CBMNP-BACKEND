@@ -3,7 +3,6 @@ import { OrderService } from './order.service';
 import { OrderController } from './order.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Order } from './entities/order.entity';
-import { ProductModule } from '../product/product.module';
 import { Product } from '../product/entity/product.entity';
 import { OrderStatus } from '../status/entities/status.entity';
 import { Customers } from '../customers/entities/customers.entity';
@@ -14,14 +13,33 @@ import { OrdersLog } from './entities/orderlog.entity';
 import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
-
+import { RequsitionModule } from '../requsition/requsition.module';
+import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
+import { OrderProductReturn } from './entities/return_damage.entity';
+import { Warehouse } from '../warehouse/entities/warehouse.entity';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Order,Product,OrderStatus,Customers,Users,Products,PaymentHistory,OrdersLog,Organization,Inventory,InventoryItem]),
+    TypeOrmModule.forFeature([
+      Order,
+      DeliveryPartner,
+      Product,
+      OrderStatus,
+      Customers,
+      Users,
+      Products,
+      PaymentHistory,
+      OrdersLog,
+      Organization,
+      Inventory,
+      InventoryItem,
+      OrderProductReturn,
+      Warehouse
+    ]),
+    RequsitionModule,
   ],
   controllers: [OrderController],
   providers: [OrderService],
-  exports: [],
+  exports: [OrderService],
 })
 export class OrderModule {}
