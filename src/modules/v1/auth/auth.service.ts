@@ -35,9 +35,7 @@ export class AuthenTicationService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'User not active');
     }
     const { userId, password: savePassword, role, id,organization:{id:organizationId} } = isUserExist;
-    console.log(savePassword,data?.password,"check",isUserExist,"abcd");
     const isPasswordMatch = await bcryptjs.compare(data.password.trim(), savePassword);
-    console.log(isPasswordMatch,"check match");
     if (!isPasswordMatch) {
       throw new ApiError(HttpStatus.UNAUTHORIZED, 'Password is incorrect');
     }
@@ -49,6 +47,39 @@ export class AuthenTicationService {
     );
     const refreshToken = jwtHelpers.createToken(
       { userId, role, id ,organizationId },
+      config.jwt.refresh_secret as string,
+      config.jwt.refresh_expires_in as string,
+    );
+    return {
+      accessToken,
+      refreshToken,
+    };
+  }
+  async adminLogin(
+    data: any,
+  ): Promise<{ refreshToken: string; accessToken: string }> {
+    const isUserExist = await this.usersRepository.findOne({
+      where: { email: data?.userId }
+    });
+    if (!isUserExist) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'User not exist');
+    }
+    if(!isUserExist.active){
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'User not active');
+    }
+    const { userId, password: savePassword, role, id} = isUserExist;
+    const isPasswordMatch = await bcryptjs.compare(data.password.trim(), savePassword);
+    if (!isPasswordMatch) {
+      throw new ApiError(HttpStatus.UNAUTHORIZED, 'Password is incorrect');
+    }
+
+    const accessToken = jwtHelpers.createToken(
+      { userId, role, id  },
+      config.jwt.secret as string,
+      config.jwt.expires_in as string,
+    );
+    const refreshToken = jwtHelpers.createToken(
+      { userId, role, id  },
       config.jwt.refresh_secret as string,
       config.jwt.refresh_expires_in as string,
     );

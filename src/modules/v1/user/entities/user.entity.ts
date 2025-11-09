@@ -24,6 +24,7 @@ export enum UserRole {
   ADMIN = 'admin',
   USER = 'user',
   OWNER = 'owner',
+  SUPER = 'super_admin',
 }
 
 @Entity({ name: 'users' })

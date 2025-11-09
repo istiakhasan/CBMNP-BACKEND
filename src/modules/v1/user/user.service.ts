@@ -13,9 +13,13 @@ export class UserService {
     private readonly userRepository: Repository<Users>,
   ) {}
   async create(data: Users) {
-    const isEmailExistInOrganization = await this.userRepository.findOne({
-      where: { email: data?.email, organizationId: data?.organizationId },
-    });
+    console.log(data,"data");
+    let isEmailExistInOrganization
+    if(data?.organizationId){
+       isEmailExistInOrganization = await this.userRepository.findOne({
+        where: { email: data?.email, organizationId: data?.organizationId },
+      });
+    }
     if (isEmailExistInOrganization) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'Email Id already exist');
     }

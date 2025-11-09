@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req, Query } from '@nestjs/common';
 import { OrganizationService } from './organization.service';
 import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
@@ -20,8 +20,22 @@ export class OrganizationController {
   @Get()
   @ApiOperation({ summary: 'Get all organizations' })
   @ApiResponse({ status: 200, description: 'List of organizations', type: [Organization] })
-  findAll() {
-    return this.organizationService.findAll();
+  findAll(@Query() query,@Req() req:Request) {
+         const options = {};
+      const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+      for (const key of keys) {
+        if (query && Object.hasOwnProperty.call(query, key)) {
+          options[key] = query[key];
+        }
+      }
+      const searchFilterOptions = {};
+      const filterKeys = ['searchTerm', 'filterByCustomerType'];
+      for (const key of filterKeys) {
+        if (query && Object.hasOwnProperty.call(query, key)) {
+          searchFilterOptions[key] = query[key];
+        }
+      }
+    return this.organizationService.findAll(options,searchFilterOptions);
   }
 
   @Get('get-by-id')
