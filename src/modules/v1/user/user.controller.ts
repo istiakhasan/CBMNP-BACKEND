@@ -12,7 +12,6 @@ export class UserController {
   @ApiOperation({ summary: 'Create a new user' })
   @ApiResponse({ status: 201, description: 'User created successfully', type: Users })
   async create(@Body() createUserDto: Users, @Req() req: Request) {
-  
     const organizationId = req.headers['x-organization-id'];
     const result = await this.userService.create({ ...createUserDto, organizationId });
     return {
