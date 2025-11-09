@@ -36,7 +36,8 @@ export class InventoryItem {
   orderQue: number;
   @Column({nullable:true})
   processing: number;
-
+  @Column({nullable:true})
+  hoildQue: number;
   @Column({ default: 0 })
   wastageQuantity: number;
 

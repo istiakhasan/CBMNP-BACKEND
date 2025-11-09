@@ -59,8 +59,11 @@ export class WarehouseService {
     return `This action returns a #${id} warehouse`;
   }
 
-  update(id: number, updateWarehouseDto: UpdateWarehouseDto) {
-    return `This action updates a #${id} warehouse`;
+  async update(id: string, updateWarehouseDto: UpdateWarehouseDto) {
+     await this.warehouse.update({id:id},updateWarehouseDto)
+     return this.warehouse.findOne({
+      where:{id:id}
+    });
   }
 
   remove(id: number) {

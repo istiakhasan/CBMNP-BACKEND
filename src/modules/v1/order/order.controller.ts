@@ -1,16 +1,14 @@
-import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Body, HttpStatus, Query, Patch, Req, Res } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
 import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { PaymentHistory } from './entities/paymentHistory.entity';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 
 @Controller('v1/orders')
 export class OrderController {  
   constructor(private readonly orderService: OrderService) {}
-
- 
 
   @Get()
   async getOrders(@Query() query,@Req() req:Request){
@@ -22,14 +20,15 @@ export class OrderController {
         options[key] = query[key];
       }
     }
+    const includeProducts = query.includeProducts === 'true';
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm', 'statusId','locationId'];
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','paymentStatus'];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];
       }
     }
-    const result= await this.orderService.getOrders(options,searchFilterOptions,organizationId);
+    const result= await this.orderService.getOrders(options,searchFilterOptions,organizationId,includeProducts);
     return {
       success:true,
       statusCode:HttpStatus.OK,
@@ -42,6 +41,113 @@ export class OrderController {
       }
    }
   }
+  @Get('/reports')
+  async getOrdersReports(@Query() query,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getOrdersReports(options,searchFilterOptions,organizationId);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Order retrieved successfully',
+      data:result?.data,
+      meta: {
+        total: result?.total,
+        page: result?.page,
+        limit: result?.limit,
+        totalAmount:result?.totalAmount,
+        damageQuantity:result?.damageQuantity,
+        totalReturnQty:result?.totalReturnQty,
+        totalPaidAmount:result?.totalPaidAmount,
+      }
+   }
+  }
+   @Get('/product-sales-report')
+  async getProductWiseSalesReports(@Query() query,@Req() req:Request){
+    const organizationId=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getProductSalesReport(options,searchFilterOptions,organizationId);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Order retrieved successfully',
+        data:result?.data,
+      meta: {
+        total: result?.total,
+        page: result?.page,
+        limit: result?.limit,
+        startDate:result?.startDate,
+        endDate:result?.endDate,
+      }
+   }
+  }
+   @Get('/delivery-partner-report')
+  async getDeliveryPartnerShipmentReport(@Query() query,@Req() req:Request){
+    const organizationId:any=req.headers['x-organization-id']
+    const options = {};
+    const keys = ['limit', 'page', 'sortBy', 'sortOrder'];
+    for (const key of keys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        options[key] = query[key];
+      }
+    }
+    const searchFilterOptions = {};
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds','orderSources','paymentMethodIds'];
+    for (const key of filterKeys) {
+      if (query && Object.hasOwnProperty.call(query, key)) {
+        searchFilterOptions[key] = query[key];
+      }
+    }
+    const result= await this.orderService.getDeliveryPartnerShipmentReport(organizationId,searchFilterOptions);
+    return {
+      success:true,
+      statusCode:HttpStatus.OK,
+      message:'Delivery partner shipment reports retrieved successfully',
+        data:result,
+
+   }
+  }
+@Get('/download-reports')
+async downloadReports(@Query() query, @Req() req: Request, @Res() res: Response) {
+  const organizationId: any = req.headers['x-organization-id'];
+
+  const searchFilterOptions = {};
+  const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','agentIds'];
+  for (const key of filterKeys) {
+    if (query && Object.hasOwnProperty.call(query, key)) {
+      searchFilterOptions[key] = query[key];
+    }
+  }
+
+  return this.orderService.downloadOrdersExcel(searchFilterOptions, organizationId, res);
+}
+
   @Get('/logs/:id')
   async getOrdersLogs(@Param('id') id:number){
 
@@ -54,6 +160,10 @@ export class OrderController {
       data:result,
    }
   }
+  @Get('/scan/:id')
+  async getScanOrderByOrderNumber(@Param('id') orderNumber: string): Promise<Order> {
+    return await this.orderService.getScanOrderById(orderNumber);
+  }
   @Get(':id')
   async getOrderById(@Param('id') id: number): Promise<Order> {
     return await this.orderService.getOrderById(id);
@@ -62,6 +172,11 @@ export class OrderController {
   async createOrder(@Body() payload: any,@Req() req:Request): Promise<Order> {
     const organizationId=req.headers['x-organization-id']
     return await this.orderService.createOrder(payload,organizationId as string);
+  }
+  @Post('/pos')
+  async createPosOrder(@Body() payload: any,@Req() req:Request): Promise<Order> {
+    const organizationId=req.headers['x-organization-id']
+    return await this.orderService.createPosOrder(payload,organizationId as string);
   }
   @Post('/payment/:id')
   async updatePayment(@Param('id') id: number,@Body() data:PaymentHistory){
@@ -76,10 +191,38 @@ export class OrderController {
     })
   }
   @Patch('/change-status')
-  async changeStatus(@Body() data:any){
+  async changeStatus(@Body() data:any,@Req() req:Request){
     return  catchAsync(async():Promise<IResponse<Order[]>>=>{
       const {orderIds,...rest}=data
-      const result=await this.orderService.changeStatusBulk(orderIds,rest);
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.orderService.changeStatusBulk(orderIds,rest,organizationId as string);
+      return {
+        message:'Order status change  successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
+  }
+  @Patch('/change-hold-status')
+  async changeHoldStatus(@Body() data:any,@Req() req:Request){
+    return  catchAsync(async():Promise<IResponse<Order[]>>=>{
+      const {orderIds,...rest}=data
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.orderService.changeHoldStatus(orderIds,rest,organizationId as string);
+      return {
+        message:'Order status change  successfully',
+        statusCode:HttpStatus.OK,
+        data:result,
+        success:true
+      }
+    })
+  }
+  @Patch('/return')
+  async returnOrders(@Body() data:any,@Req() req:Request){
+    return  catchAsync(async():Promise<IResponse<Order[]>>=>{
+      const organizationId=req.headers['x-organization-id']
+      const result=await this.orderService.returnOrders(data);
       return {
         message:'Order status change  successfully',
         statusCode:HttpStatus.OK,

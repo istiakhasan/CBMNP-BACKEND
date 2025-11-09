@@ -1,36 +1,10 @@
-// import { Module } from '@nestjs/common';
-// import { TypeOrmModule } from '@nestjs/typeorm';
-// import { join } from 'path';
-
-// @Module({
-//   imports: [
-//     TypeOrmModule.forRoot({
-//       type: 'postgres',
-//       host: "pg-1acd2627-istieak-063f.i.aivencloud.com",
-//       port: 11261,
-//       username:process.env.USERNAME,
-//       password: process.env.AIVEN_SERVICE_PASSWORD,
-//       database: "defaultdb",
-//       entities: [join(process.cwd(), '/dist/**/*.entity.js')],
-//       synchronize: true,
-//       logging: false,
-//       ssl: {
-//         rejectUnauthorized: false,
-//       },
-//     })
-    
-//   ],
-// })
-// export class DatabaseModule {}
-
-
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { join } from 'path';
 import * as dotenv from 'dotenv'; 
 
-dotenv.config(); // Load .env variables
 
+dotenv.config();
 @Module({
   imports: [
     TypeOrmModule.forRoot({
@@ -43,10 +17,11 @@ dotenv.config(); // Load .env variables
       entities: [join(process.cwd(), '/dist/**/*.entity.js')],
       synchronize: true,
       logging: false,
-      ssl: { 
+       ssl: { 
         rejectUnauthorized: false,
       },
     }),
+    
   ],
 })
 export class DatabaseModule {}

@@ -2,6 +2,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Like, Not, Repository } from 'typeorm';
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from './entities/status.entity';
+import { Products } from '../order/entities/products.entity';
 
 @Injectable()
 export class StatusService {
@@ -22,6 +23,20 @@ export class StatusService {
           label: In(["Approved","Cancel"])
     });
     }
+    if(query?.label==="In-transit"){
+        result = await this.statusRepository.findBy({
+          label: In(["Pending-Return","Delivered"])
+    });
+    }
+    if(query?.label==="Pending-Return"){
+        result = await this.statusRepository.findBy({
+          label: In([
+            "Returned",
+            "Partial-Return",
+            "Damage"
+          ])
+    });
+    }
     if(query?.label==="Pending"){
         result = await this.statusRepository.findBy({
           label: In(["Hold", "Approved","Cancel"])
@@ -29,12 +44,14 @@ export class StatusService {
     }
     if(query?.label==="Approved"){
         result = await this.statusRepository.findBy({
-          label: Not("Approved")
+        // label: Not("Approved")
+        label: In(["Store","Hold","Cancel","Unreachable"])
     });
     }
     if(query?.label==="Cancel"){
+      return
         result = await this.statusRepository.findBy({
-          label: In(["Hold", "Approved","Pending"])
+          label: In(["Approved","Pending"])
     });
     }
     if(query?.label==="Store"){
@@ -47,27 +64,134 @@ export class StatusService {
           label: In(["In-transit", "Hold","Cancel"])
     });
     }
+    if(query?.label==="all"){
+        result = await this.statusRepository.find();
+    }
     return result;
   }
-  async getAllOrdersCountByStatus(organizationId) {
-    const queryRunner = await this.statusRepository
-      .createQueryBuilder('status')
-      .leftJoin('status.orders', 'orders')
-      .where('orders.organizationId = :organizationId',{organizationId})
-      .select('status.label', 'label')
-      .addSelect('COALESCE(COUNT(orders.id), 0)', 'count')
-      .groupBy('status.value') 
-      .addGroupBy('status.label')
-      .getRawMany();
-      const totalOrders = await this.statusRepository
+async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
+  const queryBuilder = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
-    .where('orders.organizationId = :organizationId',{organizationId})
-    .select('COALESCE(COUNT(orders.id), 0)', 'count')
-    .getRawOne();
-  
-    return [...queryRunner,{label:"All",count:totalOrders?.count}];
+    .where('orders.organizationId = :organizationId', { organizationId });
+
+  // Apply filters
+  if (filterOptions.statusId?.length) {
+    queryBuilder.andWhere('orders.statusId IN (:...statusIds)', {
+      statusIds: filterOptions.statusId,
+    });
   }
+
+  if (filterOptions.currier?.length) {
+    queryBuilder.andWhere('orders.currier IN (:...curriers)', {
+      curriers: filterOptions.currier,
+    });
+  }
+
+  if (filterOptions.locationId?.length) {
+    queryBuilder.andWhere('orders.locationId IN (:...locationIds)', {
+      locationIds: filterOptions.locationId,
+    });
+  }
+
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+    queryBuilder.andWhere(
+      'orders.intransitTime BETWEEN :startDate AND :endDate',
+      {
+        startDate: new Date(filterOptions.startDate),
+        endDate: new Date(filterOptions.endDate),
+      },
+    );
+  }
+
+  if (filterOptions.searchTerm) {
+    queryBuilder.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
+      searchTerm: `%${filterOptions.searchTerm}%`,
+    });
+  }
+
+  // 🔥 Optimized product filter using subquery
+  if (filterOptions.productIds?.length) {
+    queryBuilder.andWhere(qb => {
+      const subQuery = qb.subQuery()
+        .select('p.orderId')
+        .from(Products, 'p')
+        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .getQuery();
+      return 'orders.id IN ' + subQuery;
+    });
+  }
+
+  // Get counts per status
+  const statusCounts = await queryBuilder
+    .select('status.label', 'label')
+    .addSelect('status.value', 'id')
+    .addSelect('COUNT(orders.id)', 'count') // no DISTINCT needed due to subquery
+    .groupBy('status.value')
+    .addGroupBy('status.label')
+    .getRawMany();
+
+  // -------- Total Count Query --------
+  const totalQuery = this.statusRepository
+    .createQueryBuilder('status')
+    .leftJoin('status.orders', 'orders')
+    .where('orders.organizationId = :organizationId', { organizationId });
+
+  if (filterOptions.statusId?.length) {
+    totalQuery.andWhere('orders.statusId IN (:...statusIds)', {
+      statusIds: filterOptions.statusId,
+    });
+  }
+
+  if (filterOptions.currier?.length) {
+    totalQuery.andWhere('orders.currier IN (:...curriers)', {
+      curriers: filterOptions.currier,
+    });
+  }
+
+  if (filterOptions.locationId?.length) {
+    totalQuery.andWhere('orders.locationId IN (:...locationIds)', {
+      locationIds: filterOptions.locationId,
+    });
+  }
+
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+    totalQuery.andWhere(
+      'orders.intransitTime BETWEEN :startDate AND :endDate',
+      {
+        startDate: new Date(filterOptions.startDate),
+        endDate: new Date(filterOptions.endDate),
+      },
+    );
+  }
+
+  if (filterOptions.searchTerm) {
+    totalQuery.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
+      searchTerm: `%${filterOptions.searchTerm}%`,
+    });
+  }
+
+  // 🔥 Product filter in total count using subquery
+  if (filterOptions.productIds?.length) {
+    totalQuery.andWhere(qb => {
+      const subQuery = qb.subQuery()
+        .select('p.orderId')
+        .from(Products, 'p')
+        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .getQuery();
+      return 'orders.id IN ' + subQuery;
+    });
+  }
+
+  const totalOrders = await totalQuery
+    .select('COUNT(orders.id)', 'count')
+    .getRawOne();
+
+  return [...statusCounts, { label: 'All', count: totalOrders?.count }];
+}
+
+
+
   
 }
 

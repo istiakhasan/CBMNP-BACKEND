@@ -8,6 +8,7 @@ import {
   JoinColumn,
   ManyToOne,
   Index,
+  Unique,
 } from 'typeorm';
 import { Products } from './products.entity';
 import { Customers } from '../../customers/entities/customers.entity';
@@ -17,16 +18,19 @@ import { PaymentHistory } from './paymentHistory.entity';
 import { Comments } from '../../Comments/entities/orderComment.entity';
 import { OrdersLog } from './orderlog.entity';
 import { Requisition } from '../../requsition/entities/requsition.entity';
-
-
+import { DeliveryPartner } from '../../delivery-partner/entities/delivery-partner.entity';
+import { OrderProductReturn } from './return_damage.entity';
+import { AddressBook } from '../../customers/entities/addressbook.entity';
+import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'orders' })
+@Unique(['organizationId', 'orderNumber']) 
 export class Order {
   @PrimaryGeneratedColumn()
   id: number;
-  @Column({ unique: true, nullable: true })
+  @Column({  nullable: true })
   orderNumber: string;
-  @Column({ nullable: true,type:'varchar' })
+  @Column({ nullable: true, type: 'varchar' })
   customerId: string;
   @Column({ nullable: true })
   receiverPhoneNumber: string;
@@ -81,38 +85,73 @@ export class Order {
   locationId: string;
   @Column({ nullable: true })
   requisitionId: string;
- 
+  @Column({ nullable: true })
+  previousStatus: string;
+  // store status change time
+  // store status change time
+  // store status change time
+  // store status change time
+  // store status change time
+  @Column({ type: 'timestamp', nullable: true })
+  intransitTime: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  approvedTime: Date;
+
+  @Column({ type: 'timestamp', nullable: true })
+  packingTime: Date;
+  @Column({ type: 'timestamp', nullable: true })
+  storeTime: Date;
+
   @OneToMany(() => Products, (product) => product.order, { cascade: true })
   products: Products[];
 
-  @ManyToOne(() => Customers, (customer) => customer.orders, { eager: true })
-  @JoinColumn({ name: 'customerId' ,referencedColumnName: 'customer_Id'}) 
+  @ManyToOne(() => Customers, (customer) => customer.orders)
+  @JoinColumn({ name: 'customerId', referencedColumnName: 'customer_Id' })
   customer: Customers;
 
   // relation with req
   @ManyToOne(() => Requisition, (requisition) => requisition.orders)
   requisition: Requisition;
-  
+
   @Index()
   @Column({ nullable: true })
   statusId: number;
   @ManyToOne(() => OrderStatus, (status) => status.orders, { eager: true })
-  @JoinColumn({ name: 'statusId' ,referencedColumnName: 'value'}) 
+  @JoinColumn({ name: 'statusId', referencedColumnName: 'value' })
   status: OrderStatus;
-
+  @ManyToOne(() => Warehouse, (status) => status.orders, { eager: true })
+  @JoinColumn({ name: 'locationId', referencedColumnName: 'id' })
+  warehouse: Warehouse;
 
   @Column({ nullable: true })
   agentId: string;
   @ManyToOne(() => Users, (status) => status.orders, { eager: true })
-  @JoinColumn({ name: 'agentId' ,referencedColumnName: 'userId'}) 
+  @JoinColumn({ name: 'agentId', referencedColumnName: 'userId' })
   agent: Users;
 
-  @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, { cascade: true })
+  @OneToMany(() => PaymentHistory, (paymentHistory) => paymentHistory.order, {
+    cascade: true,
+  })
   paymentHistory: PaymentHistory[];
-  @OneToMany(() => Comments, (comment) => comment.order,{ cascade: true })
+  @OneToMany(() => Comments, (comment) => comment.order, { cascade: true })
   comments: Comments[];
   @OneToMany(() => OrdersLog, (logs) => logs.order)
   orderLogs: OrdersLog[];
+  @OneToMany(() => OrderProductReturn, (returns) => returns.order)
+  productReturns: OrderProductReturn[];
+
+  @ManyToOne(() => DeliveryPartner, (partner) => partner.orders, {
+    eager: true,
+  })
+  @JoinColumn({ name: 'currier' })
+  partner: DeliveryPartner;
+  @Column({ nullable: true })
+  addressId: number;
+
+  @ManyToOne(() => AddressBook, { eager: true })
+  @JoinColumn({ name: 'addressId' })
+  address: AddressBook;
 
   @Index()
   @CreateDateColumn({

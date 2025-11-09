@@ -16,6 +16,8 @@ import { ProductImages } from './image.entity';
 import { Inventory } from '../../inventory/entities/inventory.entity';
 import { Transaction } from '../../transaction/entities/transaction.entity';
 import { InventoryItem } from '../../inventory/entities/inventoryitem.entity';
+import { ProcurementItem } from '../../procurement/entities/procurementItem.entity';
+import { OrderProductReturn } from '../../order/entities/return_damage.entity';
 enum ProductType {
   Variant = 'Variant',
   SimpleProduct = 'Simple product',
@@ -69,6 +71,8 @@ export class Product {
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   purchasePrice: number;
+  @Column({ nullable:true})
+  internalId: string;
 
   @OneToMany(() => Products, (products) => products.product)
   products: Products[];
@@ -109,5 +113,11 @@ export class Product {
     cascade: true,
   })
   inventoryItems: InventoryItem[];
+
+  @OneToMany(() => ProcurementItem, (procurementItem) => procurementItem.product)
+  procurementItems: ProcurementItem[];
+
+   @OneToMany(() => OrderProductReturn, (returns) => returns.product)
+  returns: OrderProductReturn[];
 }
 

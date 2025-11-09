@@ -9,9 +9,8 @@ import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { ApiError } from '../../../middleware/ApiError';
-import {  QueryRunner, DataSource } from 'typeorm';
+import { QueryRunner, DataSource } from 'typeorm';
 import { OrdersLog } from '../order/entities/orderlog.entity';
-
 
 @Injectable()
 export class RequisitionService {
@@ -32,101 +31,162 @@ export class RequisitionService {
     private readonly orderLogsRepository: Repository<OrdersLog>,
   ) {}
 
-  async createRequisition(createRequisitionDto: any,organizationId:string) {
+  async createRequisition(createRequisitionDto: any, organizationId: string) {
     const { orderIds, userId } = createRequisitionDto;
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
-  
+
     try {
       const requisitionNumber = await this.generateRequisitionNumber();
-  
+
+      // ✅ Load all orders in one query
       const orders = await this.orderRepository.find({
         where: { id: In(orderIds) },
         relations: ['requisition'],
       });
-  
+
       if (orders.length !== orderIds.length) {
         throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders not found');
       }
-  
-      if (orders.some(order => !!order.requisitionId)) {
-        throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders are already in a requisition');
+
+      if (orders.some((order) => !!order.requisitionId)) {
+        throw new ApiError(
+          HttpStatus.BAD_REQUEST,
+          'Some orders are already in a requisition',
+        );
       }
-  
+
+      // ✅ Create requisition
       const requisition = queryRunner.manager.create(Requisition, {
         requisitionNumber,
         orders,
         userId,
-        totalOrders:orderIds?.length || 0,
+        totalOrders: orderIds.length,
         organizationId,
-        orderIds
+        orderIds,
       });
-  
-      const savedRequisition = await queryRunner.manager.save(Requisition, requisition);
-  
-      const productUpdates = [];
-      for (const order of orders) {
-        const products = await this.productsRepository.find({
-          where: { orderId: order.id },
-        });
-  
-        for (const product of products) {
-          const inventory = await this.inventoryRepository.findOne({
-            where: { productId: product.productId },
+
+      const savedRequisition = await queryRunner.manager.save(
+        Requisition,
+        requisition,
+      );
+
+      // ✅ Fetch all products for all orders in one query
+      const allProducts = await this.productsRepository.find({
+        where: { orderId: In(orderIds) },
+      });
+
+      // ✅ Aggregate product totals in-memory
+      const productTotals = new Map<
+        string,
+        {
+          totalQty: number;
+          byLocation: Map<string, number>;
+        }
+      >();
+
+      for (const product of allProducts) {
+        const productId = product.productId;
+        const qty = product.productQuantity;
+        const locationId = product.orderId
+          ? orders.find((o) => o.id === product.orderId)?.locationId
+          : null;
+
+        if (!productTotals.has(productId)) {
+          productTotals.set(productId, {
+            totalQty: 0,
+            byLocation: new Map<string, number>(),
           });
-  
-          const inventoryItem = await this.InventoryItemRepository.findOne({
-            where: { productId: product.productId, locationId: order.locationId },
-          });
-  
-          if (inventory) {
-            productUpdates.push(
-              queryRunner.manager.update(Inventory, { productId: product.productId }, {
-                processing: inventory.processing + product.productQuantity,
-                orderQue: inventory.orderQue - product.productQuantity,
-              })
-            );
-          }
-  
+        }
+
+        const totals = productTotals.get(productId)!;
+        totals.totalQty += qty;
+
+        if (locationId) {
+          totals.byLocation.set(
+            locationId,
+            (totals.byLocation.get(locationId) || 0) + qty,
+          );
+        }
+      }
+
+      // ✅ Fetch all inventories for involved products in one query
+      const productIds = Array.from(productTotals.keys());
+      const inventories = await this.inventoryRepository.find({
+        where: { productId: In(productIds) },
+      });
+      const inventoryMap = new Map(
+        inventories.map((inv) => [inv.productId, inv]),
+      );
+
+      // ✅ Fetch all inventory items for involved products in one query
+      const inventoryItems = await this.InventoryItemRepository.find({
+        where: { productId: In(productIds) },
+      });
+      const inventoryItemMap = new Map(
+        inventoryItems.map((item) => [
+          `${item.productId}-${item.locationId}`,
+          item,
+        ]),
+      );
+
+      // ✅ Prepare bulk updates for inventories
+      const inventoryUpdates = [];
+      for (const [productId, totals] of productTotals.entries()) {
+        const inventory = inventoryMap.get(productId);
+        if (inventory) {
+          inventory.processing += totals.totalQty;
+          inventory.orderQue -= totals.totalQty;
+          inventoryUpdates.push(inventory);
+        }
+
+        for (const [locationId, qty] of totals.byLocation.entries()) {
+          const inventoryItem = inventoryItemMap.get(
+            `${productId}-${locationId}`,
+          );
           if (inventoryItem) {
-            productUpdates.push(
-              queryRunner.manager.update(InventoryItem, { productId: product.productId, locationId: order.locationId }, {
-                processing: inventoryItem.processing + product.productQuantity,
-                orderQue: inventoryItem.orderQue - product.productQuantity,
-              })
-            );
+            inventoryItem.processing += qty;
+            inventoryItem.orderQue -= qty;
+            inventoryUpdates.push(inventoryItem);
           }
         }
       }
-  
-      await Promise.all(productUpdates);
-  
-      // Explicitly update order status
-      await Promise.all(orders.map(order => 
-        queryRunner.manager.update(Order, { id: order.id }, { statusId: 5,  requisition : savedRequisition })
-      ));
-      const orderLogs = orders.map((order, index) => ({
+
+      // ✅ Save all updated inventories in bulk
+      if (inventoryUpdates.length) {
+        await queryRunner.manager.save(inventoryUpdates);
+      }
+
+      // ✅ Update all orders in bulk
+      await queryRunner.manager.update(
+        Order,
+        { id: In(orderIds) },
+        { statusId: 5, requisition: savedRequisition, storeTime: new Date() },
+      );
+
+      // ✅ Create logs in bulk
+      const orderLogs = orders.map((order) => ({
         orderId: order.id,
-        agentId: "R-000000015",
-        action: `Order Status changed to Packing and create requisition from ${order.status.label}`,
+        agentId: userId,
+        action: `Order Status changed to Store and create requisition from ${order.status?.label || ''}`,
         previousValue: null,
       }));
-    
       await this.orderLogsRepository.save(orderLogs);
-  
-      // Commit transaction
+
+      // ✅ Commit transaction
       await queryRunner.commitTransaction();
       return savedRequisition;
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to create requisition');
+      throw new ApiError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        error.message || 'Failed to create requisition',
+      );
     } finally {
       await queryRunner.release();
     }
   }
-  
-
 
   async getAllRequisition(options, filterOptions, organizationId) {
     const { page, limit, skip, sortBy, sortOrder } = paginationHelpers(options);
@@ -135,39 +195,38 @@ export class RequisitionService {
 
     // Search functionality
     if (filterOptions?.searchTerm) {
-        const searchTerm = `%${filterOptions.searchTerm}%`;
-        whereCondition.OR = [
-            { id: Like(searchTerm) },
-            { requisitionNumber: Like(searchTerm) },
-        ];
+      const searchTerm = `%${filterOptions.searchTerm}%`;
+      whereCondition.OR = [
+        { id: Like(searchTerm) },
+        { requisitionNumber: Like(searchTerm) },
+      ];
     }
     if (organizationId) {
-      whereCondition.organizationId = organizationId
+      whereCondition.organizationId = organizationId;
     }
-    
 
     // Ensure sortOrder is either 'ASC' or 'DESC'
     const validSortOrder = sortOrder === 'DESC' ? 'DESC' : 'ASC';
 
     const result = await this.requisitionRepository.find({
-        where: whereCondition,
-        take: limit,
-        skip: skip,
-        order: {
-            [sortBy]: validSortOrder,
-        },
-        relations: ['user'], 
-        select: {
-            id: true,
-            createdAt: true,
-            requisitionNumber: true,
-            totalOrders: true,
-            orderIds:true,
+      where: whereCondition,
+      take: limit,
+      skip: skip,
+      order: {
+        [sortBy]: validSortOrder,
+      },
+      relations: ['user'],
+      select: {
+        id: true,
+        createdAt: true,
+        requisitionNumber: true,
+        totalOrders: true,
+        orderIds: true,
 
-            user: {
-                name: true,
-            },
+        user: {
+          name: true,
         },
+      },
     });
     // const finalResult=[]
     // for (let i = 0; i < result.length; i++) {
@@ -181,34 +240,76 @@ export class RequisitionService {
     //     ...element,
     //     orders:abc
     //   })
-      
+
     // }
 
     // Assuming you want to count total records
     const total = await this.requisitionRepository.count({
-        where: whereCondition,
+      where: whereCondition,
     });
 
     return {
-        data: result,
-        page,
-        limit,
-        total,
+      data: result,
+      page,
+      limit,
+      total,
     };
-}
-
-
-
-
-  async getRequisitionWithOrders(id: string) {
-    return this.requisitionRepository.findOne({
-      where: { id },
-      relations: ['orders'],
-    });
   }
 
+  async getRequisitionWithOrders(id: string) {
+    const rows = await this.requisitionRepository
+      .createQueryBuilder('requisition')
+      .leftJoin('requisition.orders', 'order')
+      .leftJoin('requisition.user', 'user')
+      .leftJoin('order.products', 'op')
+      .leftJoin('op.product', 'product')
+      .select([
+        'requisition.id',
+        'requisition.createdAt',
+        'requisition.requisitionNumber',
+        'order.orderNumber',
+        'op.productQuantity',
+        'product.id',
+        'product.name',
+        'product.weight',
+        'product.unit',
+        'user.name',
+        // if you have available qty in inventory instead of product table
+        'product.purchasePrice', // or join inventory if availableQty is there
+      ])
+      .where('requisition.id = :id', { id })
+      .getRawMany();
 
-
+    // Transform → group by product
+    const grouped = rows.reduce(
+      (acc, row) => {
+        const key = `${row.product_id}_${row.product_weight}_${row.product_unit}`;
+        if (!acc[key]) {
+          acc[key] = {
+            productName: row.product_name,
+            packSize: `${row.product_weight} ${row.product_unit}`, // ← build pack size here
+            availableQty: row.product_purchasePrice ?? 0, // replace with inventory.availableQty if needed
+            orders: [],
+            totalQty: 0,
+          };
+        }
+        acc[key].orders.push({
+          orderNumber: row.order_orderNumber,
+          qty: row.op_productQuantity,
+        });
+        acc[key].totalQty += row.op_productQuantity;
+        return acc;
+      },
+      {} as Record<string, any>,
+    );
+    console.log(rows, 'row');
+    return {
+      requisitionNumber: rows[0]?.requisition_requisitionNumber,
+      prepairedBy: rows[0]?.user_name,
+      createdAt: rows[0]?.requisition_createdAt,
+      products: Object.values(grouped),
+    };
+  }
 
   async generateRequisitionNumber(): Promise<string> {
     const now = new Date();
@@ -217,17 +318,74 @@ export class RequisitionService {
 
     // Get the latest requisition for today
     const latestRequisition = await this.requisitionRepository.findOne({
-        where: { requisitionNumber: Like(`REQ-${day}-${year}-%`) },
-        order: { requisitionNumber: 'DESC' },
+      where: { requisitionNumber: Like(`REQ-${day}-${year}-%`) },
+      order: { requisitionNumber: 'DESC' },
     });
 
     let sequenceNumber = 1;
     if (latestRequisition) {
-        const lastNumber = parseInt(latestRequisition.requisitionNumber.split('-').pop() || '0', 10);
-        sequenceNumber = lastNumber + 1;
+      const lastNumber = parseInt(
+        latestRequisition.requisitionNumber.split('-').pop() || '0',
+        10,
+      );
+      sequenceNumber = lastNumber + 1;
     }
 
     return `REQ-${day}-${year}-${sequenceNumber.toString().padStart(4, '0')}`;
-}
+  }
 
+  async generatePreview(orderIds: number[], locationId: string) {
+    if (!orderIds.length) return { products: [] };
+
+    // 1️⃣ Fetch all orders + products + product details in one query
+    const rows = await this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.products', 'op')
+      .leftJoinAndSelect('op.product', 'product')
+      .where('order.id IN (:...orderIds)', { orderIds })
+      .getMany();
+
+    // 2️⃣ Flatten products
+    const productMap: Record<string, any> = {};
+
+    rows.forEach((order) => {
+      order.products.forEach((p) => {
+        const key = p.productId;
+        if (!productMap[key]) {
+          productMap[key] = {
+            productId: key,
+            name: p.product.name,
+            packSize: `${p.product.weight} ${p.product.unit}`,
+            orders: [],
+            totalQty: 0,
+          };
+        }
+        productMap[key].orders.push({
+          orderId: order.orderNumber,
+          qty: p.productQuantity,
+        });
+        productMap[key].totalQty += p.productQuantity;
+      });
+    });
+
+    const products = Object.values(productMap);
+
+    // 3️⃣ Fetch all inventories for these products + location
+    const productIds = products.map((p) => p.productId);
+
+    const inventoryItems = await this.InventoryItemRepository.find({
+      where: { productId: In(productIds), locationId },
+    });
+
+    const inventoryMap = new Map(
+      inventoryItems.map((item) => [item.productId, item.quantity || 0]),
+    );
+
+    // 4️⃣ Merge stock info
+    products.forEach((p) => {
+      p.stock = inventoryMap.get(p.productId) || 0;
+    });
+
+    return { products };
+  }
 }

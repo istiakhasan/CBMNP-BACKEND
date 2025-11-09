@@ -19,6 +19,8 @@ export class Inventory {
   @Column({nullable:true})
   orderQue: number;
   @Column({nullable:true})
+  hoildQue: number;
+  @Column({nullable:true})
   processing: number;
   @Column({nullable:true})
   organizationId: string;

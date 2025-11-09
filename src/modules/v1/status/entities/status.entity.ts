@@ -13,7 +13,7 @@ import { Order } from '../../order/entities/order.entity';
 export class OrderStatus {
   @PrimaryGeneratedColumn()
   value: number;
-  @Column({ nullable: false, type: 'varchar' })
+  @Column({ nullable: true, type: 'varchar', })
   label: string;
 
   @OneToMany(() => Order, (order) => order.status)

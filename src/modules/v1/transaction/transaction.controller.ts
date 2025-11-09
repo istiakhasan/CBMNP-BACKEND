@@ -1,10 +1,11 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req } from '@nestjs/common';
 import { TransactionService } from './transaction.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
 import { catchAsync } from '../../../hoc/createAsync';
 import { IResponse } from 'src/util/sendResponse';
 import { Transaction } from './entities/transaction.entity';
+import { Request } from 'express';
 
 @Controller('v1/transaction')
 export class TransactionController {
@@ -16,9 +17,11 @@ export class TransactionController {
   }
 
   @Get()
-  async findAll() {
+  async findAll(@Req() req:Request) {
    return catchAsync(async():Promise<IResponse<Transaction[]>>=>{
-     const result=await this.transactionService.findAll();
+     const organizationId=req.headers['x-organization-id']
+     console.log(organizationId,"abcd");
+     const result=await this.transactionService.findAll(organizationId as string);
      return {
       success:true,
       message:'Transaction history retrieved successfully',
