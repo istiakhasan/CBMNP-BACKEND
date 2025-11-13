@@ -290,7 +290,7 @@ export class OrderService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
     }
 
-    const orderNumber = this.generateOrderNumber(organizationId);
+    const orderNumber =await this.generateOrderNumber(organizationId);
     const validatedProducts: any[] = [];
     let productValue = 0;
 
