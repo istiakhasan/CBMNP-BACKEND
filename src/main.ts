@@ -33,6 +33,7 @@ async function bootstrap() {
       'http://localhost:3001',
       'http://localhost:3002',
       'http://31.97.60.104:3000',
+      'https://erp.fitone.cloud',
     ],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,
