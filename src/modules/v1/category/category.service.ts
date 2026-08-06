@@ -25,9 +25,10 @@ export class CategoryService {
     return await this.categoryRepository.save(payload);
   }
 
-  async getCategory(options,filterOptions) {
+  async getCategory(options,filterOptions,organizationId) {
      const {page,limit,skip,sortBy,sortOrder}=   paginationHelpers(options)
         const queryBuilder = this.categoryRepository.createQueryBuilder('categories')
+            .where('categories.organizationId = :organizationId', { organizationId })
             .take(limit)
             .skip(skip)
             .orderBy(`categories.${sortBy}`, sortOrder);

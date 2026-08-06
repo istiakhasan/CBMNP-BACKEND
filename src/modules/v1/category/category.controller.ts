@@ -8,7 +8,8 @@ import {
   UploadedFiles,
   HttpStatus,
   Query,
-  Patch
+  Patch,
+  Req
 } from '@nestjs/common';
 import { FileFieldsInterceptor } from '@nestjs/platform-express';
 import { ZodPipe } from '../../../middleware/ZodPipe';
@@ -27,10 +28,12 @@ export class CategoryController {
 
   @Post()
   async createCategory(
-    @Body(new ZodPipe(CategorySchema)) data: Category
+    @Body(new ZodPipe(CategorySchema)) data: Category,
+    @Req() req: Request,
   ) {
     return catchAsync(async ():Promise<IResponse<Category>> => {
-      const result = await this.categoryService.createCategory(data);
+      const organizationId = req.headers['x-organization-id'];
+      const result = await this.categoryService.createCategory({...data,organizationId});
       return {
         success: true,
         message: 'Category created successfully',
@@ -41,11 +44,12 @@ export class CategoryController {
   }
   
   @Get()
-  async getProducts(@Query() query) {
+  async getProducts(@Query() query,@Req() req: Request,) {
     return catchAsync(async ():Promise<IResponse<Category[]>> => {
+      const organizationId = req.headers['x-organization-id'];
       const paginationOptions = extractOptions(query, ['limit', 'page', 'sortBy', 'sortOrder']);
       const filterOptions = extractOptions(query, ['searchTerm', 'filterByCustomerType']);
-      const result = await this.categoryService.getCategory(paginationOptions, filterOptions);
+      const result = await this.categoryService.getCategory(paginationOptions, filterOptions,organizationId);
       return {
         success: true,
         statusCode: HttpStatus.OK,
