@@ -1,4 +1,4 @@
-import { Controller, Post, Req, Headers, BadRequestException, Body, HttpStatus, HttpCode } from '@nestjs/common';
+import { Controller, Post, Get, Req, Headers, BadRequestException, Body, HttpStatus, HttpCode, Query } from '@nestjs/common';
 import { ShopifyWebhookService } from './shopify.service';
 import { Shopify } from './entities/shopify.entity';
 import { catchAsync } from '../../../hoc/createAsync';
@@ -64,5 +64,15 @@ export class WebhookController {
         success: true,
       };
     });
+  }
+
+  // ---------- নতুন: কোন product গুলোর image মিসিং সেটা দেখার endpoint ----------
+  @Get('/shopify/products/missing-images')
+  async getProductsMissingImages(@Query('organizationId') organizationId: string) {
+    if (!organizationId) {
+      throw new BadRequestException('organizationId query param is required');
+    }
+    const result = await this.shopifyWebhookService.getProductsMissingImages(organizationId);
+    return { status: 'success', data: result };
   }
 }

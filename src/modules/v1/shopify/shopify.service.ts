@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as crypto from 'crypto';
 import { Products } from '../order/entities/products.entity';
 import { Order } from '../order/entities/order.entity';
-import { Repository } from 'typeorm';
+import { Repository, IsNull, Not } from 'typeorm';
 import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
@@ -64,10 +64,8 @@ export class ShopifyWebhookService {
       }
     }
 
-    // 1. customer resolve/create — order save করার আগেই লাগবে
     const customer = await this.resolveOrCreateCustomer(webhookData, shop.organizationId);
 
-    // 2. products resolve/create
     const products = [];
     if (webhookData.line_items?.length > 0) {
       for (const lineItem of webhookData.line_items) {
@@ -87,7 +85,7 @@ export class ShopifyWebhookService {
 
     try {
       const result = await this.orderRepository.save({
-        customerId: customer.customer_Id, // এইটাই আগে missing ছিল
+        customerId: customer.customer_Id,
         receiverPhoneNumber: webhookData.shipping_address?.phone,
         receiverName: webhookData.shipping_address?.name,
         statusId: 1,
@@ -118,14 +116,9 @@ export class ShopifyWebhookService {
     }
   }
 
-  /**
-   * Shopify order payload থেকে customer resolve করে — priority:
-   * 1. shopifyCustomerId দিয়ে match (সবচেয়ে reliable, logged-in customer)
-   * 2. phone number দিয়ে match (guest checkout, একই নাম্বার আগে থেকে থাকলে)
-   * 3. না পেলে নতুন customer তৈরি
-   */
+  // ---------- CUSTOMER resolve/create ----------
   private async resolveOrCreateCustomer(webhookData: any, organizationId: string): Promise<Customers> {
-    const shopifyCustomer = webhookData.customer; // guest checkout হলে undefined হতে পারে
+    const shopifyCustomer = webhookData.customer;
     const shopifyCustomerId = shopifyCustomer?.id ? String(shopifyCustomer.id) : null;
     const phone =
       webhookData.shipping_address?.phone ||
@@ -145,7 +138,6 @@ export class ShopifyWebhookService {
       customer = await this.customerRepository.findOne({
         where: { customerPhoneNumber: phone, organizationId },
       });
-      // পুরনো customer পাওয়া গেলে কিন্তু shopifyCustomerId সেট নেই — লিংক করে দাও future lookup এর জন্য
       if (customer && shopifyCustomerId && !customer.shopifyCustomerId) {
         customer = await this.customerRepository.save({ ...customer, shopifyCustomerId });
       }
@@ -153,7 +145,6 @@ export class ShopifyWebhookService {
 
     if (customer) return customer;
 
-    // নতুন customer তৈরি করো
     const name =
       webhookData.shipping_address?.name ||
       `${shopifyCustomer?.first_name || ''} ${shopifyCustomer?.last_name || ''}`.trim() ||
@@ -187,9 +178,10 @@ export class ShopifyWebhookService {
     return `CUS-${nextNumber}`;
   }
 
+  // ---------- PRODUCT resolve/create (order webhook থেকে) ----------
   /**
    * শুধু local catalog এ খোঁজে — না পেলে line item data দিয়ে bare-bones product বানায়
-   * (image ছাড়া — পরে products/update webhook এলে auto-fill হবে)
+   * (image ছাড়া — products/create বা products/update webhook এলে auto-fill হবে)
    */
   private async resolveOrCreateProduct(lineItem: any, organizationId: string): Promise<Product> {
     const shopifyVariantId = lineItem.variant_id ? String(lineItem.variant_id) : null;
@@ -231,21 +223,16 @@ export class ShopifyWebhookService {
     return product;
   }
 
-  // ---------- PRODUCT WEBHOOK (products/create, products/update) — image-এর আসল উৎস ----------
-async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain: string) {
-  const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
-  if (!valid) throw new BadRequestException('Invalid webhook signature');
-  if (!shop) throw new BadRequestException('Shop not configured');
+  // ---------- PRODUCT WEBHOOK (products/create, products/update) — image-এর একমাত্র উৎস ----------
+  async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
+    if (!valid) throw new BadRequestException('Invalid webhook signature');
+    if (!shop) throw new BadRequestException('Shop not configured');
 
-  const shopifyProduct = JSON.parse(body);
-
-  // সাময়িক debug log — কাজ হয়ে গেলে সরিয়ে দিও
-  this.logger.debug(`Product webhook received: id=${shopifyProduct.id}, images count=${shopifyProduct.images?.length ?? 'undefined'}`);
-  this.logger.debug(`Raw images: ${JSON.stringify(shopifyProduct.images)}`);
-
-  const saved = await this.upsertProductFromShopifyData(shopifyProduct, shop.organizationId);
-  return { productId: saved.id };
-}
+    const shopifyProduct = JSON.parse(body);
+    const saved = await this.upsertProductFromShopifyData(shopifyProduct, shop.organizationId);
+    return { productId: saved.id };
+  }
 
   private async upsertProductFromShopifyData(shopifyProduct: any, organizationId: string): Promise<Product> {
     const shopifyProductId = String(shopifyProduct.id);
@@ -296,30 +283,30 @@ async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain:
     return lastSaved;
   }
 
- private async syncProductImages(productId: string, shopifyImages: any[]) {
-  if (!shopifyImages?.length) {
-    this.logger.debug(`No images to sync for product ${productId}`);
-    return;
-  }
-
-  try {
-    const existingImages = await this.productImagesRepository.find({ where: { productId } });
-    const existingUrls = new Set(existingImages.map((img) => img.url));
-
-    for (const img of shopifyImages) {
-      if (img.src && !existingUrls.has(img.src)) {
-        await this.productImagesRepository.save({
-          url: img.src,
-          delete_url: img.src,
-          productId,
-        });
-        this.logger.debug(`Image saved for product ${productId}: ${img.src}`);
-      }
+  private async syncProductImages(productId: string, shopifyImages: any[]) {
+    if (!shopifyImages?.length) {
+      this.logger.debug(`No images to sync for product ${productId}`);
+      return;
     }
-  } catch (err: any) {
-    this.logger.error(`Image sync failed for product ${productId}: ${err.message}`, err.stack);
+
+    try {
+      const existingImages = await this.productImagesRepository.find({ where: { productId } });
+      const existingUrls = new Set(existingImages.map((img) => img.url));
+
+      for (const img of shopifyImages) {
+        if (img.src && !existingUrls.has(img.src)) {
+          await this.productImagesRepository.save({
+            url: img.src,
+            delete_url: img.src,
+            productId,
+          });
+          this.logger.debug(`Image saved for product ${productId}: ${img.src}`);
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Image sync failed for product ${productId}: ${err.message}`, err.stack);
+    }
   }
-}
 
   private stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, '').trim();
@@ -340,5 +327,31 @@ async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain:
 
   async configureShopify(data: Shopify) {
     return this.shopifyRepository.save(data);
+  }
+
+  // ---------- HELPER: কোন Shopify product গুলোর image মিসিং তার লিস্ট ----------
+  /**
+   * Admin panel-এ দেখানোর জন্য — merchant কে বলে দেওয়া যায় ঠিক কোন product গুলো
+   * Shopify-তে গিয়ে একবার re-save/publish করতে হবে যাতে image sync হয়।
+   */
+  async getProductsMissingImages(organizationId: string) {
+    const products = await this.productCatalogRepository
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.images', 'images')
+      .where('product.organizationId = :organizationId', { organizationId })
+      .andWhere('product.shopifyProductId IS NOT NULL')
+      .getMany();
+
+    const missing = products.filter((p) => !p.images || p.images.length === 0);
+
+    return {
+      total: missing.length,
+      products: missing.map((p) => ({
+        id: p.id,
+        name: p.name,
+        shopifyProductId: p.shopifyProductId,
+        shopifyAdminUrl: null, // নিচে shop domain দিয়ে বসিয়ে দিচ্ছি controller-এ
+      })),
+    };
   }
 }
