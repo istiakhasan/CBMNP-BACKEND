@@ -232,15 +232,20 @@ export class ShopifyWebhookService {
   }
 
   // ---------- PRODUCT WEBHOOK (products/create, products/update) — image-এর আসল উৎস ----------
-  async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain: string) {
-    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
-    if (!valid) throw new BadRequestException('Invalid webhook signature');
-    if (!shop) throw new BadRequestException('Shop not configured');
+async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain: string) {
+  const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
+  if (!valid) throw new BadRequestException('Invalid webhook signature');
+  if (!shop) throw new BadRequestException('Shop not configured');
 
-    const shopifyProduct = JSON.parse(body);
-    const saved = await this.upsertProductFromShopifyData(shopifyProduct, shop.organizationId);
-    return { productId: saved.id };
-  }
+  const shopifyProduct = JSON.parse(body);
+
+  // সাময়িক debug log — কাজ হয়ে গেলে সরিয়ে দিও
+  this.logger.debug(`Product webhook received: id=${shopifyProduct.id}, images count=${shopifyProduct.images?.length ?? 'undefined'}`);
+  this.logger.debug(`Raw images: ${JSON.stringify(shopifyProduct.images)}`);
+
+  const saved = await this.upsertProductFromShopifyData(shopifyProduct, shop.organizationId);
+  return { productId: saved.id };
+}
 
   private async upsertProductFromShopifyData(shopifyProduct: any, organizationId: string): Promise<Product> {
     const shopifyProductId = String(shopifyProduct.id);
@@ -291,9 +296,13 @@ export class ShopifyWebhookService {
     return lastSaved;
   }
 
-  private async syncProductImages(productId: string, shopifyImages: any[]) {
-    if (!shopifyImages?.length) return;
+ private async syncProductImages(productId: string, shopifyImages: any[]) {
+  if (!shopifyImages?.length) {
+    this.logger.debug(`No images to sync for product ${productId}`);
+    return;
+  }
 
+  try {
     const existingImages = await this.productImagesRepository.find({ where: { productId } });
     const existingUrls = new Set(existingImages.map((img) => img.url));
 
@@ -304,9 +313,13 @@ export class ShopifyWebhookService {
           delete_url: img.src,
           productId,
         });
+        this.logger.debug(`Image saved for product ${productId}: ${img.src}`);
       }
     }
+  } catch (err: any) {
+    this.logger.error(`Image sync failed for product ${productId}: ${err.message}`, err.stack);
   }
+}
 
   private stripHtml(html: string): string {
     return html.replace(/<[^>]*>/g, '').trim();
