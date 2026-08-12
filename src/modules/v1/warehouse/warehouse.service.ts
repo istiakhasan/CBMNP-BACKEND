@@ -69,4 +69,31 @@ export class WarehouseService {
   remove(id: number) {
     return `This action removes a #${id} warehouse`;
   }
+
+  async setDefault(id: string, organizationId: string) {
+  const warehouse = await this.warehouse.findOne({
+    where: { id, organizationId },
+  });
+
+  if (!warehouse) {
+    throw new ApiError(HttpStatus.NOT_FOUND, 'Warehouse not found');
+  }
+
+  // transaction diye ensure kora hocche j ekta org e ekbare 1 tai default thake
+  await this.warehouse.manager.transaction(async (manager) => {
+    await manager.update(
+      Warehouse,
+      { organizationId, isDefault: true },
+      { isDefault: false },
+    );
+
+    await manager.update(
+      Warehouse,
+      { id },
+      { isDefault: true },
+    );
+  });
+
+  return this.warehouse.findOne({ where: { id } });
+}
 }

@@ -9,6 +9,7 @@ import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
 import { Customers, CustomerType } from '../customers/entities/customers.entity';
+import { Warehouse } from '../warehouse/entities/warehouse.entity';
 
 @Injectable()
 export class ShopifyWebhookService {
@@ -27,6 +28,8 @@ export class ShopifyWebhookService {
     private readonly customerRepository: Repository<Customers>,
     @InjectRepository(Shopify)
     private readonly shopifyRepository: Repository<Shopify>,
+    @InjectRepository(Warehouse)
+    private readonly warehouseRepository: Repository<Warehouse>,
   ) {}
 
   // ---------- HMAC ----------
@@ -82,9 +85,12 @@ export class ShopifyWebhookService {
     const shippingCharge = parseFloat(webhookData.total_shipping_price_set?.shop_money?.amount || '0');
     const productValue = parseFloat(webhookData.total_line_items_price_set?.shop_money?.amount || '0');
     const totalAmount = productValue + shippingCharge;
-
+const defaultWarehouse = await this.warehouseRepository.findOne({
+    where: { organizationId: shop.organizationId, isDefault: true },
+  });
     try {
       const result = await this.orderRepository.save({
+        locationId: defaultWarehouse.id,
         customerId: customer.customer_Id,
         receiverPhoneNumber: webhookData.shipping_address?.phone,
         receiverName: webhookData.shipping_address?.name,

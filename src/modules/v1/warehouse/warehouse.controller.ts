@@ -78,7 +78,13 @@ export class WarehouseController {
     };
    })
   }
-
+@Patch('/set-default/id')
+setDefault(
+  @Param('id') id: string,
+  @Req() req, // ধরে নিচ্ছি organizationId req.user থেকে আসে
+) {
+  return this.warehouseService.setDefault(id, req.user.organizationId);
+}
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.warehouseService.findOne(+id);

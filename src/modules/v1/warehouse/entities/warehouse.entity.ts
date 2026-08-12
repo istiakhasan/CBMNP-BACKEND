@@ -24,7 +24,8 @@ export class Warehouse {
   organizationId: string;
   @OneToMany(() => Order, (order) => order.warehouse)
   orders: Order[];
-
+@Column({ type: 'boolean', default: false })
+isDefault: boolean;
   @CreateDateColumn({
     type: 'timestamp',
     default: () => 'CURRENT_TIMESTAMP(6)',
