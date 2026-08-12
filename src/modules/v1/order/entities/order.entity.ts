@@ -41,8 +41,6 @@ export class Order {
   @Column({ nullable: true })
   deliveryNote: string;
   @Column({ nullable: true })
-  shippingCharge: number;
-  @Column({ nullable: true })
   shippingType: string;
   @Column({ nullable: true })
   orderType: string;
@@ -50,16 +48,6 @@ export class Order {
   invoiceNumber: string;
   @Column({ nullable: true })
   orderSource: string;
-  @Column({ nullable: true })
-  productValue: number;
-  @Column({ nullable: true })
-  totalPrice: number;
-  @Column({ nullable: true })
-  discount: number;
-  @Column({ nullable: true })
-  totalPaidAmount: number;
-  @Column({ nullable: true })
-  totalReceiveAbleAmount: number;
   @Column({ nullable: true })
   currier: string;
   @Column({ nullable: true })
@@ -166,4 +154,53 @@ export class Order {
     onUpdate: 'CURRENT_TIMESTAMP(6)',
   })
   updatedAt: Date;
+
+
+  @Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+shippingCharge: number;
+
+@Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+productValue: number;
+
+@Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+totalPrice: number;
+
+@Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+discount: number;
+
+@Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+totalPaidAmount: number;
+
+@Column({
+  type: 'numeric',
+  precision: 12,
+  scale: 2,
+  nullable: true,
+})
+totalReceiveAbleAmount: number;
 }
