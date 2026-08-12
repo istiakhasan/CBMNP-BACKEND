@@ -7,8 +7,9 @@ import { ShopifyWebhookService } from './shopify.service';
 import { Products } from '../order/entities/products.entity';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
+import { ProductImages } from '../product/entity/image.entity';
 @Module({
-  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product]), OrderModule],
+  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product,ProductImages]), OrderModule],
   providers: [ShopifyWebhookService],
   controllers: [WebhookController],
 })

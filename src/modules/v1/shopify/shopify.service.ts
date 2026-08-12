@@ -7,6 +7,7 @@ import { Repository } from 'typeorm';
 import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
+import { ProductImages } from '../product/entity/image.entity';
 
 @Injectable()
 export class ShopifyWebhookService {
@@ -16,31 +17,23 @@ export class ShopifyWebhookService {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     @InjectRepository(Products)
-    private readonly productRepository: Repository<Products>, // order line-item entity
+    private readonly productRepository: Repository<Products>,
     @InjectRepository(Product)
-    private readonly productCatalogRepository: Repository<Product>, // আসল product catalog
+    private readonly productCatalogRepository: Repository<Product>,
+    @InjectRepository(ProductImages)
+    private readonly productImagesRepository: Repository<ProductImages>,
     @InjectRepository(Shopify)
     private readonly shopifyRepository: Repository<Shopify>,
   ) {}
 
-  async verifyShopifyWebhookSignature(
-    body: string,
-    shopifyHmac: string,
-    shopDomain: string,
-  ): Promise<{ valid: boolean; shop: Shopify | null }> {
+  // ---------- HMAC ----------
+  async verifyShopifyWebhookSignature(body: string, shopifyHmac: string, shopDomain: string) {
     const shop = await this.shopifyRepository.findOne({ where: { domain: shopDomain } });
     if (!shop || !shop.secret || !shopifyHmac) {
       return { valid: false, shop: null };
     }
-
-    const calculatedHmac = crypto
-      .createHmac('sha256', shop.secret)
-      .update(body, 'utf8')
-      .digest('base64');
-
-    // timing-safe compare — string === string HMAC compare timing attack এর জন্য vulnerable
-    const isValid = this.timingSafeEqual(calculatedHmac, shopifyHmac);
-    return { valid: isValid, shop };
+    const calculatedHmac = crypto.createHmac('sha256', shop.secret).update(body, 'utf8').digest('base64');
+    return { valid: this.timingSafeEqual(calculatedHmac, shopifyHmac), shop };
   }
 
   private timingSafeEqual(a: string, b: string): boolean {
@@ -50,25 +43,14 @@ export class ShopifyWebhookService {
     return crypto.timingSafeEqual(bufA, bufB);
   }
 
-  async handleShopifyOrderWebhook(
-    body: string,
-    shopifyHmac: string,
-    shopDomain: string,
-    webhookId?: string,
-  ) {
-    // 1. HMAC verify + shop resolve একই কলে (duplicate lookup এড়াতে)
+  // ---------- ORDER WEBHOOK (Shopify → ERP) ----------
+  async handleShopifyOrderWebhook(body: string, shopifyHmac: string, shopDomain: string, webhookId?: string) {
     const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
-
-    if (!valid) {
-      throw new BadRequestException('Invalid webhook signature');
-    }
-    if (!shop) {
-      throw new BadRequestException('Shop not configured');
-    }
+    if (!valid) throw new BadRequestException('Invalid webhook signature');
+    if (!shop) throw new BadRequestException('Shop not configured');
 
     const webhookData = JSON.parse(body);
 
-    // 2. Idempotency check — Shopify webhook-id দিয়ে duplicate delivery ঠেকাও
     if (webhookId) {
       const existing = await this.orderRepository.findOne({
         where: { orderNumber: webhookData.name, organizationId: shop.organizationId },
@@ -79,12 +61,10 @@ export class ShopifyWebhookService {
       }
     }
 
-    // 3. প্রতিটা line item এর জন্য প্রোডাক্ট resolve/create করো
     const products = [];
     if (webhookData.line_items?.length > 0) {
       for (const lineItem of webhookData.line_items) {
         const catalogProduct = await this.resolveOrCreateProduct(lineItem, shop.organizationId);
-
         products.push({
           productId: catalogProduct.id,
           productQuantity: lineItem.quantity,
@@ -107,7 +87,7 @@ export class ShopifyWebhookService {
         paymentMethod: webhookData.payment_gateway_names?.join(', '),
         receiverDivision: webhookData.shipping_address?.province,
         receiverDistrict: webhookData.shipping_address?.city,
-        receiverThana: '', // "string" placeholder বাদ দিলাম — এটা bug ছিল
+        receiverThana: '',
         receiverAddress: webhookData.shipping_address?.address1,
         products,
         orderNumber: webhookData.name || generateUniqueOrderNumber(),
@@ -119,19 +99,20 @@ export class ShopifyWebhookService {
         discount: parseFloat(webhookData.total_discounts_set?.shop_money?.amount || '0'),
         paymentStatus: webhookData.financial_status,
         onCancelReason: webhookData.cancel_reason,
+        shopifyOrderId: String(webhookData.id),
       });
 
       this.logger.log(`Order saved: ${result.id} (${result.orderNumber})`);
       return { orderId: result.id, orderNumber: result.orderNumber };
-    } catch (error:any) {
+    } catch (error: any) {
       this.logger.error(`Error saving Shopify order: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Failed to save order');
     }
   }
 
   /**
-   * Shopify line item অনুযায়ী local product catalog থেকে খুঁজে বের করে,
-   * না পেলে নতুন product + inventory তৈরি করে।
+   * শুধু local catalog এ খোঁজে — না পেলে line item data দিয়ে bare-bones product বানায়
+   * (image ছাড়া — পরে products/update webhook এলে auto-fill হবে)
    */
   private async resolveOrCreateProduct(lineItem: any, organizationId: string): Promise<Product> {
     const shopifyVariantId = lineItem.variant_id ? String(lineItem.variant_id) : null;
@@ -144,18 +125,13 @@ export class ShopifyWebhookService {
         where: { shopifyVariantId, organizationId },
       });
     }
-
     if (!product && shopifyProductId) {
       product = await this.productCatalogRepository.findOne({
         where: { shopifyProductId, organizationId },
       });
     }
+    if (product) return product;
 
-    if (product) {
-      return product;
-    }
-
-    // নতুন product তৈরি করো
     product = await this.productCatalogRepository.save({
       name: lineItem.name || lineItem.title || 'Untitled Shopify Product',
       sku: lineItem.sku || '',
@@ -174,21 +150,106 @@ export class ShopifyWebhookService {
       shopifyVariantId,
     });
 
-    this.logger.log(`New product auto-created from Shopify: ${product.id} (${product.name})`);
-
-    // Inventory তে zero-stock entry খুলে রাখো, পরে stock sync/adjustment হবে
-    // Inventory entity/repository তোমার actual field অনুযায়ী adjust করো
-    // await this.inventoryRepository.save({
-    //   product: { id: product.id },
-    //   organizationId,
-    //   quantity: 0,
-    // });
-
+    this.logger.log(`New product auto-created from order (no image yet): ${product.id}`);
     return product;
   }
 
+  // ---------- PRODUCT WEBHOOK (products/create, products/update) — image-এর আসল উৎস ----------
+  async handleShopifyProductWebhook(body: string, shopifyHmac: string, shopDomain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
+    if (!valid) throw new BadRequestException('Invalid webhook signature');
+    if (!shop) throw new BadRequestException('Shop not configured');
+
+    const shopifyProduct = JSON.parse(body);
+    const saved = await this.upsertProductFromShopifyData(shopifyProduct, shop.organizationId);
+    return { productId: saved.id };
+  }
+
+  private async upsertProductFromShopifyData(shopifyProduct: any, organizationId: string): Promise<Product> {
+    const shopifyProductId = String(shopifyProduct.id);
+    const variants = shopifyProduct.variants?.length ? shopifyProduct.variants : [{}];
+
+    let lastSaved: Product;
+
+    for (const variant of variants) {
+      const shopifyVariantId = variant.id ? String(variant.id) : null;
+
+      let existing = shopifyVariantId
+        ? await this.productCatalogRepository.findOne({ where: { shopifyVariantId, organizationId } })
+        : await this.productCatalogRepository.findOne({ where: { shopifyProductId, organizationId } });
+
+      const productData = {
+        name: variants.length > 1 ? `${shopifyProduct.title} - ${variant.title}` : shopifyProduct.title,
+        sku: variant.sku || '',
+        description: this.stripHtml(shopifyProduct.body_html || ''),
+        active: shopifyProduct.status === 'active',
+        weight: String(variant.grams ?? variant.weight ?? 0),
+        unit: variant.weight_unit || 'g',
+        organizationId,
+        productType: 'Simple product' as const,
+        regularPrice: parseFloat(variant.compare_at_price || variant.price || '0'),
+        salePrice: parseFloat(variant.price || '0'),
+        retailPrice: parseFloat(variant.price || '0'),
+        distributionPrice: parseFloat(variant.price || '0'),
+        purchasePrice: 0,
+        shopifyProductId,
+        shopifyVariantId,
+      };
+
+      if (existing) {
+        lastSaved = await this.productCatalogRepository.save({ ...existing, ...productData });
+        this.logger.log(`Product updated from Shopify: ${lastSaved.id}`);
+      } else {
+        lastSaved = await this.productCatalogRepository.save(productData);
+        this.logger.log(`Product created from Shopify: ${lastSaved.id}`);
+      }
+
+      // variant-specific image থাকলে সেটা, নাহলে product-level সব image
+      const relevantImages = variant.image_id
+        ? shopifyProduct.images?.filter((img: any) => img.id === variant.image_id)
+        : shopifyProduct.images;
+
+      await this.syncProductImages(lastSaved.id, relevantImages?.length ? relevantImages : shopifyProduct.images || []);
+    }
+
+    return lastSaved;
+  }
+
+  private async syncProductImages(productId: string, shopifyImages: any[]) {
+    if (!shopifyImages?.length) return;
+
+    const existingImages = await this.productImagesRepository.find({ where: { productId } });
+    const existingUrls = new Set(existingImages.map((img) => img.url));
+
+    for (const img of shopifyImages) {
+      if (img.src && !existingUrls.has(img.src)) {
+        await this.productImagesRepository.save({
+          url: img.src,
+          delete_url: img.src,
+          productId,
+        });
+      }
+    }
+  }
+
+  private stripHtml(html: string): string {
+    return html.replace(/<[^>]*>/g, '').trim();
+  }
+
+  async handleShopifyProductDeleteWebhook(body: string, shopifyHmac: string, shopDomain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, shopifyHmac, shopDomain);
+    if (!valid) throw new BadRequestException('Invalid webhook signature');
+    if (!shop) throw new BadRequestException('Shop not configured');
+
+    const data = JSON.parse(body);
+    await this.productCatalogRepository.update(
+      { shopifyProductId: String(data.id), organizationId: shop.organizationId },
+      { active: false },
+    );
+    return { deactivated: String(data.id) };
+  }
+
   async configureShopify(data: Shopify) {
-    const result = await this.shopifyRepository.save(data);
-    return result;
+    return this.shopifyRepository.save(data);
   }
 }

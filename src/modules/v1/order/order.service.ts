@@ -65,7 +65,7 @@ export class OrderService {
       where: { organizationId },
       order: { createdAt: 'DESC' },
     });
-    console.log(lastOrder, 'hhhhhhhhhhhhhhhhh');
+
     if (!lastOrder || !lastOrder.orderNumber) {
       return 'ORD-10000';
     }
