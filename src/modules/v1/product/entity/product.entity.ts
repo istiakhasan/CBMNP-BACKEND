@@ -105,7 +105,11 @@ export class Product {
 
   @OneToOne(() => Inventory, (inventory) => inventory.product)
   inventories: Inventory;
+  @Column({ nullable: true })
+  shopifyProductId: string;
 
+  @Column({ nullable: true })
+  shopifyVariantId: string;
   @OneToMany(() => Transaction, (transaction) => transaction.product)
   @JoinColumn({name:"productId",referencedColumnName:"productId"})
   transactions: Transaction[];
