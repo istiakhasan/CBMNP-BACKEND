@@ -88,7 +88,8 @@ export class WarehouseController {
     @Param('id') id: string,
     @Req() req, // ধরে নিচ্ছি organizationId req.user থেকে আসে
   ) {
-    return this.warehouseService.setDefault(id, req.user.organizationId);
+    const organizationId = req.headers['x-organization-id'];
+    return this.warehouseService.setDefault(id,organizationId);
   }
   @Get(':id')
   findOne(@Param('id') id: string) {
