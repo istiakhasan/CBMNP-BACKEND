@@ -22,10 +22,13 @@ export class WarehouseController {
   constructor(private readonly warehouseService: WarehouseService) {}
 
   @Post()
-  create(@Body() createWarehouseDto: Warehouse,@Req() req:Request) {
-    const organizationId=req.headers['x-organization-id']
+  create(@Body() createWarehouseDto: Warehouse, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
     return catchAsync(async (): Promise<IResponse<Warehouse>> => {
-      const result = await this.warehouseService.create({...createWarehouseDto,organizationId});
+      const result = await this.warehouseService.create({
+        ...createWarehouseDto,
+        organizationId,
+      });
       return {
         success: true,
         message: 'Warehouse created successfully',
@@ -36,8 +39,8 @@ export class WarehouseController {
   }
 
   @Get()
-  async findAll(@Query() query,@Req() req:Request) {
-    const organizationId=req.headers['x-organization-id']
+  async findAll(@Query() query, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
     return catchAsync(async (): Promise<IResponse<Warehouse[]>> => {
       const paginationOptions = extractOptions(query, [
         'limit',
@@ -49,7 +52,7 @@ export class WarehouseController {
       const result = await this.warehouseService.findAll(
         paginationOptions,
         filterOptions,
-        organizationId
+        organizationId,
       );
       return {
         success: true,
@@ -66,25 +69,27 @@ export class WarehouseController {
   }
 
   @Get('/options')
-  async warehouseOptions(@Req() req:Request){
-    const organizationId=req.headers['x-organization-id']
-   return catchAsync(async(): Promise<IResponse<{label:string;value:string}[]>>=>{
-    const result = await this.warehouseService.loadOptions(organizationId);
-    return {
-      success: true,
-      statusCode: HttpStatus.OK,
-      message: 'Warehouse options retrieved successfully',
-      data: result
-    };
-   })
+  async warehouseOptions(@Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
+    return catchAsync(
+      async (): Promise<IResponse<{ label: string; value: string }[]>> => {
+        const result = await this.warehouseService.loadOptions(organizationId);
+        return {
+          success: true,
+          statusCode: HttpStatus.OK,
+          message: 'Warehouse options retrieved successfully',
+          data: result,
+        };
+      },
+    );
   }
-@Patch('/set-default/id')
-setDefault(
-  @Param('id') id: string,
-  @Req() req, // ধরে নিচ্ছি organizationId req.user থেকে আসে
-) {
-  return this.warehouseService.setDefault(id, req.user.organizationId);
-}
+  @Patch('/set-default/:id')
+  setDefault(
+    @Param('id') id: string,
+    @Req() req, // ধরে নিচ্ছি organizationId req.user থেকে আসে
+  ) {
+    return this.warehouseService.setDefault(id, req.user.organizationId);
+  }
   @Get(':id')
   findOne(@Param('id') id: string) {
     return this.warehouseService.findOne(+id);
@@ -94,16 +99,16 @@ setDefault(
   update(
     @Param('id') id: string,
     @Body() updateWarehouseDto: Warehouse,
-    @Req() req:any
+    @Req() req: any,
   ) {
-    const organizationId=req.headers['x-organization-id']
-    const result=  this.warehouseService.update(id, updateWarehouseDto);
+    const organizationId = req.headers['x-organization-id'];
+    const result = this.warehouseService.update(id, updateWarehouseDto);
     return {
-      success:true,
-      statusCode:HttpStatus.OK,
-      message:'Warehouse update successfully',
-      data:result
-   }
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Warehouse update successfully',
+      data: result,
+    };
   }
 
   @Delete(':id')
