@@ -50,7 +50,7 @@ export class WarehouseService {
     const options = await this.warehouse
       .createQueryBuilder('warehouse')
       .where('warehouse.organizationId = :organizationId', { organizationId })
-      .select(['warehouse.id AS value', 'warehouse.name AS label']) 
+      .select(['warehouse.id AS value', 'warehouse.name AS label','warehouse.isDefault AS "isDefault"']) 
       .getRawMany();
   
     return options;
