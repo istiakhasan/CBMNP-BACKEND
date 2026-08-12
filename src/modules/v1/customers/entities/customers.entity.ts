@@ -74,4 +74,8 @@ export class Customers {
     onUpdate: 'CURRENT_TIMESTAMP(6)',
   })
   updatedAt: Date;
+
+  @Index('idx_customers_shopify')
+@Column({ nullable: true, type: 'varchar' })
+shopifyCustomerId: string;
 }

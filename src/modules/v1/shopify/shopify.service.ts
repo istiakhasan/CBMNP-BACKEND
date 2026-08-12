@@ -8,6 +8,7 @@ import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
+import { Customers, CustomerType } from '../customers/entities/customers.entity';
 
 @Injectable()
 export class ShopifyWebhookService {
@@ -22,6 +23,8 @@ export class ShopifyWebhookService {
     private readonly productCatalogRepository: Repository<Product>,
     @InjectRepository(ProductImages)
     private readonly productImagesRepository: Repository<ProductImages>,
+    @InjectRepository(Customers)
+    private readonly customerRepository: Repository<Customers>,
     @InjectRepository(Shopify)
     private readonly shopifyRepository: Repository<Shopify>,
   ) {}
@@ -61,6 +64,10 @@ export class ShopifyWebhookService {
       }
     }
 
+    // 1. customer resolve/create — order save করার আগেই লাগবে
+    const customer = await this.resolveOrCreateCustomer(webhookData, shop.organizationId);
+
+    // 2. products resolve/create
     const products = [];
     if (webhookData.line_items?.length > 0) {
       for (const lineItem of webhookData.line_items) {
@@ -80,6 +87,7 @@ export class ShopifyWebhookService {
 
     try {
       const result = await this.orderRepository.save({
+        customerId: customer.customer_Id, // এইটাই আগে missing ছিল
         receiverPhoneNumber: webhookData.shipping_address?.phone,
         receiverName: webhookData.shipping_address?.name,
         statusId: 1,
@@ -102,12 +110,81 @@ export class ShopifyWebhookService {
         shopifyOrderId: String(webhookData.id),
       });
 
-      this.logger.log(`Order saved: ${result.id} (${result.orderNumber})`);
+      this.logger.log(`Order saved: ${result.id} (${result.orderNumber}), customer: ${customer.customer_Id}`);
       return { orderId: result.id, orderNumber: result.orderNumber };
     } catch (error: any) {
       this.logger.error(`Error saving Shopify order: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Failed to save order');
     }
+  }
+
+  /**
+   * Shopify order payload থেকে customer resolve করে — priority:
+   * 1. shopifyCustomerId দিয়ে match (সবচেয়ে reliable, logged-in customer)
+   * 2. phone number দিয়ে match (guest checkout, একই নাম্বার আগে থেকে থাকলে)
+   * 3. না পেলে নতুন customer তৈরি
+   */
+  private async resolveOrCreateCustomer(webhookData: any, organizationId: string): Promise<Customers> {
+    const shopifyCustomer = webhookData.customer; // guest checkout হলে undefined হতে পারে
+    const shopifyCustomerId = shopifyCustomer?.id ? String(shopifyCustomer.id) : null;
+    const phone =
+      webhookData.shipping_address?.phone ||
+      webhookData.billing_address?.phone ||
+      shopifyCustomer?.phone ||
+      null;
+
+    let customer: Customers | null = null;
+
+    if (shopifyCustomerId) {
+      customer = await this.customerRepository.findOne({
+        where: { shopifyCustomerId, organizationId },
+      });
+    }
+
+    if (!customer && phone) {
+      customer = await this.customerRepository.findOne({
+        where: { customerPhoneNumber: phone, organizationId },
+      });
+      // পুরনো customer পাওয়া গেলে কিন্তু shopifyCustomerId সেট নেই — লিংক করে দাও future lookup এর জন্য
+      if (customer && shopifyCustomerId && !customer.shopifyCustomerId) {
+        customer = await this.customerRepository.save({ ...customer, shopifyCustomerId });
+      }
+    }
+
+    if (customer) return customer;
+
+    // নতুন customer তৈরি করো
+    const name =
+      webhookData.shipping_address?.name ||
+      `${shopifyCustomer?.first_name || ''} ${shopifyCustomer?.last_name || ''}`.trim() ||
+      'Shopify Customer';
+
+    customer = await this.customerRepository.save({
+      customerName: name,
+      customerPhoneNumber: phone || '',
+      address: webhookData.shipping_address?.address1 || '',
+      division: webhookData.shipping_address?.province || '',
+      district: webhookData.shipping_address?.city || '',
+      thana: '',
+      country: webhookData.shipping_address?.country || 'Bangladesh',
+      customerType: CustomerType.NonProbashi,
+      customer_Id: await this.generateUniqueCustomerId(organizationId),
+      organizationId,
+      shopifyCustomerId,
+    });
+
+    this.logger.log(`New customer auto-created from Shopify order: ${customer.customer_Id}`);
+    return customer;
+  }
+
+  private async generateUniqueCustomerId(organizationId: string): Promise<string> {
+    const lastCustomer = await this.customerRepository.findOne({
+      where: { organizationId },
+      order: { id: 'DESC' },
+    });
+    const lastNumber = lastCustomer?.customer_Id?.replace('CUS-', '');
+    const nextNumber = lastNumber && !isNaN(Number(lastNumber)) ? Number(lastNumber) + 1 : 10000;
+    return `CUS-${nextNumber}`;
   }
 
   /**
@@ -204,7 +281,6 @@ export class ShopifyWebhookService {
         this.logger.log(`Product created from Shopify: ${lastSaved.id}`);
       }
 
-      // variant-specific image থাকলে সেটা, নাহলে product-level সব image
       const relevantImages = variant.image_id
         ? shopifyProduct.images?.filter((img: any) => img.id === variant.image_id)
         : shopifyProduct.images;

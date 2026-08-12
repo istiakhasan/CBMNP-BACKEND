@@ -8,8 +8,9 @@ import { Products } from '../order/entities/products.entity';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
+import { Customers } from '../customers/entities/customers.entity';
 @Module({
-  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product,ProductImages]), OrderModule],
+  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product,ProductImages,Customers]), OrderModule],
   providers: [ShopifyWebhookService],
   controllers: [WebhookController],
 })

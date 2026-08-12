@@ -17,20 +17,38 @@ export class WebhookController {
     @Headers('x-shopify-webhook-id') webhookId: string,
   ) {
     const rawBody = req.rawBody;
+    if (!rawBody) throw new BadRequestException('Raw body is missing!');
+    if (!shopifyHmac || !shopDomain) throw new BadRequestException('Missing Shopify verification headers');
 
-    if (!rawBody) {
-      throw new BadRequestException('Raw body is missing!');
-    }
-    if (!shopifyHmac || !shopDomain) {
-      throw new BadRequestException('Missing Shopify verification headers');
-    }
+    const result = await this.shopifyWebhookService.handleShopifyOrderWebhook(rawBody, shopifyHmac, shopDomain, webhookId);
+    return { status: 'success', data: result };
+  }
 
-    const result = await this.shopifyWebhookService.handleShopifyOrderWebhook(
-      rawBody,
-      shopifyHmac,
-      shopDomain,
-      webhookId,
-    );
+  @Post('/shopify/product')
+  @HttpCode(HttpStatus.OK)
+  async handleProductWebhook(
+    @Req() req,
+    @Headers('X-Shopify-Hmac-Sha256') shopifyHmac: string,
+    @Headers('x-shopify-shop-domain') shopDomain: string,
+  ) {
+    const rawBody = req.rawBody;
+    if (!rawBody) throw new BadRequestException('Raw body is missing!');
+
+    const result = await this.shopifyWebhookService.handleShopifyProductWebhook(rawBody, shopifyHmac, shopDomain);
+    return { status: 'success', data: result };
+  }
+
+  @Post('/shopify/product/delete')
+  @HttpCode(HttpStatus.OK)
+  async handleProductDeleteWebhook(
+    @Req() req,
+    @Headers('X-Shopify-Hmac-Sha256') shopifyHmac: string,
+    @Headers('x-shopify-shop-domain') shopDomain: string,
+  ) {
+    const rawBody = req.rawBody;
+    if (!rawBody) throw new BadRequestException('Raw body is missing!');
+
+    const result = await this.shopifyWebhookService.handleShopifyProductDeleteWebhook(rawBody, shopifyHmac, shopDomain);
     return { status: 'success', data: result };
   }
 
