@@ -1,6 +1,6 @@
 import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import * as ExcelJS from 'exceljs';
 import { Products } from './entities/products.entity';
@@ -61,38 +61,46 @@ export class OrderService {
     private readonly requisitionService: RequisitionService,
   ) {}
  // আগের generateOrderNumber() টা এই দিয়ে replace করুন
+// ---------- Shared helper: organization এর prefix বের করা ----------
+private async getOrganizationPrefix(
+  manager: EntityManager,
+  organizationId: string,
+): Promise<string> {
+  const organization = await manager.findOne(Organization, {
+    where: { id: organizationId },
+  });
+  return organization?.invoicePrefix || 'ORD';
+}
+
+// ---------- Order Number ----------
 async generateOrderNumber(organizationId: string): Promise<string> {
   return this.dataSource.transaction(async (manager) => {
-    // Lock দিয়ে row select করছি যাতে concurrent request এ duplicate না হয়
+    const prefix = await this.getOrganizationPrefix(manager, organizationId);
+
     const lastOrder = await manager
       .createQueryBuilder(Order, 'order')
       .setLock('pessimistic_write')
       .where('order.organizationId = :organizationId', { organizationId })
-      .andWhere('order.orderNumber IS NOT NULL')
+      .andWhere('order.orderNumber LIKE :prefix', { prefix: `${prefix}-%` })
       .orderBy('order.id', 'DESC')
       .take(1)
       .getOne();
 
-    if (!lastOrder || !lastOrder.orderNumber) {
-      return 'ORD-10000';
+    let nextNumber = 10000; // order number এর default starting point আগের মতোই রাখলাম
+    if (lastOrder?.orderNumber) {
+      const lastNumStr = lastOrder.orderNumber.replace(`${prefix}-`, '');
+      const lastNum = parseInt(lastNumStr, 10);
+      if (!isNaN(lastNum)) nextNumber = lastNum + 1;
     }
 
-    const lastNumber = parseInt(
-      lastOrder.orderNumber.replace('ORD-', ''),
-      10,
-    );
-    const newNumber = isNaN(lastNumber) ? 10000 : lastNumber + 1;
-    return `ORD-${newNumber}`;
+    return `${prefix}-${nextNumber}`;
   });
 }
 
-// নতুন — invoice number কে company-wise dynamic prefix দিয়ে generate করবে
+// ---------- Invoice Number ----------
 async generateInvoiceNumber(organizationId: string): Promise<string> {
   return this.dataSource.transaction(async (manager) => {
-    const organization = await manager.findOne(Organization, {
-      where: { id: organizationId },
-    });
-    const prefix = organization?.invoicePrefix || 'SO';
+    const prefix = await this.getOrganizationPrefix(manager, organizationId);
 
     const lastOrder = await manager
       .createQueryBuilder(Order, 'order')
