@@ -227,7 +227,7 @@ export class ShopifyWebhookService {
     customer = await this.customerRepository.save({
       customerName: name,
       customerPhoneNumber: phone || '',
-      address: webhookData.shipping_address?.address1 || '',
+      // address: webhookData.shipping_address?.address1 || '',
       division: webhookData.shipping_address?.province || '',
       district: webhookData.shipping_address?.city || '',
       thana: '',

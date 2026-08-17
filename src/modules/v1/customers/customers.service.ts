@@ -527,4 +527,22 @@ if (customer) {
     const result = await this.addressRepository.save(data);
     return result;
   }
+
+  async updateAddressBook(id: number, data) {
+  const address = await this.addressRepository.findOne({ where: { id } });
+  if (!address) {
+    throw new ApiError(404, 'Address not found');
+  }
+
+  // যদি এটাকে default করা হয়, একই customer এর আগের default গুলো unset করে দাও
+  if (data?.isDefault) {
+    await this.addressRepository.update(
+      { customerId: address.customerId, isDefault: true },
+      { isDefault: false },
+    );
+  }
+
+  await this.addressRepository.update({ id }, data);
+  return this.addressRepository.findOne({ where: { id } });
+}
 }

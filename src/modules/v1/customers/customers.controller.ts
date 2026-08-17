@@ -124,6 +124,19 @@ export class CustomerController {
       data: result,
     };
   }
+  @Patch('address/:id')
+async updateAddressBook(
+  @Param('id') id: number,
+  @Body() data: Partial<AddressBook>,
+) {
+  const result = await this.customerService.updateAddressBook(id, data);
+  return {
+    success: true,
+    statusCode: HttpStatus.OK,
+    message: 'Address updated successfully',
+    data: result,
+  };
+}
   @Get('top-customers-reports')
   async topCustomersReprots(@Query() query, @Req() req: Request) {
     const options = {};
