@@ -139,13 +139,18 @@ shopifyOrderId: string;
   })
   @JoinColumn({ name: 'currier' })
   partner: DeliveryPartner;
-  @Column({ nullable: true })
-  addressId: number;
+  // @Column({ nullable: true })
+  // addressId: number;
 
-  @ManyToOne(() => AddressBook, { eager: true })
-  @JoinColumn({ name: 'addressId' })
-  address: AddressBook;
+  // @ManyToOne(() => AddressBook, { eager: true })
+  // @JoinColumn({ name: 'addressId' })
+  // address: AddressBook;
+@Column({ type: 'varchar', nullable: true })
+addressId: string;
 
+@ManyToOne(() => AddressBook, { eager: true })
+@JoinColumn({ name: 'addressId' })
+address: AddressBook;
   @Index()
   @CreateDateColumn({
     type: 'timestamp',
