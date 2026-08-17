@@ -60,20 +60,59 @@ export class OrderService {
 
     private readonly requisitionService: RequisitionService,
   ) {}
-  async generateOrderNumber(organizationId: string): Promise<string> {
-    const lastOrder = await this.orderRepository.findOne({
-      where: { organizationId },
-      order: { createdAt: 'DESC' },
-    });
+ // আগের generateOrderNumber() টা এই দিয়ে replace করুন
+async generateOrderNumber(organizationId: string): Promise<string> {
+  return this.dataSource.transaction(async (manager) => {
+    // Lock দিয়ে row select করছি যাতে concurrent request এ duplicate না হয়
+    const lastOrder = await manager
+      .createQueryBuilder(Order, 'order')
+      .setLock('pessimistic_write')
+      .where('order.organizationId = :organizationId', { organizationId })
+      .andWhere('order.orderNumber IS NOT NULL')
+      .orderBy('order.id', 'DESC')
+      .take(1)
+      .getOne();
 
     if (!lastOrder || !lastOrder.orderNumber) {
       return 'ORD-10000';
     }
 
-    const lastNumber = parseInt(lastOrder.orderNumber.replace('ORD-', ''), 10);
-    const newNumber = lastNumber + 1;
+    const lastNumber = parseInt(
+      lastOrder.orderNumber.replace('ORD-', ''),
+      10,
+    );
+    const newNumber = isNaN(lastNumber) ? 10000 : lastNumber + 1;
     return `ORD-${newNumber}`;
-  }
+  });
+}
+
+// নতুন — invoice number কে company-wise dynamic prefix দিয়ে generate করবে
+async generateInvoiceNumber(organizationId: string): Promise<string> {
+  return this.dataSource.transaction(async (manager) => {
+    const organization = await manager.findOne(Organization, {
+      where: { id: organizationId },
+    });
+    const prefix = organization?.invoicePrefix || 'SO';
+
+    const lastOrder = await manager
+      .createQueryBuilder(Order, 'order')
+      .setLock('pessimistic_write')
+      .where('order.organizationId = :organizationId', { organizationId })
+      .andWhere('order.invoiceNumber LIKE :prefix', { prefix: `${prefix}-%` })
+      .orderBy('order.id', 'DESC')
+      .take(1)
+      .getOne();
+
+    let nextNumber = 1;
+    if (lastOrder?.invoiceNumber) {
+      const lastNumStr = lastOrder.invoiceNumber.replace(`${prefix}-`, '');
+      const lastNum = parseInt(lastNumStr, 10);
+      if (!isNaN(lastNum)) nextNumber = lastNum + 1;
+    }
+
+    return `${prefix}-${nextNumber.toString().padStart(4, '0')}`;
+  });
+}
 
   async createOrder(payload: Order, organizationId: string) {
     const {
@@ -99,7 +138,6 @@ export class OrderService {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
     }
 
-    const orderNumber = await this.generateOrderNumber(organizationId);
     const validatedProducts: any[] = [];
     let productValue = 0;
 
@@ -131,15 +169,8 @@ export class OrderService {
     const totalReceivableAmount = grandTotal - totalPaidAmount;
 
     // generate invoice number
-    const lastOrder = await this.orderRepository
-      .createQueryBuilder('order')
-      .orderBy('order.createdAt', 'DESC')
-      .take(1)
-      .getOne();
-    const lastUserId = lastOrder?.invoiceNumber?.substring(3);
-    const currentId = lastUserId || (0).toString().padStart(4, '0');
-    let incrementedId = (parseInt(currentId) + 1).toString().padStart(4, '0');
-    incrementedId = `SO-${incrementedId}`;
+const orderNumber = await this.generateOrderNumber(organizationId);
+const incrementedId = await this.generateInvoiceNumber(organizationId);
     const result = await this.orderRepository.save({
       orderNumber,
       paymentHistory: paymentHistory,
@@ -321,16 +352,7 @@ export class OrderService {
     const grandTotal = productValue + Number(shippingCharge) - Number(discount);
     const totalReceivableAmount = grandTotal - totalPaidAmount;
 
-    // generate invoice number
-    const lastOrder = await this.orderRepository
-      .createQueryBuilder('order')
-      .orderBy('order.createdAt', 'DESC')
-      .take(1)
-      .getOne();
-    const lastUserId = lastOrder?.invoiceNumber?.substring(3);
-    const currentId = lastUserId || (0).toString().padStart(4, '0');
-    let incrementedId = (parseInt(currentId) + 1).toString().padStart(4, '0');
-    incrementedId = `SO-${incrementedId}`;
+  const incrementedId = await this.generateInvoiceNumber(organizationId);
     const result = await this.orderRepository.save({
       orderNumber,
       paymentHistory: paymentHistory,
@@ -1311,7 +1333,7 @@ export class OrderService {
       );
 
       await queryRunner.commitTransaction();
-    } catch (error) {
+    } catch (error:any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -1520,7 +1542,7 @@ export class OrderService {
 
       // Commit transaction
       await queryRunner.commitTransaction();
-    } catch (error) {
+    } catch (error:any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -1723,7 +1745,7 @@ export class OrderService {
       await queryRunner.commitTransaction();
 
       return updatedOrders;
-    } catch (error) {
+    } catch (error:any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,

@@ -10,6 +10,7 @@ import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
 import { Customers, CustomerType } from '../customers/entities/customers.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
+import { OrderService } from '../order/order.service';
 
 @Injectable()
 export class ShopifyWebhookService {
@@ -30,6 +31,7 @@ export class ShopifyWebhookService {
     private readonly shopifyRepository: Repository<Shopify>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepository: Repository<Warehouse>,
+    private readonly orderService: OrderService, 
   ) {}
 
   // ---------- HMAC ----------
@@ -57,15 +59,15 @@ export class ShopifyWebhookService {
 
     const webhookData = JSON.parse(body);
 
-    if (webhookId) {
-      const existing = await this.orderRepository.findOne({
-        where: { orderNumber: webhookData.name, organizationId: shop.organizationId },
-      });
-      if (existing) {
-        this.logger.log(`Duplicate webhook for order ${webhookData.name}, skipping`);
-        return { skipped: true, orderId: existing.id };
-      }
-    }
+   if (webhookId) {
+  const existing = await this.orderRepository.findOne({
+    where: { shopifyOrderId: String(webhookData.id), organizationId: shop.organizationId },
+  });
+  if (existing) {
+    this.logger.log(`Duplicate webhook for order ${webhookData.name}, skipping`);
+    return { skipped: true, orderId: existing.id };
+  }
+}
 
     const customer = await this.resolveOrCreateCustomer(webhookData, shop.organizationId);
 
@@ -88,6 +90,9 @@ export class ShopifyWebhookService {
 const defaultWarehouse = await this.warehouseRepository.findOne({
     where: { organizationId: shop.organizationId, isDefault: true },
   });
+  // ✅ একই generator, তাই format সবজায়গায় same (ORD-XXXXX)
+const orderNumber = await this.orderService.generateOrderNumber(shop.organizationId);
+const invoiceNumber = await this.orderService.generateInvoiceNumber(shop.organizationId);
     try {
       const result = await this.orderRepository.save({
         locationId: defaultWarehouse.id,
@@ -102,8 +107,11 @@ const defaultWarehouse = await this.warehouseRepository.findOne({
         receiverThana: '',
         receiverAddress: webhookData.shipping_address?.address1,
         products,
-        orderNumber: webhookData.name || generateUniqueOrderNumber(),
+
         shippingCharge,
+           orderNumber, // ✅ এখন ORD-10001 ফরম্যাট, Shopify এর #1307 না
+    invoiceNumber, // ✅ org এর prefix দিয়ে (TB-0001)
+    shopifyOrderName: webhookData.name,
         productValue,
         orderSource: 'Shopify',
         organizationId: shop.organizationId,

@@ -38,4 +38,8 @@ export class Organization {
   @ApiProperty({ example: '2025-09-03T12:30:00Z', description: 'Last updated timestamp' })
   @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP(6)', onUpdate: 'CURRENT_TIMESTAMP(6)' })
   updatedAt: Date;
+
+  // organization.entity.ts এ যোগ করুন
+@Column({ type: 'varchar', length: 10, default: 'SO' })
+invoicePrefix: string; // যেমন Tabaya এর জন্য 'TB'
 }

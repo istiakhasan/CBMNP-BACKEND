@@ -49,6 +49,11 @@ export class Order {
   @Column({ nullable: true })
   orderSource: string;
   @Column({ nullable: true })
+shopifyOrderName: string;
+
+@Column({ nullable: true, unique: true })
+shopifyOrderId: string;
+  @Column({ nullable: true })
   currier: string;
   @Column({ nullable: true })
   paymentStatus: string;
