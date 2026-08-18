@@ -19,6 +19,7 @@ export class InventoryItem {
 
   @PrimaryColumn()
   productId: string;
+
   @Column()
   inventoryId: string;
 
@@ -30,18 +31,22 @@ export class InventoryItem {
   @JoinColumn({ name: 'locationId' })
   location: Warehouse;
 
-  @Column()
+  @Column({ type: 'int', default: 0 })
   quantity: number;
-  @Column({nullable:true})
+
+  @Column({ type: 'int', default: 0 })
   orderQue: number;
-  @Column({nullable:true})
+
+  @Column({ type: 'int', default: 0 })
   processing: number;
-  @Column({nullable:true})
+
+  @Column({ type: 'int', default: 0 })
   hoildQue: number;
-  @Column({ default: 0 })
+
+  @Column({ type: 'int', default: 0 })
   wastageQuantity: number;
 
-  @Column({ default: 0 })
+  @Column({ type: 'int', default: 0 })
   expiredQuantity: number;
 
   @ManyToOne(() => Inventory, (inventory) => inventory.inventoryItems, {
