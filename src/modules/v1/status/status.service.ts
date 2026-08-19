@@ -114,7 +114,7 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
   }
 
   if (filterOptions.searchTerm) {
-    queryBuilder.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
+    queryBuilder.andWhere(`(orders.orderNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)`, {
       searchTerm: `%${filterOptions.searchTerm}%`,
     });
   }
