@@ -15,7 +15,7 @@ dotenv.config();
       password: process.env.DB_PASSWORD,
       database: process.env.DB_NAME,
       entities: [join(process.cwd(), '/dist/**/*.entity.js')],
-      synchronize: true,
+      synchronize: false,
       logging: false,
        ssl: { 
         rejectUnauthorized: false,

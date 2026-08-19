@@ -22,7 +22,7 @@ export class OrderController {
     }
     const includeProducts = query.includeProducts === 'true';
     const searchFilterOptions = {};
-    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','paymentStatus'];
+    const filterKeys = ['searchTerm','statusId','locationId','startDate','endDate','currier','productId','paymentStatus',"createdAtStart","createdAtEnd"];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
         searchFilterOptions[key] = query[key];

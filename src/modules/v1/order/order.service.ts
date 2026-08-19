@@ -451,12 +451,16 @@ const incrementedId = await this.generateInvoiceNumber(organizationId);
     queryBuilder.leftJoinAndSelect('orders.products', 'products');
     queryBuilder.leftJoinAndSelect('products.product', 'product');
   }
-    if (filterOptions?.searchTerm) {
-      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
-      queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', {
-        searchTerm,
-      });
-    }
+  if (filterOptions?.searchTerm) {
+  const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+
+  queryBuilder.andWhere(
+    '(orders.orderNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
+    {
+      searchTerm,
+    },
+  );
+}
 
     if (filterOptions?.startDate && filterOptions?.endDate) {
       queryBuilder.andWhere(
@@ -464,6 +468,15 @@ const incrementedId = await this.generateInvoiceNumber(organizationId);
         {
           startDate: new Date(filterOptions.startDate),
           endDate: new Date(filterOptions.endDate),
+        },
+      );
+    }
+    if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
+      queryBuilder.andWhere(
+        'orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd',
+        {
+          createdAtStart: new Date(filterOptions.createdAtStart),
+          createdAtEnd: new Date(filterOptions.createdAtEnd),
         },
       );
     }
