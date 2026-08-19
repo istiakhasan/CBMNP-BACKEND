@@ -103,6 +103,15 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
       },
     );
   }
+  if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
+    queryBuilder.andWhere(
+      'orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd',
+      {
+        createdAtStart: new Date(filterOptions.createdAtStart),
+        createdAtEnd: new Date(filterOptions.createdAtEnd),
+      },
+    );
+  }
 
   if (filterOptions.searchTerm) {
     queryBuilder.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
