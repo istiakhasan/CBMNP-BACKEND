@@ -1,4 +1,4 @@
-import { HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
@@ -205,55 +205,118 @@ const incrementedId = await this.generateInvoiceNumber(organizationId);
       previousValue: null,
     });
     // if order status approved then this section will be execute
-    if (payload?.statusId === 2) {
-      for (const item of products) {
-        const { productId, productQuantity } = item;
-        const existingInventory = await this.inventoryRepository.findOne({
-          where: { productId },
-        });
-        if (!existingInventory?.orderQue) {
-          await this.inventoryRepository.update({ productId }, { orderQue: 0 });
-        }
-        await this.inventoryRepository.increment(
-          { productId },
-          'orderQue',
-          productQuantity,
-        );
+    // if (payload?.statusId === 2) {
+    //   for (const item of products) {
+    //     const { productId, productQuantity } = item;
+    //     const existingInventory = await this.inventoryRepository.findOne({
+    //       where: { productId },
+    //     });
+    //     if (!existingInventory?.orderQue) {
+    //       await this.inventoryRepository.update({ productId }, { orderQue: 0 });
+    //     }
+    //     await this.inventoryRepository.increment(
+    //       { productId },
+    //       'orderQue',
+    //       productQuantity,
+    //     );
 
-        const existingInventoryItem =
-          await this.InventoryItemItemRepository.findOne({
-            where: { productId, locationId: rest?.locationId },
-          });
+    //     const existingInventoryItem =
+    //       await this.InventoryItemItemRepository.findOne({
+    //         where: { productId, locationId: rest?.locationId },
+    //       });
 
-        //
-        if (!existingInventoryItem) {
-          const newInventoryItems =
-            await this.InventoryItemItemRepository.create({
-              locationId: rest?.locationId,
-              productId: productId,
-              quantity: 0,
-              orderQue: productQuantity,
-              inventoryId: existingInventory.id,
-            });
+    //     //
+    //     if (!existingInventoryItem) {
+    //       const newInventoryItems =
+    //         await this.InventoryItemItemRepository.create({
+    //           locationId: rest?.locationId,
+    //           productId: productId,
+    //           quantity: 0,
+    //           orderQue: productQuantity,
+    //           inventoryId: existingInventory.id,
+    //         });
 
-          await this.InventoryItemItemRepository.save(newInventoryItems);
-        } else {
-          if (!existingInventoryItem?.orderQue) {
-            await this.InventoryItemItemRepository.update(
-              { productId, locationId: rest?.locationId },
-              { orderQue: 0 },
-            );
-          }
+    //       await this.InventoryItemItemRepository.save(newInventoryItems);
+    //     } else {
+    //       if (!existingInventoryItem?.orderQue) {
+    //         await this.InventoryItemItemRepository.update(
+    //           { productId, locationId: rest?.locationId },
+    //           { orderQue: 0 },
+    //         );
+    //       }
 
-          await this.InventoryItemItemRepository.increment(
-            { productId, locationId: rest?.locationId },
-            'orderQue',
-            productQuantity,
-          );
-        }
-      }
+    //       await this.InventoryItemItemRepository.increment(
+    //         { productId, locationId: rest?.locationId },
+    //         'orderQue',
+    //         productQuantity,
+    //       );
+    //     }
+    //   }
+    // }
+if (payload?.statusId === 2) {
+  for (const item of products) {
+    const { productId, productQuantity } = item;
+
+    let existingInventory = await this.inventoryRepository.findOne({
+      where: { productId },
+    });
+
+    // Inventory না থাকলে create
+    if (!existingInventory) {
+      existingInventory = await this.inventoryRepository.save({
+        productId,
+        organizationId,
+        orderQue: productQuantity,
+        hoildQue: 0,
+        processing: 0,
+        stock: 0,
+      });
+    } else {
+      await this.inventoryRepository.increment(
+        { productId },
+        'orderQue',
+        productQuantity,
+      );
     }
 
+    // location অবশ্যই লাগবে
+    if (!rest?.locationId) {
+      throw new BadRequestException(
+        `Location is required for product ${productId}`,
+      );
+    }
+
+    const existingInventoryItem =
+      await this.InventoryItemItemRepository.findOne({
+        where: {
+          productId,
+          locationId: rest.locationId,
+        },
+      });
+
+    if (!existingInventoryItem) {
+      const newInventoryItem =
+        this.InventoryItemItemRepository.create({
+          locationId: rest.locationId,
+          productId,
+          quantity: 0,
+          orderQue: productQuantity,
+          inventoryId: existingInventory.id,
+        });
+
+      await this.InventoryItemItemRepository.save(newInventoryItem);
+    } else {
+      await this.InventoryItemItemRepository.increment(
+        {
+          productId,
+          locationId: rest.locationId,
+        },
+        'orderQue',
+        productQuantity,
+      );
+    }
+  }
+}
     // if order status hold then this section will be execute
     if (payload?.statusId === 3) {
       for (const item of products) {
