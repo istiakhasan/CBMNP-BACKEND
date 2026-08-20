@@ -24,11 +24,11 @@ import { AddressBook } from '../../customers/entities/addressbook.entity';
 import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 
 @Entity({ name: 'orders' })
-@Unique(['organizationId', 'orderNumber']) 
+@Unique(['organizationId', 'orderNumber'])
 export class Order {
   @PrimaryGeneratedColumn()
   id: number;
-  @Column({  nullable: true })
+  @Column({ nullable: true })
   orderNumber: string;
   @Column({ nullable: true, type: 'varchar' })
   customerId: string;
@@ -49,10 +49,10 @@ export class Order {
   @Column({ nullable: true })
   orderSource: string;
   @Column({ nullable: true })
-shopifyOrderName: string;
+  shopifyOrderName: string;
 
-@Column({ nullable: true, unique: true })
-shopifyOrderId: string;
+  @Column({ nullable: true, unique: true })
+  shopifyOrderId: string;
   @Column({ nullable: true })
   currier: string;
   @Column({ nullable: true })
@@ -145,12 +145,12 @@ shopifyOrderId: string;
   // @ManyToOne(() => AddressBook, { eager: true })
   // @JoinColumn({ name: 'addressId' })
   // address: AddressBook;
-@Column({ type: 'varchar', nullable: true })
-addressId: string;
+  @Column({ type: 'varchar', nullable: true })
+  addressId: string;
 
-@ManyToOne(() => AddressBook, { eager: true })
-@JoinColumn({ name: 'addressId' })
-address: AddressBook;
+  @ManyToOne(() => AddressBook, { eager: true })
+  @JoinColumn({ name: 'addressId' })
+  address: AddressBook;
   @Index()
   @CreateDateColumn({
     type: 'timestamp',
@@ -165,52 +165,75 @@ address: AddressBook;
   })
   updatedAt: Date;
 
+  @Column({
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  shippingCharge: number;
 
   @Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-shippingCharge: number;
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  productValue: number;
 
-@Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-productValue: number;
+  @Column({
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  totalPrice: number;
 
-@Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-totalPrice: number;
+  @Column({
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  discount: number;
 
-@Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-discount: number;
+  @Column({
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  totalPaidAmount: number;
 
-@Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-totalPaidAmount: number;
+  @Column({
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    nullable: true,
+  })
+  totalReceiveAbleAmount: number;
 
-@Column({
-  type: 'numeric',
-  precision: 12,
-  scale: 2,
-  nullable: true,
-})
-totalReceiveAbleAmount: number;
+  @Column({ nullable: true })
+  consignmentId: string;
+
+  @Column({ nullable: true })
+  trackingCode: string;
+
+  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+  deliveryCharge: number;
+
+  @Column({ nullable: true, type: 'text' })
+  trackingMessage: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  courierUpdatedAt: Date;
+
+  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
+  codAmount: number;
+
+  @Column({ nullable: true })
+  courierStatus: string;
+
+  @Column({ nullable: true })
+  courierNotificationType: string;
 }

@@ -34,6 +34,7 @@ import { DistrictsModule } from './modules/v1/districts/districts.module';
 import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_charge.module';
 import { OrderModuleV2 } from './modules/v2/order/order.module';
 import { ChatModule } from './modules/v2/chat/chat.module';
+import { WebhookModule } from './modules/v1/webhook/webhook.module';
 
 @Module({
   imports: [
@@ -69,7 +70,8 @@ import { ChatModule } from './modules/v2/chat/chat.module';
     DistrictsModule,
     DelivaryChargeModule,
     OrderModuleV2,
-    ChatModule
+    ChatModule,
+    WebhookModule
   ],
   controllers: [AppController],
   providers: [
