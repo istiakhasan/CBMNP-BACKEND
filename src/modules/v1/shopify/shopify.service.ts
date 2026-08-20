@@ -9,7 +9,6 @@ import * as crypto from 'crypto';
 import { Products } from '../order/entities/products.entity';
 import { Order } from '../order/entities/order.entity';
 import { Repository, IsNull, Not } from 'typeorm';
-import { generateUniqueOrderNumber } from '../../../util/genarateUniqueNumber';
 import { Shopify } from './entities/shopify.entity';
 import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
@@ -68,7 +67,10 @@ export class ShopifyWebhookService {
     return crypto.timingSafeEqual(bufA, bufB);
   }
 
-  // ---------- ORDER WEBHOOK (Shopify → ERP) ----------
+  // =====================================================================
+  // ORDER WEBHOOK — পুরো method একটাই try/catch এ, কোনো লাইনেই crash হলে
+  // unhandled exception হবে না, আর warehouse missing থাকলেও order block হবে না।
+  // =====================================================================
   async handleShopifyOrderWebhook(
     body: string,
     shopifyHmac: string,
@@ -84,13 +86,16 @@ export class ShopifyWebhookService {
     if (!shop) throw new BadRequestException('Shop not configured');
 
     const webhookData = JSON.parse(body);
+    const shopifyOrderId = String(webhookData.id);
 
-    if (webhookId) {
+    this.logger.log(
+      `Webhook received: order ${webhookData.name} (${shopifyOrderId}) for shop ${shopDomain}`,
+    );
+
+    try {
+      // ---- dedup check ----
       const existing = await this.orderRepository.findOne({
-        where: {
-          shopifyOrderId: String(webhookData.id),
-          organizationId: shop.organizationId,
-        },
+        where: { shopifyOrderId, organizationId: shop.organizationId },
       });
       if (existing) {
         this.logger.log(
@@ -98,11 +103,67 @@ export class ShopifyWebhookService {
         );
         return { skipped: true, orderId: existing.id };
       }
-    }
 
+      // ---- retry wrapper diye actual processing (transient DB error handle korar jonno) ----
+      const result = await this.processOrderWithRetry(
+        webhookData,
+        shop.organizationId,
+      );
+
+      this.logger.log(`Order saved: ${result.orderId} (${result.orderNumber})`);
+      return result;
+    } catch (error: any) {
+      // ei catch-e sob kisu dhora porbe: warehouse null, customer/product error,
+      // lock timeout (3 retry er porew fail korle), duplicate key — SOB.
+      this.logger.error(
+        `FAILED processing Shopify order ${webhookData.name} (${shopifyOrderId}) for shop ${shopDomain}: ${error.message}`,
+        error.stack,
+      );
+      // non-2xx return korchi jate Shopify nijeo webhook retry kore (extra safety net)
+      throw new InternalServerErrorException(
+        'Failed to save order, will be retried',
+      );
+    }
+  }
+
+  // ---- Core processing, transient error hole automatic retry (max 3 bar, backoff shoho) ----
+  private async processOrderWithRetry(
+    webhookData: any,
+    organizationId: string,
+    attempt = 1,
+  ): Promise<{ orderId: string; orderNumber: string }> {
+    const MAX_ATTEMPTS = 3;
+    try {
+      return await this.processOrder(webhookData, organizationId);
+    } catch (error: any) {
+      const isTransient =
+        error?.code === '40P01' || // deadlock_detected
+        error?.code === '55P03' || // lock_not_available
+        /deadlock|lock|timeout/i.test(error?.message || '');
+
+      if (isTransient && attempt < MAX_ATTEMPTS) {
+        const delay = attempt * 500; // 500ms, 1000ms
+        this.logger.warn(
+          `Transient error on order ${webhookData.name}, attempt ${attempt}, retrying in ${delay}ms: ${error.message}`,
+        );
+        await new Promise((res) => setTimeout(res, delay));
+        return this.processOrderWithRetry(
+          webhookData,
+          organizationId,
+          attempt + 1,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async processOrder(
+    webhookData: any,
+    organizationId: string,
+  ): Promise<{ orderId: string; orderNumber: string }> {
     const customer = await this.resolveOrCreateCustomer(
       webhookData,
-      shop.organizationId,
+      organizationId,
     );
 
     const products = [];
@@ -110,7 +171,7 @@ export class ShopifyWebhookService {
       for (const lineItem of webhookData.line_items) {
         const catalogProduct = await this.resolveOrCreateProduct(
           lineItem,
-          shop.organizationId,
+          organizationId,
         );
         products.push({
           productId: catalogProduct.id,
@@ -128,57 +189,97 @@ export class ShopifyWebhookService {
       webhookData.total_line_items_price_set?.shop_money?.amount || '0',
     );
     const totalAmount = productValue + shippingCharge;
-    const defaultWarehouse = await this.warehouseRepository.findOne({
-      where: { organizationId: shop.organizationId, isDefault: true },
+
+    // ✅ SELF-HEALING WAREHOUSE — এইটাই মূল fix, আর কখনো `.id of null` crash হবে না
+    const warehouseId =
+      await this.getOrCreateFallbackWarehouseId(organizationId);
+
+    const orderNumber =
+      await this.orderService.generateOrderNumber(organizationId);
+    const invoiceNumber =
+      await this.orderService.generateInvoiceNumber(organizationId);
+
+    const result = await this.orderRepository.save({
+      locationId: warehouseId,
+      customerId: customer.customer_Id,
+      receiverPhoneNumber:
+        webhookData.shipping_address?.phone ||
+        webhookData.billing_address?.phone ||
+        '',
+      receiverName:
+        webhookData.shipping_address?.name ||
+        webhookData.billing_address?.name ||
+        customer.customerName,
+      statusId: 1,
+      totalPrice: totalAmount,
+      paymentMethod: webhookData.payment_gateway_names?.join(', ') || 'Shopify',
+      receiverDivision: webhookData.shipping_address?.province || '',
+      receiverDistrict: webhookData.shipping_address?.city || '',
+      receiverThana: '',
+      receiverAddress: webhookData.shipping_address?.address1 || '',
+      products,
+      shippingCharge,
+      orderNumber,
+      invoiceNumber,
+      shopifyOrderName: webhookData.name,
+      productValue,
+      orderSource: 'Shopify',
+      organizationId,
+      totalReceiveAbleAmount: totalAmount,
+      discount: parseFloat(
+        webhookData.total_discounts_set?.shop_money?.amount || '0',
+      ),
+      paymentStatus: webhookData.financial_status,
+      onCancelReason: webhookData.cancel_reason,
+      shopifyOrderId: String(webhookData.id),
     });
-    // ✅ একই generator, তাই format সবজায়গায় same (ORD-XXXXX)
-    const orderNumber = await this.orderService.generateOrderNumber(
-      shop.organizationId,
-    );
-    const invoiceNumber = await this.orderService.generateInvoiceNumber(
-      shop.organizationId,
+
+    return { orderId: String(result.id), orderNumber: result.orderNumber };
+  }
+
+  // ---- Warehouse resolve: default > any active warehouse > auto-create placeholder ----
+  // Ei function-i guarantee dey je locationId kokhono null hobe na, order kokhono
+  // "warehouse nai" bole atke thakbe na.
+  private async getOrCreateFallbackWarehouseId(
+    organizationId: string,
+  ): Promise<string> {
+    let warehouse = await this.warehouseRepository.findOne({
+      where: { organizationId, isDefault: true },
+    });
+    if (warehouse) return warehouse.id;
+
+    // default nai, kintu onno kono warehouse ache kina dekhi
+    warehouse = await this.warehouseRepository.findOne({
+      where: { organizationId },
+      order: { id: 'ASC' as any },
+    });
+    if (warehouse) {
+      this.logger.warn(
+        `No default warehouse for org ${organizationId}, falling back to warehouse ${warehouse.id}. Please set a default warehouse in admin panel.`,
+      );
+      return warehouse.id;
+    }
+
+    // kono warehouse-i nai — ekta placeholder auto-create kore dei, order jeno block na hoy
+    this.logger.warn(
+      `No warehouse at all for org ${organizationId}. Auto-creating fallback "Unassigned" warehouse.`,
     );
     try {
-      const result = await this.orderRepository.save({
-        locationId: defaultWarehouse.id,
-        customerId: customer.customer_Id,
-        receiverPhoneNumber: webhookData.shipping_address?.phone,
-        receiverName: webhookData.shipping_address?.name,
-        statusId: 1,
-        totalPrice: totalAmount,
-        paymentMethod: webhookData.payment_gateway_names?.join(', '),
-        receiverDivision: webhookData.shipping_address?.province,
-        receiverDistrict: webhookData.shipping_address?.city,
-        receiverThana: '',
-        receiverAddress: webhookData.shipping_address?.address1,
-        products,
-
-        shippingCharge,
-        orderNumber, // ✅ এখন ORD-10001 ফরম্যাট, Shopify এর #1307 না
-        invoiceNumber, // ✅ org এর prefix দিয়ে (TB-0001)
-        shopifyOrderName: webhookData.name,
-        productValue,
-        orderSource: 'Shopify',
-        organizationId: shop.organizationId,
-        totalReceiveAbleAmount: totalAmount,
-        discount: parseFloat(
-          webhookData.total_discounts_set?.shop_money?.amount || '0',
-        ),
-        paymentStatus: webhookData.financial_status,
-        onCancelReason: webhookData.cancel_reason,
-        shopifyOrderId: String(webhookData.id),
-      });
-
-      this.logger.log(
-        `Order saved: ${result.id} (${result.orderNumber}), customer: ${customer.customer_Id}`,
-      );
-      return { orderId: result.id, orderNumber: result.orderNumber };
-    } catch (error: any) {
-      this.logger.error(
-        `Error saving Shopify order: ${error.message}`,
-        error.stack,
-      );
-      throw new InternalServerErrorException('Failed to save order');
+      const created = await this.warehouseRepository.save({
+        organizationId,
+        name: 'Unassigned (auto-created)',
+        isDefault: true,
+      } as any);
+      return created.id;
+    } catch (err: any) {
+      // race condition: eki shomoy e onno request-o warehouse create korte pare
+      if (/duplicate key|unique constraint/i.test(err.message)) {
+        const retryFind = await this.warehouseRepository.findOne({
+          where: { organizationId },
+        });
+        if (retryFind) return retryFind.id;
+      }
+      throw err;
     }
   }
 
@@ -224,19 +325,38 @@ export class ShopifyWebhookService {
       `${shopifyCustomer?.first_name || ''} ${shopifyCustomer?.last_name || ''}`.trim() ||
       'Shopify Customer';
 
-    customer = await this.customerRepository.save({
-      customerName: name,
-      customerPhoneNumber: phone || '',
-      // address: webhookData.shipping_address?.address1 || '',
-      division: webhookData.shipping_address?.province || '',
-      district: webhookData.shipping_address?.city || '',
-      thana: '',
-      country: webhookData.shipping_address?.country || 'Bangladesh',
-      customerType: CustomerType.NonProbashi,
-      customer_Id: await this.generateUniqueCustomerId(organizationId),
-      organizationId,
-      shopifyCustomerId,
-    });
+    try {
+      customer = await this.customerRepository.save({
+        customerName: name,
+        customerPhoneNumber: phone || '',
+        division: webhookData.shipping_address?.province || '',
+        district: webhookData.shipping_address?.city || '',
+        thana: '',
+        country: webhookData.shipping_address?.country || 'Bangladesh',
+        customerType: CustomerType.NonProbashi,
+        customer_Id: await this.generateUniqueCustomerId(organizationId),
+        organizationId,
+        shopifyCustomerId,
+      });
+    } catch (err: any) {
+      // duplicate customer_Id race condition hole ekbar notun id niye retry
+      if (/duplicate key|unique constraint/i.test(err.message)) {
+        customer = await this.customerRepository.save({
+          customerName: name,
+          customerPhoneNumber: phone || '',
+          division: webhookData.shipping_address?.province || '',
+          district: webhookData.shipping_address?.city || '',
+          thana: '',
+          country: webhookData.shipping_address?.country || 'Bangladesh',
+          customerType: CustomerType.NonProbashi,
+          customer_Id: await this.generateUniqueCustomerId(organizationId),
+          organizationId,
+          shopifyCustomerId,
+        });
+      } else {
+        throw err;
+      }
+    }
 
     this.logger.log(
       `New customer auto-created from Shopify order: ${customer.customer_Id}`,
@@ -258,10 +378,6 @@ export class ShopifyWebhookService {
   }
 
   // ---------- PRODUCT resolve/create (order webhook থেকে) ----------
-  /**
-   * শুধু local catalog এ খোঁজে — না পেলে line item data দিয়ে bare-bones product বানায়
-   * (image ছাড়া — products/create বা products/update webhook এলে auto-fill হবে)
-   */
   private async resolveOrCreateProduct(
     lineItem: any,
     organizationId: string,
@@ -287,23 +403,38 @@ export class ShopifyWebhookService {
     }
     if (product) return product;
 
-    product = await this.productCatalogRepository.save({
-      name: lineItem.name || lineItem.title || 'Untitled Shopify Product',
-      sku: lineItem.sku || '',
-      description: lineItem.title || '',
-      active: true,
-      weight: String(lineItem.grams ?? 0),
-      unit: 'g',
-      organizationId,
-      productType: 'Simple product',
-      regularPrice: parseFloat(lineItem.price || '0'),
-      salePrice: parseFloat(lineItem.price || '0'),
-      retailPrice: parseFloat(lineItem.price || '0'),
-      distributionPrice: parseFloat(lineItem.price || '0'),
-      purchasePrice: 0,
-      shopifyProductId,
-      shopifyVariantId,
-    });
+    try {
+      product = await this.productCatalogRepository.save({
+        name: lineItem.name || lineItem.title || 'Untitled Shopify Product',
+        sku: lineItem.sku || '',
+        description: lineItem.title || '',
+        active: true,
+        weight: String(lineItem.grams ?? 0),
+        unit: 'g',
+        organizationId,
+        productType: 'Simple product',
+        regularPrice: parseFloat(lineItem.price || '0'),
+        salePrice: parseFloat(lineItem.price || '0'),
+        retailPrice: parseFloat(lineItem.price || '0'),
+        distributionPrice: parseFloat(lineItem.price || '0'),
+        purchasePrice: 0,
+        shopifyProductId,
+        shopifyVariantId,
+      });
+    } catch (err: any) {
+      // race condition: products/create webhook eki shomoy e already create kore fele thakte pare
+      if (/duplicate key|unique constraint/i.test(err.message)) {
+        product = shopifyVariantId
+          ? await this.productCatalogRepository.findOne({
+              where: { shopifyVariantId, organizationId },
+            })
+          : await this.productCatalogRepository.findOne({
+              where: { shopifyProductId, organizationId },
+            });
+        if (product) return product;
+      }
+      throw err;
+    }
 
     this.logger.log(
       `New product auto-created from order (no image yet): ${product.id}`,
@@ -326,11 +457,21 @@ export class ShopifyWebhookService {
     if (!shop) throw new BadRequestException('Shop not configured');
 
     const shopifyProduct = JSON.parse(body);
-    const saved = await this.upsertProductFromShopifyData(
-      shopifyProduct,
-      shop.organizationId,
-    );
-    return { productId: saved.id };
+    try {
+      const saved = await this.upsertProductFromShopifyData(
+        shopifyProduct,
+        shop.organizationId,
+      );
+      return { productId: saved.id };
+    } catch (error: any) {
+      this.logger.error(
+        `Product webhook processing failed for ${shopifyProduct?.id}: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        'Failed to process product webhook',
+      );
+    }
   }
 
   private async upsertProductFromShopifyData(
@@ -467,10 +608,6 @@ export class ShopifyWebhookService {
   }
 
   // ---------- HELPER: কোন Shopify product গুলোর image মিসিং তার লিস্ট ----------
-  /**
-   * Admin panel-এ দেখানোর জন্য — merchant কে বলে দেওয়া যায় ঠিক কোন product গুলো
-   * Shopify-তে গিয়ে একবার re-save/publish করতে হবে যাতে image sync হয়।
-   */
   async getProductsMissingImages(organizationId: string) {
     const products = await this.productCatalogRepository
       .createQueryBuilder('product')
@@ -487,8 +624,9 @@ export class ShopifyWebhookService {
         id: p.id,
         name: p.name,
         shopifyProductId: p.shopifyProductId,
-        shopifyAdminUrl: null, // নিচে shop domain দিয়ে বসিয়ে দিচ্ছি controller-এ
+        shopifyAdminUrl: null,
       })),
     };
   }
 }
+ 
