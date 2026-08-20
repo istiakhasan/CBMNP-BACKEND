@@ -138,12 +138,9 @@ export class ShopifyWebhookService {
       // is expected and NOT a real failure, so we resolve it gracefully
       // instead of bubbling up a 500 (which would just make Shopify retry
       // and spam error logs/alerts for something that already succeeded).
-      if (
-        isUniqueViolation(error) &&
-        /shopifyOrderId|shopify_order/i.test(
-          error?.detail || error?.message || '',
-        )
-      ) {
+      if (isUniqueViolation(error) && /shopifyOrderId|shopify_order/i.test(
+        error?.detail || error?.message || '',
+      )) {
         const existing = await this.orderRepository.findOne({
           where: { shopifyOrderId, organizationId: shop.organizationId },
         });
@@ -375,48 +372,18 @@ export class ShopifyWebhookService {
       shopifyCustomerId,
     };
 
-    // customer_Id is GLOBALLY unique but generated per-organization
-    // ("CUS-10000" starting point per org), so two different orgs can
-    // collide on their first customer. A single blind retry using the
-    // SAME generation logic would collide again and throw — so we loop
-    // with a fresh generated id each time, bounded to avoid an infinite loop.
-    const MAX_ATTEMPTS = 5;
-    let lastErr: any;
-    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      try {
-        customer = await this.customerRepository.save({
-          ...baseCustomerData,
-          customer_Id: await this.generateUniqueCustomerId(organizationId),
-        });
-        lastErr = null;
-        break;
-      } catch (err: any) {
-        lastErr = err;
-        if (!isUniqueViolation(err)) throw err;
-
-        // Another request may have already created this exact customer
-        // (e.g. same shopifyCustomerId/phone) concurrently — check first.
-        const concurrent = shopifyCustomerId
-          ? await this.customerRepository.findOne({
-              where: { shopifyCustomerId, organizationId },
-            })
-          : phone
-            ? await this.customerRepository.findOne({
-                where: { customerPhoneNumber: phone, organizationId },
-              })
-            : null;
-        if (concurrent) {
-          customer = concurrent;
-          lastErr = null;
-          break;
-        }
-        // Otherwise it was a customer_Id collision — loop and regenerate.
-        this.logger.warn(
-          `customer_Id collision on attempt ${attempt} for org ${organizationId}, regenerating`,
-        );
-      }
-    }
-    if (lastErr) throw lastErr;
+    // customer_Id is a GLOBALLY unique column. Under real production load
+    // (Shopify redelivering the same failed webhook, multiple pm2 workers,
+    // a burst of mobile orders) many requests can try to create a NEW
+    // customer at almost the same instant. An optimistic "read last id,
+    // insert, retry on collision" approach was tried first but still failed
+    // repeatedly under enough concurrency — retries just re-collide with
+    // each other. So this now uses a Postgres transaction-level advisory
+    // lock: only ONE request at a time can compute+insert the next
+    // customer_Id; every other concurrent request simply waits its turn
+    // instead of racing and failing. No retry loop needed — it cannot
+    // collide by construction.
+    customer = await this.createCustomerWithLock(baseCustomerData);
 
     this.logger.log(
       `New customer auto-created from Shopify order: ${customer.customer_Id}`,
@@ -424,17 +391,44 @@ export class ShopifyWebhookService {
     return customer;
   }
 
-  private async generateUniqueCustomerId(
-    organizationId: string,
-  ): Promise<string> {
-    const lastCustomer = await this.customerRepository.findOne({
-      where: { organizationId },
-      order: { id: 'DESC' },
-    });
-    const lastNumber = lastCustomer?.customer_Id?.replace('CUS-', '');
-    const nextNumber =
-      lastNumber && !isNaN(Number(lastNumber)) ? Number(lastNumber) + 1 : 10000;
-    return `CUS-${nextNumber}`;
+  private async createCustomerWithLock(
+    baseCustomerData: Partial<Customers>,
+  ): Promise<Customers> {
+    const queryRunner =
+      this.customerRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      // Serializes ALL concurrent customer-creation transactions on this
+      // one named lock. Held until commit/rollback, then automatically
+      // released — no cleanup needed, no chance of a stuck lock.
+      await queryRunner.query(
+        `SELECT pg_advisory_xact_lock(hashtext('customer_id_generation'))`,
+      );
+
+      const result = await queryRunner.query(
+        `SELECT MAX(CAST(SUBSTRING("customer_Id" FROM 5) AS INTEGER)) AS "maxNumber"
+         FROM customers
+         WHERE "customer_Id" ~ '^CUS-[0-9]+$'`,
+      );
+      const maxNumber = result?.[0]?.maxNumber;
+      const nextNumber =
+        maxNumber !== null && maxNumber !== undefined
+          ? Number(maxNumber) + 1
+          : 10000;
+
+      const saved = await queryRunner.manager.save(Customers, {
+        ...baseCustomerData,
+        customer_Id: `CUS-${nextNumber}`,
+      });
+      await queryRunner.commitTransaction();
+      return saved;
+    } catch (err) {
+      await queryRunner.rollbackTransaction();
+      throw err;
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   // ---------- PRODUCT resolve/create (order webhook থেকে) ----------
