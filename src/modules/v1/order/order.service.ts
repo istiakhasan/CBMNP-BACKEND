@@ -651,7 +651,7 @@ if (payload?.statusId === 2) {
     };
   }
   // get order reports
-  async getOrdersReports(options, filterOptions, organizationId) {
+ async getOrdersReports(options, filterOptions, organizationId) {
     const { sortBy, sortOrder, limit, page, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
@@ -663,6 +663,21 @@ if (payload?.statusId === 2) {
         searchTerm,
       });
     }
+
+    // ✅ FIX: choose which date field to filter by via a `dateField` query param.
+    // Defaults to 'createdAt' to preserve old behaviour for existing callers,
+    // but pass dateField=intransitTime to get "In-transit on this date" reports,
+    // or dateField=storeTime / packingTime for other stage-based reports.
+    const allowedDateFields = [
+      'createdAt',
+      'intransitTime',
+      'storeTime',
+      'packingTime',
+      'approvedTime',
+    ];
+    const dateField = allowedDateFields.includes(filterOptions?.dateField)
+      ? filterOptions.dateField
+      : 'createdAt';
 
     if (filterOptions?.startDate && filterOptions?.endDate) {
       const localStartDate = new Date(filterOptions.startDate);
@@ -692,7 +707,7 @@ if (payload?.statusId === 2) {
       );
 
       queryBuilder.andWhere(
-        'orders.createdAt BETWEEN :startDate AND :endDate',
+        `orders.${dateField} BETWEEN :startDate AND :endDate`,
         {
           startDate: utcStartDate.toISOString(),
           endDate: utcEndDate.toISOString(),
@@ -722,7 +737,6 @@ if (payload?.statusId === 2) {
       selesAgentIds = Array.isArray(selesAgentIds)
         ? selesAgentIds
         : [selesAgentIds];
-      console.log(selesAgentIds, 'check');
       queryBuilder.andWhere('orders.agentId IN (:...selesAgentIds)', {
         selesAgentIds,
       });
@@ -733,7 +747,6 @@ if (payload?.statusId === 2) {
     }
     let productIds = filterOptions?.productId;
     if (productIds) {
-      console.log(productIds, 'product ids');
       productIds = Array.isArray(productIds) ? productIds : [productIds];
       queryBuilder.andWhere('product.productId IN (:...productIds)', {
         productIds,
@@ -756,7 +769,7 @@ if (payload?.statusId === 2) {
     }
     let paymentMethodIds = filterOptions?.paymentMethodIds;
     if (paymentMethodIds) {
-      locationIds = Array.isArray(paymentMethodIds)
+      paymentMethodIds = Array.isArray(paymentMethodIds)
         ? paymentMethodIds
         : [paymentMethodIds];
       queryBuilder.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
