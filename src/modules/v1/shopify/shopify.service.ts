@@ -237,7 +237,7 @@ export class ShopifyWebhookService {
 
     const result = await this.orderRepository.save({
       locationId: warehouseId,
-      customerId: customer.customer_Id,
+      customerId: customer.customer_Id || undefined,
       receiverPhoneNumber:
         webhookData.shipping_address?.phone ||
         webhookData.billing_address?.phone ||

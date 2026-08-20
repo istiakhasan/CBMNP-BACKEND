@@ -177,7 +177,7 @@ export class RequisitionService {
       // ✅ Commit transaction
       await queryRunner.commitTransaction();
       return savedRequisition;
-    } catch (error) {
+    } catch (error:any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,

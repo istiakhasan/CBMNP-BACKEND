@@ -1381,7 +1381,7 @@ if (payload?.statusId === 2) {
         // ========== STATUS 5: STORE ===========
         if (data.statusId === 5) {
           await this.requisitionService.createRequisition(
-            { orderIds, userId: data?.userId },
+            { orderIds, userId: data?.userId ?? data?.agentId  },
             organizationId,
           );
           await this.orderRepository.update(
