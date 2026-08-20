@@ -19,6 +19,17 @@ import {
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { OrderService } from '../order/order.service';
 
+// Postgres unique_violation error code — used everywhere we need to detect
+// a duplicate-key race instead of pattern-matching error.message (locale/driver safe).
+const PG_UNIQUE_VIOLATION = '23505';
+
+function isUniqueViolation(err: any): boolean {
+  return (
+    err?.code === PG_UNIQUE_VIOLATION ||
+    /duplicate key|unique constraint/i.test(err?.message || '')
+  );
+}
+
 @Injectable()
 export class ShopifyWebhookService {
   private readonly logger = new Logger(ShopifyWebhookService.name);
@@ -68,8 +79,7 @@ export class ShopifyWebhookService {
   }
 
   // =====================================================================
-  // ORDER WEBHOOK — পুরো method একটাই try/catch এ, কোনো লাইনেই crash হলে
-  // unhandled exception হবে না, আর warehouse missing থাকলেও order block হবে না।
+  // ORDER WEBHOOK
   // =====================================================================
   async handleShopifyOrderWebhook(
     body: string,
@@ -85,7 +95,16 @@ export class ShopifyWebhookService {
     if (!valid) throw new BadRequestException('Invalid webhook signature');
     if (!shop) throw new BadRequestException('Shop not configured');
 
-    const webhookData = JSON.parse(body);
+    let webhookData: any;
+    try {
+      webhookData = JSON.parse(body);
+    } catch (err: any) {
+      this.logger.error(
+        `Invalid JSON body received for shop ${shopDomain}: ${err.message}`,
+      );
+      throw new BadRequestException('Invalid webhook payload');
+    }
+
     const shopifyOrderId = String(webhookData.id);
 
     this.logger.log(
@@ -93,7 +112,7 @@ export class ShopifyWebhookService {
     );
 
     try {
-      // ---- dedup check ----
+      // ---- dedup check (best-effort; final safety net is the DB unique constraint below) ----
       const existing = await this.orderRepository.findOne({
         where: { shopifyOrderId, organizationId: shop.organizationId },
       });
@@ -104,7 +123,6 @@ export class ShopifyWebhookService {
         return { skipped: true, orderId: existing.id };
       }
 
-      // ---- retry wrapper diye actual processing (transient DB error handle korar jonno) ----
       const result = await this.processOrderWithRetry(
         webhookData,
         shop.organizationId,
@@ -113,13 +131,34 @@ export class ShopifyWebhookService {
       this.logger.log(`Order saved: ${result.orderId} (${result.orderNumber})`);
       return result;
     } catch (error: any) {
-      // ei catch-e sob kisu dhora porbe: warehouse null, customer/product error,
-      // lock timeout (3 retry er porew fail korle), duplicate key — SOB.
+      // Two concurrent deliveries of the SAME order (Shopify redelivery, or
+      // multiple pm2/cluster workers) can both pass the dedup SELECT above
+      // before either INSERT commits. The DB unique constraint on
+      // shopifyOrderId is what actually prevents the duplicate row — this
+      // is expected and NOT a real failure, so we resolve it gracefully
+      // instead of bubbling up a 500 (which would just make Shopify retry
+      // and spam error logs/alerts for something that already succeeded).
+      if (
+        isUniqueViolation(error) &&
+        /shopifyOrderId|shopify_order/i.test(
+          error?.detail || error?.message || '',
+        )
+      ) {
+        const existing = await this.orderRepository.findOne({
+          where: { shopifyOrderId, organizationId: shop.organizationId },
+        });
+        if (existing) {
+          this.logger.log(
+            `Order ${webhookData.name} was saved by a concurrent request, skipping`,
+          );
+          return { skipped: true, orderId: existing.id };
+        }
+      }
+
       this.logger.error(
         `FAILED processing Shopify order ${webhookData.name} (${shopifyOrderId}) for shop ${shopDomain}: ${error.message}`,
         error.stack,
       );
-      // non-2xx return korchi jate Shopify nijeo webhook retry kore (extra safety net)
       throw new InternalServerErrorException(
         'Failed to save order, will be retried',
       );
@@ -190,7 +229,7 @@ export class ShopifyWebhookService {
     );
     const totalAmount = productValue + shippingCharge;
 
-    // ✅ SELF-HEALING WAREHOUSE — এইটাই মূল fix, আর কখনো `.id of null` crash হবে না
+    // Self-healing warehouse — guarantees locationId is never null.
     const warehouseId =
       await this.getOrCreateFallbackWarehouseId(organizationId);
 
@@ -238,8 +277,6 @@ export class ShopifyWebhookService {
   }
 
   // ---- Warehouse resolve: default > any active warehouse > auto-create placeholder ----
-  // Ei function-i guarantee dey je locationId kokhono null hobe na, order kokhono
-  // "warehouse nai" bole atke thakbe na.
   private async getOrCreateFallbackWarehouseId(
     organizationId: string,
   ): Promise<string> {
@@ -248,7 +285,6 @@ export class ShopifyWebhookService {
     });
     if (warehouse) return warehouse.id;
 
-    // default nai, kintu onno kono warehouse ache kina dekhi
     warehouse = await this.warehouseRepository.findOne({
       where: { organizationId },
       order: { id: 'ASC' as any },
@@ -260,20 +296,22 @@ export class ShopifyWebhookService {
       return warehouse.id;
     }
 
-    // kono warehouse-i nai — ekta placeholder auto-create kore dei, order jeno block na hoy
     this.logger.warn(
       `No warehouse at all for org ${organizationId}. Auto-creating fallback "Unassigned" warehouse.`,
     );
     try {
+      // NOTE: Warehouse.name has a GLOBAL unique constraint (not scoped to
+      // organizationId), so the fallback name must be unique per org too —
+      // otherwise the 2nd+ organization to hit this path fails permanently.
       const created = await this.warehouseRepository.save({
         organizationId,
-        name: 'Unassigned (auto-created)',
+        name: `Unassigned (auto-created) - ${organizationId}`,
         isDefault: true,
       } as any);
       return created.id;
     } catch (err: any) {
-      // race condition: eki shomoy e onno request-o warehouse create korte pare
-      if (/duplicate key|unique constraint/i.test(err.message)) {
+      if (isUniqueViolation(err)) {
+        // Concurrent request for the SAME org may have created it first.
         const retryFind = await this.warehouseRepository.findOne({
           where: { organizationId },
         });
@@ -325,38 +363,60 @@ export class ShopifyWebhookService {
       `${shopifyCustomer?.first_name || ''} ${shopifyCustomer?.last_name || ''}`.trim() ||
       'Shopify Customer';
 
-    try {
-      customer = await this.customerRepository.save({
-        customerName: name,
-        customerPhoneNumber: phone || '',
-        division: webhookData.shipping_address?.province || '',
-        district: webhookData.shipping_address?.city || '',
-        thana: '',
-        country: webhookData.shipping_address?.country || 'Bangladesh',
-        customerType: CustomerType.NonProbashi,
-        customer_Id: await this.generateUniqueCustomerId(organizationId),
-        organizationId,
-        shopifyCustomerId,
-      });
-    } catch (err: any) {
-      // duplicate customer_Id race condition hole ekbar notun id niye retry
-      if (/duplicate key|unique constraint/i.test(err.message)) {
+    const baseCustomerData = {
+      customerName: name,
+      customerPhoneNumber: phone || '',
+      division: webhookData.shipping_address?.province || '',
+      district: webhookData.shipping_address?.city || '',
+      thana: '',
+      country: webhookData.shipping_address?.country || 'Bangladesh',
+      customerType: CustomerType.NonProbashi,
+      organizationId,
+      shopifyCustomerId,
+    };
+
+    // customer_Id is GLOBALLY unique but generated per-organization
+    // ("CUS-10000" starting point per org), so two different orgs can
+    // collide on their first customer. A single blind retry using the
+    // SAME generation logic would collide again and throw — so we loop
+    // with a fresh generated id each time, bounded to avoid an infinite loop.
+    const MAX_ATTEMPTS = 5;
+    let lastErr: any;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
         customer = await this.customerRepository.save({
-          customerName: name,
-          customerPhoneNumber: phone || '',
-          division: webhookData.shipping_address?.province || '',
-          district: webhookData.shipping_address?.city || '',
-          thana: '',
-          country: webhookData.shipping_address?.country || 'Bangladesh',
-          customerType: CustomerType.NonProbashi,
+          ...baseCustomerData,
           customer_Id: await this.generateUniqueCustomerId(organizationId),
-          organizationId,
-          shopifyCustomerId,
         });
-      } else {
-        throw err;
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        lastErr = err;
+        if (!isUniqueViolation(err)) throw err;
+
+        // Another request may have already created this exact customer
+        // (e.g. same shopifyCustomerId/phone) concurrently — check first.
+        const concurrent = shopifyCustomerId
+          ? await this.customerRepository.findOne({
+              where: { shopifyCustomerId, organizationId },
+            })
+          : phone
+            ? await this.customerRepository.findOne({
+                where: { customerPhoneNumber: phone, organizationId },
+              })
+            : null;
+        if (concurrent) {
+          customer = concurrent;
+          lastErr = null;
+          break;
+        }
+        // Otherwise it was a customer_Id collision — loop and regenerate.
+        this.logger.warn(
+          `customer_Id collision on attempt ${attempt} for org ${organizationId}, regenerating`,
+        );
       }
     }
+    if (lastErr) throw lastErr;
 
     this.logger.log(
       `New customer auto-created from Shopify order: ${customer.customer_Id}`,
@@ -422,8 +482,7 @@ export class ShopifyWebhookService {
         shopifyVariantId,
       });
     } catch (err: any) {
-      // race condition: products/create webhook eki shomoy e already create kore fele thakte pare
-      if (/duplicate key|unique constraint/i.test(err.message)) {
+      if (isUniqueViolation(err)) {
         product = shopifyVariantId
           ? await this.productCatalogRepository.findOne({
               where: { shopifyVariantId, organizationId },
@@ -456,7 +515,16 @@ export class ShopifyWebhookService {
     if (!valid) throw new BadRequestException('Invalid webhook signature');
     if (!shop) throw new BadRequestException('Shop not configured');
 
-    const shopifyProduct = JSON.parse(body);
+    let shopifyProduct: any;
+    try {
+      shopifyProduct = JSON.parse(body);
+    } catch (err: any) {
+      this.logger.error(
+        `Invalid JSON body received for product webhook, shop ${shopDomain}: ${err.message}`,
+      );
+      throw new BadRequestException('Invalid webhook payload');
+    }
+
     try {
       const saved = await this.upsertProductFromShopifyData(
         shopifyProduct,
@@ -519,15 +587,39 @@ export class ShopifyWebhookService {
         shopifyVariantId,
       };
 
-      if (existing) {
-        lastSaved = await this.productCatalogRepository.save({
-          ...existing,
-          ...productData,
-        });
-        this.logger.log(`Product updated from Shopify: ${lastSaved.id}`);
-      } else {
-        lastSaved = await this.productCatalogRepository.save(productData);
-        this.logger.log(`Product created from Shopify: ${lastSaved.id}`);
+      try {
+        if (existing) {
+          lastSaved = await this.productCatalogRepository.save({
+            ...existing,
+            ...productData,
+          });
+          this.logger.log(`Product updated from Shopify: ${lastSaved.id}`);
+        } else {
+          lastSaved = await this.productCatalogRepository.save(productData);
+          this.logger.log(`Product created from Shopify: ${lastSaved.id}`);
+        }
+      } catch (err: any) {
+        if (isUniqueViolation(err)) {
+          // Order webhook / concurrent product webhook may have created
+          // this variant already — fetch it instead of failing the whole batch.
+          const concurrent = shopifyVariantId
+            ? await this.productCatalogRepository.findOne({
+                where: { shopifyVariantId, organizationId },
+              })
+            : await this.productCatalogRepository.findOne({
+                where: { shopifyProductId, organizationId },
+              });
+          if (concurrent) {
+            lastSaved = await this.productCatalogRepository.save({
+              ...concurrent,
+              ...productData,
+            });
+          } else {
+            throw err;
+          }
+        } else {
+          throw err;
+        }
       }
 
       const relevantImages = variant.image_id
@@ -629,4 +721,3 @@ export class ShopifyWebhookService {
     };
   }
 }
- 
