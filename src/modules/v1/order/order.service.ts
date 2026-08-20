@@ -651,7 +651,7 @@ if (payload?.statusId === 2) {
     };
   }
   // get order reports
- async getOrdersReports(options, filterOptions, organizationId) {
+async getOrdersReports(options, filterOptions, organizationId) {
     const { sortBy, sortOrder, limit, page, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
@@ -664,10 +664,6 @@ if (payload?.statusId === 2) {
       });
     }
 
-    // ✅ FIX: choose which date field to filter by via a `dateField` query param.
-    // Defaults to 'createdAt' to preserve old behaviour for existing callers,
-    // but pass dateField=intransitTime to get "In-transit on this date" reports,
-    // or dateField=storeTime / packingTime for other stage-based reports.
     const allowedDateFields = [
       'createdAt',
       'intransitTime',
@@ -679,31 +675,37 @@ if (payload?.statusId === 2) {
       ? filterOptions.dateField
       : 'createdAt';
 
-    if (filterOptions?.startDate && filterOptions?.endDate) {
-      const localStartDate = new Date(filterOptions.startDate);
-      const utcStartDate = new Date(
-        Date.UTC(
-          localStartDate.getFullYear(),
-          localStartDate.getMonth(),
-          localStartDate.getDate(),
-          0,
-          0,
-          0,
-          0,
-        ),
-      );
+    // ✅ FIX: Bangladesh is UTC+6. Instead of using Date's LOCAL getters
+    // (getFullYear/getMonth/getDate) — which depend on the SERVER's timezone
+    // and silently shift the day when the input is already a UTC instant
+    // representing "Dhaka midnight" — we explicitly shift by +6h first,
+    // read the calendar date using UTC getters (unambiguous), then shift
+    // back by -6h to get the correct UTC boundaries for that Dhaka day.
+    const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 
-      const localEndDate = new Date(filterOptions.endDate);
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      const rawStart = new Date(filterOptions.startDate);
+      const rawEnd = new Date(filterOptions.endDate);
+
+      // Shift into Dhaka wall-clock time (expressed as a UTC instant) so we
+      // can safely read the calendar date with UTC getters.
+      const bdStart = new Date(rawStart.getTime() + BD_OFFSET_MS);
+      const bdEnd = new Date(rawEnd.getTime() + BD_OFFSET_MS);
+
+      const startY = bdStart.getUTCFullYear();
+      const startM = bdStart.getUTCMonth();
+      const startD = bdStart.getUTCDate();
+
+      const endY = bdEnd.getUTCFullYear();
+      const endM = bdEnd.getUTCMonth();
+      const endD = bdEnd.getUTCDate();
+
+      // Dhaka day-start / day-end, converted back to real UTC instants.
+      const utcStartDate = new Date(
+        Date.UTC(startY, startM, startD, 0, 0, 0, 0) - BD_OFFSET_MS,
+      );
       const utcEndDate = new Date(
-        Date.UTC(
-          localEndDate.getFullYear(),
-          localEndDate.getMonth(),
-          localEndDate.getDate(),
-          23,
-          59,
-          59,
-          999,
-        ),
+        Date.UTC(endY, endM, endD, 23, 59, 59, 999) - BD_OFFSET_MS,
       );
 
       queryBuilder.andWhere(
