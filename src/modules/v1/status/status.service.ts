@@ -174,11 +174,6 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
     );
   }
 
-  if (filterOptions.searchTerm) {
-    totalQuery.andWhere(`orders.orderNumber ILIKE :searchTerm`, {
-      searchTerm: `%${filterOptions.searchTerm}%`,
-    });
-  }
 
   // 🔥 Product filter in total count using subquery
   if (filterOptions.productIds?.length) {
