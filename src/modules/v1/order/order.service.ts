@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
 import * as ExcelJS from 'exceljs';
+import { Logger } from '@nestjs/common';
 import { Products } from './entities/products.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
@@ -27,6 +28,7 @@ import { Response } from 'express';
 import * as _ from 'lodash';
 @Injectable()
 export class OrderService {
+  private readonly logger = new Logger(OrderService.name);
   constructor(
     private readonly dataSource: DataSource,
     @InjectRepository(Order)
@@ -93,7 +95,8 @@ async generateOrderNumber(organizationId: string): Promise<string> {
       if (!isNaN(lastNum)) nextNumber = lastNum + 1;
     }
 
-    return `${prefix}-${nextNumber}`;
+    // 8-digit zero-padded number, e.g. 00010000, 00010001 ...
+    return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
   });
 }
 
@@ -118,7 +121,8 @@ async generateInvoiceNumber(organizationId: string): Promise<string> {
       if (!isNaN(lastNum)) nextNumber = lastNum + 1;
     }
 
-    return `${prefix}-${nextNumber.toString().padStart(4, '0')}`;
+    // 8-digit zero-padded number, e.g. 00000001, 00000002 ...
+    return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
   });
 }
 
@@ -1160,334 +1164,441 @@ async getOrdersReports(options, filterOptions, organizationId) {
   // ===============================
   // ✅ Process Single Chunk of Orders
   // ===============================
-  private async processOrdersChunk(
-    orderIds: number[],
-    mainData: any,
-    organizationId: string,
-  ) {
-    const { currentStatus, ...data } = mainData;
+private async processOrdersChunk(
+  orderIds: number[],
+  mainData: any,
+  organizationId: string,
+) {
+  const { currentStatus, ...data } = mainData;
 
-    const orders = await this.orderRepository.find({
-      where: { id: In(orderIds) },
-      relations: ['status'],
+  const orders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
+
+  if (orders.length !== orderIds.length) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+  }
+
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    const allProducts = await this.productsRepository.find({
+      where: { orderId: In(orderIds) },
     });
 
-    if (orders.length !== orderIds.length) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-    }
+    // Bulk inventory updates
+    const inventoryUpdatePromises: Promise<any>[] = [];
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    for (const product of allProducts) {
+      const { productId, productQuantity } = product;
+      const order = orders.find((o) => o.id === product.orderId);
 
-    try {
-      const allProducts = await this.productsRepository.find({
-        where: { orderId: In(orderIds) },
+      const inventory = await this.inventoryRepository.findOne({
+        where: { productId },
+      });
+      const inventoryItem = await this.InventoryItemItemRepository.findOne({
+        where: { productId, locationId: order?.locationId },
       });
 
-      // Bulk inventory updates
-      const inventoryUpdatePromises: Promise<any>[] = [];
-
-      for (const product of allProducts) {
-        const { productId, productQuantity } = product;
-        const order = orders.find((o) => o.id === product.orderId);
-
-        const inventory = await this.inventoryRepository.findOne({
-          where: { productId },
-        });
-        const inventoryItem = await this.InventoryItemItemRepository.findOne({
-          where: { productId, locationId: order?.locationId },
-        });
-
-        // ========== STATUS 7: IN-TRANSIT ===========
-        if (data.statusId === 7) {
-          if (inventory) {
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.decrement(
-                { productId },
-                'processing',
-                productQuantity,
-              ),
-            );
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.decrement(
-                { productId },
-                'stock',
-                productQuantity,
-              ),
-            );
-          }
-
-          if (inventoryItem) {
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.decrement(
-                { productId, locationId: order.locationId },
-                'processing',
-                productQuantity,
-              ),
-            );
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.decrement(
-                { productId, locationId: order.locationId },
-                'quantity',
-                productQuantity,
-              ),
-            );
-          }
-        }
-
-        // ========== STATUS 4: CANCEL ===========
-        if (
-          data.statusId === 4 &&
-          (currentStatus === 5 || currentStatus === 6)
-        ) {
-          if (inventory) {
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.decrement(
-                { productId },
-                'processing',
-                productQuantity,
-              ),
-            );
-          }
-          if (inventoryItem) {
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.decrement(
-                { productId, locationId: order.locationId },
-                'processing',
-                productQuantity,
-              ),
-            );
-          }
-        }
-
-        // ========== STATUS 4: RETURN / ORDER QUE ===========
-        if (data.statusId === 4 && currentStatus === 2) {
-          if (inventory) {
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.decrement(
-                { productId },
-                'orderQue',
-                productQuantity,
-              ),
-            );
-          }
-          if (inventoryItem) {
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.decrement(
-                { productId, locationId: order.locationId },
-                'orderQue',
-                productQuantity,
-              ),
-            );
-          }
-        }
-
-        // ========== STATUS 3: HOLD ===========
-        // ========== STATUS 3: HOLD ===========
-        if (data.statusId === 3 && currentStatus === 2) {
-          console.log(
-            'this block is execute properly=========================',
+      // ========== STATUS 7: IN-TRANSIT ===========
+      if (data.statusId === 7) {
+        if (inventory) {
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.decrement(
+              { productId },
+              'processing',
+              productQuantity,
+            ),
           );
-
-          // ensure productQuantity is a number
-          const qty = Number(productQuantity) || 0;
-
-          if (inventory) {
-            // update Inventory table (use parameterized query, COALESCE to handle NULLs)
-            inventoryUpdatePromises.push(
-              queryRunner.manager.query(
-                `UPDATE "inventory"
-         SET "orderQue" = COALESCE("orderQue", 0) - $1,
-             "hoildQue" = COALESCE("hoildQue", 0) + $1,
-             "updatedAt" = now()
-         WHERE "productId" = $2`,
-                [qty, productId],
-              ),
-            );
-          }
-
-          if (inventoryItem) {
-            // inventoryItems table name from your entity: 'inventoryItems'
-            inventoryUpdatePromises.push(
-              queryRunner.manager.query(
-                `UPDATE "inventoryItems"
-         SET "orderQue" = COALESCE("orderQue", 0) - $1,
-             "hoildQue" = COALESCE("hoildQue", 0) + $1,
-             "updatedAt" = now()
-         WHERE "productId" = $2 AND "locationId" = $3`,
-                [qty, productId, order.locationId],
-              ),
-            );
-          }
-        }
-
-        // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
-        if (
-          data.statusId === 2 &&
-          (currentStatus === 1 || currentStatus === 4)
-        ) {
-          if (inventory) {
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.increment(
-                { productId },
-                'orderQue',
-                productQuantity,
-              ),
-            );
-          }
-          if (inventoryItem) {
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.increment(
-                { productId, locationId: order.locationId },
-                'orderQue',
-                productQuantity,
-              ),
-            );
-          } else if (inventory) {
-            // create new inventory item if missing
-            const newItem = this.InventoryItemItemRepository.create({
-              locationId: order.locationId,
-              productId,
-              quantity: 0,
-              orderQue: productQuantity,
-              inventoryId: inventory.id,
-            });
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.save(newItem),
-            );
-          }
-        }
-
-        // ========== STATUS 3 from 1 → HOLD QUE ===========
-        if (data.statusId === 3 && currentStatus === 1) {
-          if (inventory) {
-            inventoryUpdatePromises.push(
-              this.inventoryRepository.increment(
-                { productId },
-                'hoildQue',
-                productQuantity,
-              ),
-            );
-          }
-          if (inventoryItem) {
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.increment(
-                { productId, locationId: order.locationId },
-                'hoildQue',
-                productQuantity,
-              ),
-            );
-          } else if (inventory) {
-            const newItem = this.InventoryItemItemRepository.create({
-              locationId: order.locationId,
-              productId,
-              quantity: 0,
-              orderQue: 0,
-              hoildQue: productQuantity,
-              inventoryId: inventory.id,
-            });
-            inventoryUpdatePromises.push(
-              this.InventoryItemItemRepository.save(newItem),
-            );
-          }
-        }
-
-        // ========== STATUS 5: STORE ===========
-        if (data.statusId === 5) {
-          await this.requisitionService.createRequisition(
-            { orderIds, userId: data?.userId ?? data?.agentId  },
-            organizationId,
-          );
-          await this.orderRepository.update(
-            { id: In(orderIds) },
-            { storeTime: new Date() },
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.decrement(
+              { productId },
+              'stock',
+              productQuantity,
+            ),
           );
         }
 
-        // ========== STATUS 6: PACKING ===========
-        if (data.statusId === 6) {
-          await this.orderRepository.update(
-            { id: In(orderIds) },
-            { packingTime: new Date() },
+        if (inventoryItem) {
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.decrement(
+              { productId, locationId: order.locationId },
+              'processing',
+              productQuantity,
+            ),
+          );
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.decrement(
+              { productId, locationId: order.locationId },
+              'quantity',
+              productQuantity,
+            ),
           );
         }
       }
 
-      // Execute all bulk updates in parallel
-      await Promise.all(inventoryUpdatePromises);
+      // ========== STATUS 4: CANCEL ===========
+      if (
+        data.statusId === 4 &&
+        (currentStatus === 5 || currentStatus === 6)
+      ) {
+        if (inventory) {
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.decrement(
+              { productId },
+              'processing',
+              productQuantity,
+            ),
+          );
+        }
+        if (inventoryItem) {
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.decrement(
+              { productId, locationId: order.locationId },
+              'processing',
+              productQuantity,
+            ),
+          );
+        }
+      }
 
-      // Update orders with new status & timestamps
-      if (data.statusId === 7) {
+      // ========== STATUS 4: RETURN / ORDER QUE ===========
+      if (data.statusId === 4 && currentStatus === 2) {
+        if (inventory) {
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.decrement(
+              { productId },
+              'orderQue',
+              productQuantity,
+            ),
+          );
+        }
+        if (inventoryItem) {
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.decrement(
+              { productId, locationId: order.locationId },
+              'orderQue',
+              productQuantity,
+            ),
+          );
+        }
+      }
+
+      // ========== STATUS 3: HOLD ===========
+      if (data.statusId === 3 && currentStatus === 2) {
+        console.log(
+          'this block is execute properly=========================',
+        );
+
+        // ensure productQuantity is a number
+        const qty = Number(productQuantity) || 0;
+
+        if (inventory) {
+          // update Inventory table (use parameterized query, COALESCE to handle NULLs)
+          inventoryUpdatePromises.push(
+            queryRunner.manager.query(
+              `UPDATE "inventory"
+       SET "orderQue" = COALESCE("orderQue", 0) - $1,
+           "hoildQue" = COALESCE("hoildQue", 0) + $1,
+           "updatedAt" = now()
+       WHERE "productId" = $2`,
+              [qty, productId],
+            ),
+          );
+        }
+
+        if (inventoryItem) {
+          // inventoryItems table name from your entity: 'inventoryItems'
+          inventoryUpdatePromises.push(
+            queryRunner.manager.query(
+              `UPDATE "inventoryItems"
+       SET "orderQue" = COALESCE("orderQue", 0) - $1,
+           "hoildQue" = COALESCE("hoildQue", 0) + $1,
+           "updatedAt" = now()
+       WHERE "productId" = $2 AND "locationId" = $3`,
+              [qty, productId, order.locationId],
+            ),
+          );
+        }
+      }
+
+      // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
+      if (
+        data.statusId === 2 &&
+        (currentStatus === 1 || currentStatus === 4)
+      ) {
+        if (inventory) {
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.increment(
+              { productId },
+              'orderQue',
+              productQuantity,
+            ),
+          );
+        }
+        if (inventoryItem) {
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.increment(
+              { productId, locationId: order.locationId },
+              'orderQue',
+              productQuantity,
+            ),
+          );
+        } else if (inventory) {
+          // create new inventory item if missing
+          const newItem = this.InventoryItemItemRepository.create({
+            locationId: order.locationId,
+            productId,
+            quantity: 0,
+            orderQue: productQuantity,
+            inventoryId: inventory.id,
+          });
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.save(newItem),
+          );
+        }
+      }
+
+      // ========== STATUS 3 from 1 → HOLD QUE ===========
+      if (data.statusId === 3 && currentStatus === 1) {
+        if (inventory) {
+          inventoryUpdatePromises.push(
+            this.inventoryRepository.increment(
+              { productId },
+              'hoildQue',
+              productQuantity,
+            ),
+          );
+        }
+        if (inventoryItem) {
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.increment(
+              { productId, locationId: order.locationId },
+              'hoildQue',
+              productQuantity,
+            ),
+          );
+        } else if (inventory) {
+          const newItem = this.InventoryItemItemRepository.create({
+            locationId: order.locationId,
+            productId,
+            quantity: 0,
+            orderQue: 0,
+            hoildQue: productQuantity,
+            inventoryId: inventory.id,
+          });
+          inventoryUpdatePromises.push(
+            this.InventoryItemItemRepository.save(newItem),
+          );
+        }
+      }
+
+      // ========== STATUS 5: STORE ===========
+      if (data.statusId === 5) {
+        await this.requisitionService.createRequisition(
+          { orderIds, userId: data?.userId ?? data?.agentId },
+          organizationId,
+        );
         await this.orderRepository.update(
           { id: In(orderIds) },
-          { intransitTime: new Date() },
+          { storeTime: new Date() },
         );
       }
 
-      // Finally, update orders general status & previousStatus
-      await this.orderRepository.update(
-        { id: In(orderIds) },
-        { ...data, previousStatus: currentStatus },
-      );
-
-      await queryRunner.commitTransaction();
-    } catch (error:any) {
-      await queryRunner.rollbackTransaction();
-      throw new ApiError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        error.message || 'Failed to update inventory',
-      );
-    } finally {
-      await queryRunner.release();
+      // ========== STATUS 6: PACKING ===========
+      if (data.statusId === 6) {
+        await this.orderRepository.update(
+          { id: In(orderIds) },
+          { packingTime: new Date() },
+        );
+      }
     }
 
-    // ✅ Courier API call outside transaction
+    // Execute all bulk updates in parallel
+    await Promise.all(inventoryUpdatePromises);
+
+    // Update orders with new status & timestamps
     if (data.statusId === 7) {
-      const currierCompany = await this.deliveryPartnerRepository.findOne({
-        where: { organizationId, id: orders[0]?.currier },
-      });
+      await this.orderRepository.update(
+        { id: In(orderIds) },
+        { intransitTime: new Date() },
+      );
+    }
 
-      if (currierCompany?.partnerName === 'SteadFast') {
-        const courierPayload = orders.map((op) => ({
-          invoice: op.invoiceNumber,
-          recipient_name: op.receiverName,
-          recipient_phone: op.receiverPhoneNumber,
-          recipient_address: op.receiverAddress,
-          cod_amount: op.totalReceiveAbleAmount,
-          note: op.deliveryNote || 'N/A',
-        }));
+    // Finally, update orders general status & previousStatus
+    await this.orderRepository.update(
+      { id: In(orderIds) },
+      { ...data, previousStatus: currentStatus },
+    );
 
-        await axios.post(
+    await queryRunner.commitTransaction();
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to update inventory',
+    );
+  } finally {
+    await queryRunner.release();
+  }
+
+  // ✅ Courier API call outside transaction — inventory/status changes are
+  // already committed, so a courier failure here never rolls those back.
+  if (data.statusId === 7) {
+    const currierCompany = await this.deliveryPartnerRepository.findOne({
+      where: { organizationId, id: orders[0]?.currier },
+    });
+
+    if (currierCompany?.partnerName === 'SteadFast') {
+      // Steadfast requires recipient_phone to be exactly 11 digits.
+      // Orders with an invalid phone are excluded from the courier
+      // request entirely and marked locally so they show up as
+      // "needs phone fix" instead of silently vanishing.
+      const isValidBdPhone = (phone: string) =>
+        /^[0-9]{11}$/.test((phone || '').trim());
+
+      const validOrders = orders.filter((op) =>
+        isValidBdPhone(op.receiverPhoneNumber),
+      );
+      const invalidOrders = orders.filter(
+        (op) => !isValidBdPhone(op.receiverPhoneNumber),
+      );
+
+      if (invalidOrders.length) {
+        for (const op of invalidOrders) {
+          await this.orderRepository.update(op.id, {
+            courierStatus: 'error',
+            courierNotificationType: 'invalid_phone',
+            trackingMessage: `Recipient phone "${op.receiverPhoneNumber || ''}" is not a valid 11-digit number — not sent to courier`,
+            courierUpdatedAt: new Date(),
+          });
+        }
+        this.logger.warn(
+          `Skipped ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
+            .map((o) => o.invoiceNumber)
+            .join(', ')}]`,
+        );
+      }
+
+      const courierPayload = validOrders.map((op) => ({
+        invoice: op.invoiceNumber,
+        recipient_name: op.receiverName,
+        recipient_phone: op.receiverPhoneNumber,
+        recipient_address: op.receiverAddress,
+        cod_amount: op.totalReceiveAbleAmount,
+        note: op.deliveryNote || 'N/A',
+      }));
+
+      let steadfastResults: any[] = [];
+
+      if (courierPayload.length) {
+      try {
+        // Steadfast's bulk endpoint requires the array wrapped inside a
+        // `data` key — sending the raw array directly does not match
+        // their documented contract and would be silently misinterpreted.
+        const response = await axios.post(
           'https://portal.packzy.com/api/v1/create_order/bulk-order',
-          courierPayload,
+          { data: courierPayload },
           {
             headers: {
               'Api-Key': currierCompany.api_key,
               'Secret-Key': currierCompany.secret_key,
+              'Content-Type': 'application/json',
             },
           },
         );
+
+        // Response has been observed as either a bare array, or wrapped
+        // as { data: [...] } — handle both defensively.
+        steadfastResults = Array.isArray(response.data)
+          ? response.data
+          : response.data?.data || [];
+      } catch (err: any) {
+        this.logger.error(
+          `Steadfast bulk order request failed for orderIds [${orderIds.join(',')}]: ${
+            err?.response?.data
+              ? JSON.stringify(err.response.data)
+              : err.message
+          }`,
+        );
+        // Whole courier request failed (network/auth/etc). Orders keep
+        // status 7 (in-transit) and null courier fields, so they can be
+        // identified and resent to the courier later without touching
+        // inventory again.
+        steadfastResults = [];
+      }
+      }
+
+      if (steadfastResults.length) {
+        // Match each courier result back to its order by invoice, NOT by
+        // array position — Steadfast doesn't guarantee response order
+        // matches request order 1:1, especially when some items error out.
+        const resultsByInvoice = new Map<string, any>();
+        for (const result of steadfastResults) {
+          if (result?.invoice) {
+            resultsByInvoice.set(String(result.invoice), result);
+          }
+        }
+
+        // Only iterate validOrders here — invalidOrders were already
+        // marked as 'invalid_phone' above and were never sent to Steadfast,
+        // so there's no courier result to match them against.
+        for (const op of validOrders) {
+          const result = resultsByInvoice.get(String(op.invoiceNumber));
+          if (!result) continue; // no matching result — leave courier fields untouched, safe to retry
+
+          if (result.status === 'success') {
+            await this.orderRepository.update(op.id, {
+              consignmentId: result.consignment_id
+                ? String(result.consignment_id)
+                : null,
+              trackingCode: result.tracking_code || null,
+              courierStatus: 'in_review', // Steadfast's initial state right after creation
+              courierNotificationType: 'order_created',
+              codAmount: op.totalReceiveAbleAmount,
+              courierUpdatedAt: new Date(),
+            });
+          } else {
+            // status === 'error' (or anything unexpected) — record the
+            // failure without touching deliveryCharge or other fields
+            // that only get populated once real delivery-status updates
+            // start coming in.
+            await this.orderRepository.update(op.id, {
+              courierStatus: 'error',
+              courierNotificationType: 'order_create_failed',
+              trackingMessage:
+                result?.message || 'Steadfast order creation failed',
+              courierUpdatedAt: new Date(),
+            });
+            this.logger.warn(
+              `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
+            );
+          }
+        }
       }
     }
-
-    // Save order logs
-    const updatedOrders = await this.orderRepository.find({
-      where: { id: In(orderIds) },
-      relations: ['status'],
-    });
-
-    const orderLogs = orders.map((order, index) => ({
-      orderId: order.id,
-      agentId: data.agentId,
-      action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
-      previousValue: null,
-    }));
-
-    await this.orderLogsRepository.save(orderLogs);
-
-    return updatedOrders;
   }
+
+  // Save order logs
+  const updatedOrders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
+
+  const orderLogs = orders.map((order, index) => ({
+    orderId: order.id,
+    agentId: data.agentId,
+    action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
+    previousValue: null,
+  }));
+
+  await this.orderLogsRepository.save(orderLogs);
+
+  return updatedOrders;
+}
   // change hold status
   async changeHoldStatus(
     orderIds: number[],
