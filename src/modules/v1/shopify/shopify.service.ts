@@ -616,19 +616,66 @@ export class ShopifyWebhookService {
         }
       }
 
-      const relevantImages = variant.image_id
-        ? shopifyProduct.images?.filter(
-            (img: any) => img.id === variant.image_id,
-          )
-        : shopifyProduct.images;
-
-      await this.syncProductImages(
-        lastSaved.id,
-        relevantImages?.length ? relevantImages : shopifyProduct.images || [],
+      // ---- Per-variant image matching (FIXED) ----
+      // Shopify's canonical way of telling us "which variants use this
+      // image" is the image's own `variant_ids` array — NOT just the
+      // variant's single `image_id` (that's only the *primary* image).
+      // We use variant_ids as the source of truth when it's present, with
+      // string-coerced comparisons everywhere so number/string mismatches
+      // in the webhook payload never silently break the match.
+      const imagesToSync = this.resolveVariantImages(
+        shopifyProduct.images || [],
+        variant,
       );
+
+      await this.syncProductImages(lastSaved.id, imagesToSync);
     }
 
     return lastSaved;
+  }
+
+  // ---------- HELPER: এই নির্দিষ্ট variant-এর জন্য কোন images প্রযোজ্য তা বের করা ----------
+  // Rules (in priority order):
+  // 1. If ANY image in the product has a non-empty `variant_ids` array,
+  //    that means Shopify has explicitly split images per variant — trust
+  //    it fully. This variant gets ONLY the images whose variant_ids
+  //    include this variant's id (could legitimately be zero images).
+  // 2. Otherwise (no image has variant_ids info at all — e.g. some legacy
+  //    payloads, or a genuinely single-image/non-split product), fall back
+  //    to matching by the variant's primary `image_id`.
+  // 3. If that also fails to match anything AND there's truly no
+  //    variant-level image data anywhere on the product, only THEN give
+  //    every variant the full image list (this is the correct behavior
+  //    for a real single-image product, e.g. only 1 photo total).
+  private resolveVariantImages(shopifyImages: any[], variant: any): any[] {
+    if (!shopifyImages.length) return [];
+
+    const hasAnyVariantMapping = shopifyImages.some(
+      (img: any) => Array.isArray(img.variant_ids) && img.variant_ids.length > 0,
+    );
+
+    if (hasAnyVariantMapping) {
+      const mapped = shopifyImages.filter(
+        (img: any) =>
+          Array.isArray(img.variant_ids) &&
+          img.variant_ids.some((vid: any) => String(vid) === String(variant.id)),
+      );
+      // Trust Shopify's mapping even if it's empty for this variant —
+      // do NOT fall back to all images here, that's exactly the bug
+      // that caused every variant to get every other variant's photos.
+      return mapped;
+    }
+
+    // No variant-level mapping exists anywhere on this product.
+    if (variant.image_id) {
+      const byPrimaryImage = shopifyImages.filter(
+        (img: any) => String(img.id) === String(variant.image_id),
+      );
+      if (byPrimaryImage.length) return byPrimaryImage;
+    }
+
+    // Truly a single-image / non-split product — every variant shares it.
+    return shopifyImages;
   }
 
   private async syncProductImages(productId: string, shopifyImages: any[]) {
