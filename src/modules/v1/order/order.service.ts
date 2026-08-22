@@ -518,7 +518,7 @@ if (payload?.statusId === 2) {
   const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
 
   queryBuilder.andWhere(
-    '(orders.orderNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
+    '(orders.invoiceNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
     {
       searchTerm,
     },
