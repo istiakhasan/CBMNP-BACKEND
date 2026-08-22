@@ -1448,137 +1448,48 @@ private async processOrdersChunk(
   // ✅ Courier API call outside transaction — inventory/status changes are
   // already committed, so a courier failure here never rolls those back.
   if (data.statusId === 7) {
-    const currierCompany = await this.deliveryPartnerRepository.findOne({
-      where: { organizationId, id: orders[0]?.currier },
-    });
+    // IMPORTANT: different orders in the same chunk can have different
+    // couriers assigned. Grouping by orders[0].currier alone would
+    // silently send NOTHING for the whole chunk whenever the first order
+    // in the array happened to use a different (or no) courier partner —
+    // this was the actual bug. Group by each order's OWN currier id so
+    // every courier partner only ever gets its own orders.
+    const ordersByCourierPartnerId = new Map<string, typeof orders>();
+    for (const op of orders) {
+      const key = op.currier || 'unassigned';
+      if (!ordersByCourierPartnerId.has(key)) {
+        ordersByCourierPartnerId.set(key, []);
+      }
+      ordersByCourierPartnerId.get(key)!.push(op);
+    }
 
-    if (currierCompany?.partnerName === 'SteadFast') {
-      // Steadfast requires recipient_phone to be exactly 11 digits.
-      // Orders with an invalid phone are excluded from the courier
-      // request entirely and marked locally so they show up as
-      // "needs phone fix" instead of silently vanishing.
-      const isValidBdPhone = (phone: string) =>
-        /^[0-9]{11}$/.test((phone || '').trim());
-
-      const validOrders = orders.filter((op) =>
-        isValidBdPhone(op.receiverPhoneNumber),
-      );
-      const invalidOrders = orders.filter(
-        (op) => !isValidBdPhone(op.receiverPhoneNumber),
-      );
-
-      if (invalidOrders.length) {
-        for (const op of invalidOrders) {
-          await this.orderRepository.update(op.id, {
-            courierStatus: 'error',
-            courierNotificationType: 'invalid_phone',
-            trackingMessage: `Recipient phone "${op.receiverPhoneNumber || ''}" is not a valid 11-digit number — not sent to courier`,
-            courierUpdatedAt: new Date(),
-          });
-        }
+    for (const [partnerId, partnerOrders] of ordersByCourierPartnerId) {
+      if (partnerId === 'unassigned') {
         this.logger.warn(
-          `Skipped ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
+          `Skipped ${partnerOrders.length} order(s) with no courier partner assigned: [${partnerOrders
             .map((o) => o.invoiceNumber)
             .join(', ')}]`,
         );
+        continue;
       }
 
-      const courierPayload = validOrders.map((op) => ({
-        invoice: op.invoiceNumber,
-        recipient_name: op.receiverName,
-        recipient_phone: op.receiverPhoneNumber,
-        recipient_address: op.receiverAddress,
-        cod_amount: op.totalReceiveAbleAmount,
-        note: op.deliveryNote || 'N/A',
-      }));
+      const currierCompany = await this.deliveryPartnerRepository.findOne({
+        where: { organizationId, id: partnerId },
+      });
 
-      let steadfastResults: any[] = [];
-
-      if (courierPayload.length) {
-      try {
-        // Steadfast's bulk endpoint requires the array wrapped inside a
-        // `data` key — sending the raw array directly does not match
-        // their documented contract and would be silently misinterpreted.
-        const response = await axios.post(
-          'https://portal.packzy.com/api/v1/create_order/bulk-order',
-          { data: courierPayload },
-          {
-            headers: {
-              'Api-Key': currierCompany.api_key,
-              'Secret-Key': currierCompany.secret_key,
-              'Content-Type': 'application/json',
-            },
-          },
+      if (!currierCompany) {
+        this.logger.warn(
+          `Courier partner ${partnerId} not found for org ${organizationId}, skipping ${partnerOrders.length} order(s): [${partnerOrders
+            .map((o) => o.invoiceNumber)
+            .join(', ')}]`,
         );
-
-        // Response has been observed as either a bare array, or wrapped
-        // as { data: [...] } — handle both defensively.
-        steadfastResults = Array.isArray(response.data)
-          ? response.data
-          : response.data?.data || [];
-      } catch (err: any) {
-        this.logger.error(
-          `Steadfast bulk order request failed for orderIds [${orderIds.join(',')}]: ${
-            err?.response?.data
-              ? JSON.stringify(err.response.data)
-              : err.message
-          }`,
-        );
-        // Whole courier request failed (network/auth/etc). Orders keep
-        // status 7 (in-transit) and null courier fields, so they can be
-        // identified and resent to the courier later without touching
-        // inventory again.
-        steadfastResults = [];
-      }
+        continue;
       }
 
-      if (steadfastResults.length) {
-        // Match each courier result back to its order by invoice, NOT by
-        // array position — Steadfast doesn't guarantee response order
-        // matches request order 1:1, especially when some items error out.
-        const resultsByInvoice = new Map<string, any>();
-        for (const result of steadfastResults) {
-          if (result?.invoice) {
-            resultsByInvoice.set(String(result.invoice), result);
-          }
-        }
-
-        // Only iterate validOrders here — invalidOrders were already
-        // marked as 'invalid_phone' above and were never sent to Steadfast,
-        // so there's no courier result to match them against.
-        for (const op of validOrders) {
-          const result = resultsByInvoice.get(String(op.invoiceNumber));
-          if (!result) continue; // no matching result — leave courier fields untouched, safe to retry
-
-          if (result.status === 'success') {
-            await this.orderRepository.update(op.id, {
-              consignmentId: result.consignment_id
-                ? String(result.consignment_id)
-                : null,
-              trackingCode: result.tracking_code || null,
-              courierStatus: 'in_review', // Steadfast's initial state right after creation
-              courierNotificationType: 'order_created',
-              codAmount: op.totalReceiveAbleAmount,
-              courierUpdatedAt: new Date(),
-            });
-          } else {
-            // status === 'error' (or anything unexpected) — record the
-            // failure without touching deliveryCharge or other fields
-            // that only get populated once real delivery-status updates
-            // start coming in.
-            await this.orderRepository.update(op.id, {
-              courierStatus: 'error',
-              courierNotificationType: 'order_create_failed',
-              trackingMessage:
-                result?.message || 'Steadfast order creation failed',
-              courierUpdatedAt: new Date(),
-            });
-            this.logger.warn(
-              `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
-            );
-          }
-        }
+      if (currierCompany.partnerName === 'SteadFast') {
+        await this.sendOrdersToSteadfast(partnerOrders, currierCompany);
       }
+      // else: other courier partners handled elsewhere / not yet integrated
     }
   }
 
@@ -1598,6 +1509,159 @@ private async processOrdersChunk(
   await this.orderLogsRepository.save(orderLogs);
 
   return updatedOrders;
+}
+
+// ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
+private async sendOrdersToSteadfast(
+  orders: any[],
+  currierCompany: any,
+): Promise<void> {
+  // Steadfast requires recipient_phone to be exactly 11 digits.
+  // Orders with an invalid phone are excluded from the courier request
+  // entirely (sending them risks the whole batch being rejected by
+  // Steadfast) and are marked locally so they show up as "needs phone
+  // fix" instead of silently vanishing.
+  const isValidBdPhone = (phone: string) =>
+    /^[0-9]{11}$/.test((phone || '').trim());
+
+  const validOrders = orders.filter((op) =>
+    isValidBdPhone(op.receiverPhoneNumber),
+  );
+  const invalidOrders = orders.filter(
+    (op) => !isValidBdPhone(op.receiverPhoneNumber),
+  );
+
+  if (invalidOrders.length) {
+    for (const op of invalidOrders) {
+      await this.orderRepository.update(op.id, {
+        courierStatus: 'error',
+        courierNotificationType: 'invalid_phone',
+        trackingMessage: `Recipient phone "${op.receiverPhoneNumber || ''}" is not a valid 11-digit number — not sent to courier`,
+        courierUpdatedAt: new Date(),
+      });
+    }
+    this.logger.warn(
+      `Skipped ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}]`,
+    );
+  }
+
+  if (!validOrders.length) {
+    return; // nothing valid to send
+  }
+
+  const courierPayload = validOrders.map((op) => ({
+    invoice: op.invoiceNumber,
+    recipient_name: op.receiverName,
+    recipient_phone: op.receiverPhoneNumber,
+    recipient_address: op.receiverAddress,
+    cod_amount: op.totalReceiveAbleAmount,
+    note: op.deliveryNote || 'N/A',
+  }));
+
+  let steadfastResults: any[] = [];
+
+  try {
+    // NOTE: Confirmed in production that Steadfast's bulk endpoint expects
+    // the RAW array directly as the request body — NOT wrapped in a
+    // `{ data: [...] }` object. (The doc's PHP example passes
+    // json_encode($data) as the 'data' form field, which is a different
+    // shape than a raw JSON POST body — that led to an incorrect "fix"
+    // earlier that broke working orders. Reverted.)
+    const response = await axios.post(
+      'https://portal.packzy.com/api/v1/create_order/bulk-order',
+      courierPayload,
+      {
+        headers: {
+          'Api-Key': currierCompany.api_key,
+          'Secret-Key': currierCompany.secret_key,
+        },
+      },
+    );
+
+    // Response has been observed as either a bare array, or wrapped as
+    // { data: [...] } — handle both defensively.
+    steadfastResults = Array.isArray(response.data)
+      ? response.data
+      : response.data?.data || [];
+
+    this.logger.log(
+      `Steadfast bulk order request sent: ${validOrders.length} order(s), invoices [${validOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}], ${steadfastResults.length} result(s) received`,
+    );
+  } catch (err: any) {
+    this.logger.error(
+      `Steadfast bulk order request failed for invoices [${validOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}]: ${
+        err?.response?.data
+          ? JSON.stringify(err.response.data)
+          : err.message
+      }`,
+    );
+    // Whole courier request failed (network/auth/etc). Orders keep
+    // status 7 (in-transit) and null courier fields, so they can be
+    // identified and resent to the courier later without touching
+    // inventory again.
+    return;
+  }
+
+  if (!steadfastResults.length) {
+    this.logger.warn(
+      `Steadfast returned no results for invoices [${validOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}]`,
+    );
+    return;
+  }
+
+  // Match each courier result back to its order by invoice, NOT by array
+  // position — Steadfast doesn't guarantee response order matches
+  // request order 1:1, especially when some items error out.
+  const resultsByInvoice = new Map<string, any>();
+  for (const result of steadfastResults) {
+    if (result?.invoice) {
+      resultsByInvoice.set(String(result.invoice), result);
+    }
+  }
+
+  for (const op of validOrders) {
+    const result = resultsByInvoice.get(String(op.invoiceNumber));
+    if (!result) {
+      this.logger.warn(
+        `No Steadfast result matched for invoice ${op.invoiceNumber} — courier fields left untouched, safe to retry`,
+      );
+      continue;
+    }
+
+    if (result.status === 'success') {
+      await this.orderRepository.update(op.id, {
+        consignmentId: result.consignment_id
+          ? String(result.consignment_id)
+          : null,
+        trackingCode: result.tracking_code || null,
+        courierStatus: 'in_review', // Steadfast's initial state right after creation
+        courierNotificationType: 'order_created',
+        codAmount: op.totalReceiveAbleAmount,
+        courierUpdatedAt: new Date(),
+      });
+    } else {
+      // status === 'error' (or anything unexpected) — record the
+      // failure without touching deliveryCharge or other fields that
+      // only get populated once real delivery-status updates arrive.
+      await this.orderRepository.update(op.id, {
+        courierStatus: 'error',
+        courierNotificationType: 'order_create_failed',
+        trackingMessage: result?.message || 'Steadfast order creation failed',
+        courierUpdatedAt: new Date(),
+      });
+      this.logger.warn(
+        `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
+      );
+    }
+  }
 }
   // change hold status
   async changeHoldStatus(
