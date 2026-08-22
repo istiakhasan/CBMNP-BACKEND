@@ -678,33 +678,59 @@ export class ShopifyWebhookService {
     return shopifyImages;
   }
 
+  // ---------- Replace-style image sync (SAFE: only touches product_images table) ----------
+  // Deletes this product's existing images and re-inserts the current
+  // Shopify image list, so images that were removed/reassigned on Shopify
+  // (or wrongly synced earlier due to the old bug) don't linger forever.
+  //
+  // IMPORTANT SAFETY NOTES:
+  // - This ONLY operates on the `productImagesRepository` (product_images
+  //   table). It never reads, writes, or deletes anything on the `Product`
+  //   row itself (name, sku, price, id, etc. are untouched).
+  // - `Product.id` never changes here, and Orders reference products via
+  //   `productId` (a link to `Product.id`), NOT via any image id. So
+  //   existing orders, invoices, and sales history are completely
+  //   unaffected by deleting/re-adding rows in product_images.
+  // - Wrapped in a DB transaction: if the insert step fails for any
+  //   reason, the delete is rolled back too — so a partial failure can
+  //   NEVER leave the product with zero images. Worst case, this run's
+  //   changes just don't apply and the old images silently remain
+  //   (logged as an error), ready to retry on the next webhook delivery.
   private async syncProductImages(productId: string, shopifyImages: any[]) {
-    if (!shopifyImages?.length) {
-      this.logger.debug(`No images to sync for product ${productId}`);
-      return;
-    }
+    const queryRunner =
+      this.productImagesRepository.manager.connection.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
     try {
-      const existingImages = await this.productImagesRepository.find({
-        where: { productId },
-      });
-      const existingUrls = new Set(existingImages.map((img) => img.url));
+      // Wipe this product's current image rows...
+      await queryRunner.manager.delete(ProductImages, { productId });
 
-      for (const img of shopifyImages) {
-        if (img.src && !existingUrls.has(img.src)) {
-          await this.productImagesRepository.save({
-            url: img.src,
-            delete_url: img.src,
-            productId,
-          });
-          this.logger.debug(`Image saved for product ${productId}: ${img.src}`);
-        }
+      // ...and re-insert exactly what Shopify says is current.
+      // (If shopifyImages is empty, product ends up with zero images —
+      // which correctly reflects Shopify reality, e.g. all photos removed.)
+      const validImages = (shopifyImages || []).filter((img: any) => !!img.src);
+      if (validImages.length) {
+        const rows = validImages.map((img: any) => ({
+          url: img.src,
+          delete_url: img.src,
+          productId,
+        }));
+        await queryRunner.manager.save(ProductImages, rows);
       }
+
+      await queryRunner.commitTransaction();
+      this.logger.debug(
+        `Images resynced for product ${productId}: ${validImages.length} image(s)`,
+      );
     } catch (err: any) {
+      await queryRunner.rollbackTransaction();
       this.logger.error(
-        `Image sync failed for product ${productId}: ${err.message}`,
+        `Image sync failed for product ${productId}, old images kept intact: ${err.message}`,
         err.stack,
       );
+    } finally {
+      await queryRunner.release();
     }
   }
 
