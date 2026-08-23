@@ -190,7 +190,12 @@ export class UserService {
       }
     }
 
-    await this.userRepository.update({ id }, updateUserDto);
+    const updateData = { ...updateUserDto };
+    if (updateData?.password) {
+      updateData.password = await bcryptjs.hash(updateData.password.trim(), 12);
+    }
+
+    await this.userRepository.update({ id }, updateData);
 
     return this.userRepository.findOne({
       where: { id },

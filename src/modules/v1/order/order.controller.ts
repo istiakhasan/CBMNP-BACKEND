@@ -104,7 +104,8 @@ export class OrderController {
         limit: result?.limit,
         startDate:result?.startDate,
         endDate:result?.endDate,
-      }
+      },
+      summary: result?.summary,
    }
   }
    @Get('/delivery-partner-report')

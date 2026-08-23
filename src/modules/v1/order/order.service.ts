@@ -1487,7 +1487,7 @@ private async processOrdersChunk(
       }
 
       if (currierCompany.partnerName === 'SteadFast') {
-        await this.sendOrdersToSteadfast(partnerOrders, currierCompany);
+        await this.sendOrdersToSteadfast(partnerOrders, currierCompany,currentStatus);
       }
       // else: other courier partners handled elsewhere / not yet integrated
     }
@@ -1512,49 +1512,250 @@ private async processOrdersChunk(
 }
 
 // ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
+/**
+ * FIX: Orders were staying at statusId 7 (In-Transit) even when they were
+ * never actually accepted by Steadfast — invalid phone numbers, a failed
+ * HTTP request, an empty response, a missing per-invoice result, or a
+ * per-item "error" result all left the order's main status untouched
+ * (only `courierStatus` was set), and inventory stayed decremented as if
+ * the order had shipped.
+ *
+ * This file contains:
+ *   1. A new private helper, `revertFailedCourierOrders`, that undoes the
+ *      status-7 side effects for any order that could not be confirmed as
+ *      sent to the courier.
+ *   2. A revised `sendOrdersToSteadfast` that calls it at every failure
+ *      point instead of leaving the order status inconsistent.
+ *
+ * Paste both methods into OrderService, replacing the existing
+ * `sendOrdersToSteadfast` method. No other files need to change — all
+ * repositories/imports used here (Inventory, InventoryItem, In, Order,
+ * axios, this.dataSource, this.logger, etc.) are already present in
+ * order.service.ts.
+ */
+
+// ---------- Revert an order's status/inventory when courier dispatch fails ----------
+// Called for any order that could NOT be confirmed as actually accepted by
+// the courier: invalid phone, a per-item rejection from Steadfast, no
+// matching result in the response, or a total request failure.
+//
+// Without this, changeStatusBulk's statusId === 7 branch (which runs in
+// its own transaction BEFORE the courier call) leaves the order looking
+// like it shipped — status 7, inventory decremented, intransitTime set —
+// even though Steadfast never actually received it. This function undoes
+// exactly that.
+/**
+ * FIX v2 — root cause of "status change holeu courier a dhukloi na, but
+ * status stayed at In-Transit":
+ *
+ * revertFailedCourierOrders() was reverting statusId using
+ * `order.previousStatus` from an Order object fetched BEFORE the main
+ * status-7 transaction ran. That transaction is what actually WRITES
+ * `previousStatus = currentStatus` — so the in-memory value was stale
+ * (the previousStatus from some earlier transition, not this one).
+ *
+ * If that stale value happened to be invalid (e.g. 0, or a statusId that
+ * no longer exists in the status table), the UPDATE hit a foreign-key
+ * constraint violation, the revert transaction rolled back, the error was
+ * only logged (not thrown), and the outer code kept printing
+ * "Reverted N order(s)..." regardless — so the order silently stayed at
+ * statusId 7 with no visible failure.
+ *
+ * Fix: stop guessing from a stale field. Thread the real, known-correct
+ * `currentStatus` (already available in processOrdersChunk, and what
+ * actually gets written as `previousStatus` in the main transaction)
+ * explicitly through sendOrdersToSteadfast -> revertFailedCourierOrders.
+ *
+ * Changes needed in order.service.ts:
+ *   1. processOrdersChunk: pass `currentStatus` into sendOrdersToSteadfast.
+ *   2. sendOrdersToSteadfast: accept `revertToStatusId` param, pass it on.
+ *   3. revertFailedCourierOrders: accept `revertToStatusId` param, use it
+ *      directly instead of reading order.previousStatus.
+ */
+
+// ============================================================
+// 1) Inside processOrdersChunk — find this block:
+// ============================================================
+//
+//     if (currierCompany.partnerName === 'SteadFast') {
+//       await this.sendOrdersToSteadfast(partnerOrders, currierCompany);
+//     }
+//
+// Replace with (note the third argument):
+//
+//     if (currierCompany.partnerName === 'SteadFast') {
+//       await this.sendOrdersToSteadfast(
+//         partnerOrders,
+//         currierCompany,
+//         currentStatus, // the known-correct status to revert to on failure
+//       );
+//     }
+
+// ============================================================
+// 2) Replace revertFailedCourierOrders with this version
+// ============================================================
+private async revertFailedCourierOrders(
+  failedOrders: Order[],
+  revertToStatusId: number,
+  reason: {
+    courierStatus: string;
+    courierNotificationType: string;
+    trackingMessage: string;
+  },
+): Promise<void> {
+  if (!failedOrders.length) return;
+
+  // Guard against an unusable revert target instead of writing garbage
+  // into statusId and hitting a silent FK-constraint rollback again.
+  if (revertToStatusId === undefined || revertToStatusId === null || isNaN(revertToStatusId)) {
+    this.logger.error(
+      `CRITICAL: cannot revert courier-failed orders [${failedOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}] — no valid revertToStatusId was provided (got: ${revertToStatusId}). Order(s) remain incorrectly at statusId 7.`,
+    );
+    return;
+  }
+
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    const orderIds = failedOrders.map((o) => o.id);
+    const products = await queryRunner.manager.find(
+      this.productsRepository.target,
+      { where: { orderId: In(orderIds) } },
+    );
+
+    for (const order of failedOrders) {
+      const orderProducts = products.filter((p) => p.orderId === order.id);
+
+      for (const product of orderProducts) {
+        const { productId, productQuantity } = product;
+
+        await queryRunner.manager.increment(
+          Inventory,
+          { productId },
+          'processing',
+          productQuantity,
+        );
+        await queryRunner.manager.increment(
+          Inventory,
+          { productId },
+          'stock',
+          productQuantity,
+        );
+
+        if (order.locationId) {
+          await queryRunner.manager.increment(
+            InventoryItem,
+            { productId, locationId: order.locationId },
+            'processing',
+            productQuantity,
+          );
+          await queryRunner.manager.increment(
+            InventoryItem,
+            { productId, locationId: order.locationId },
+            'quantity',
+            productQuantity,
+          );
+        }
+      }
+
+      await queryRunner.manager.update(
+        Order,
+        { id: order.id },
+        {
+          statusId: revertToStatusId,
+          previousStatus: null, // this transition never actually completed
+          intransitTime: null,
+          courierStatus: reason.courierStatus,
+          courierNotificationType: reason.courierNotificationType,
+          trackingMessage: reason.trackingMessage,
+          courierUpdatedAt: new Date(),
+        },
+      );
+
+      await queryRunner.manager.save(this.orderLogsRepository.target, {
+        orderId: order.id,
+        agentId: null,
+        action: `Courier dispatch failed (${reason.courierNotificationType}: ${reason.trackingMessage}). Status reverted from In-Transit to ${revertToStatusId}, inventory restored.`,
+        previousValue: null,
+      });
+    }
+
+    await queryRunner.commitTransaction();
+  } catch (err: any) {
+    await queryRunner.rollbackTransaction();
+    // Log the FULL error (including stack / driver error) this time —
+    // a bare err.message hides FK/constraint details needed to diagnose
+    // exactly this kind of silent-rollback bug.
+    this.logger.error(
+      `CRITICAL: failed to revert courier-failed orders [${failedOrders
+        .map((o) => o.invoiceNumber)
+        .join(', ')}] to statusId ${revertToStatusId} — they remain incorrectly at statusId 7: ${err.message}`,
+      err.stack,
+    );
+  } finally {
+    await queryRunner.release();
+  }
+}
+
+// ============================================================
+// 3) Replace sendOrdersToSteadfast's signature and every
+//    revertFailedCourierOrders(...) call site to pass revertToStatusId
+// ============================================================
 private async sendOrdersToSteadfast(
   orders: any[],
   currierCompany: any,
+  revertToStatusId: number, // NEW — the status to fall back to on any failure
 ): Promise<void> {
-  // Steadfast requires recipient_phone to be exactly 11 digits.
-  // Orders with an invalid phone are excluded from the courier request
-  // entirely (sending them risks the whole batch being rejected by
-  // Steadfast) and are marked locally so they show up as "needs phone
-  // fix" instead of silently vanishing.
-  const isValidBdPhone = (phone: string) =>
-    /^[0-9]{11}$/.test((phone || '').trim());
+  const normalizeBdPhone = (raw: string): string | null => {
+    if (!raw) return null;
+    let digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('00')) digits = digits.slice(2);
+    if (digits.startsWith('880')) digits = digits.slice(3);
+    if (digits.length === 10 && !digits.startsWith('0')) digits = '0' + digits;
+    return /^0[0-9]{10}$/.test(digits) ? digits : null;
+  };
 
-  const validOrders = orders.filter((op) =>
-    isValidBdPhone(op.receiverPhoneNumber),
-  );
-  const invalidOrders = orders.filter(
-    (op) => !isValidBdPhone(op.receiverPhoneNumber),
-  );
+  const ordersWithPhone = orders.map((op) => ({
+    op,
+    normalizedPhone: normalizeBdPhone(op.receiverPhoneNumber),
+  }));
+
+  const validOrders = ordersWithPhone
+    .filter((x) => x.normalizedPhone !== null)
+    .map((x) => x.op);
+  const invalidOrders = ordersWithPhone
+    .filter((x) => x.normalizedPhone === null)
+    .map((x) => x.op);
+
+  const normalizedPhoneByOrderId = new Map<number, string>();
+  for (const x of ordersWithPhone) {
+    if (x.normalizedPhone) normalizedPhoneByOrderId.set(x.op.id, x.normalizedPhone);
+  }
 
   if (invalidOrders.length) {
-    for (const op of invalidOrders) {
-      await this.orderRepository.update(op.id, {
-        courierStatus: 'error',
-        courierNotificationType: 'invalid_phone',
-        trackingMessage: `Recipient phone "${op.receiverPhoneNumber || ''}" is not a valid 11-digit number — not sent to courier`,
-        courierUpdatedAt: new Date(),
-      });
-    }
+    await this.revertFailedCourierOrders(invalidOrders, revertToStatusId, {
+      courierStatus: 'error',
+      courierNotificationType: 'invalid_phone',
+      trackingMessage:
+        'Recipient phone number is not a valid 11-digit BD number — not sent to courier',
+    });
     this.logger.warn(
-      `Skipped ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
+      `Reverted ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
         .map((o) => o.invoiceNumber)
         .join(', ')}]`,
     );
   }
 
-  if (!validOrders.length) {
-    return; // nothing valid to send
-  }
+  if (!validOrders.length) return;
 
   const courierPayload = validOrders.map((op) => ({
     invoice: op.invoiceNumber,
     recipient_name: op.receiverName,
-    recipient_phone: op.receiverPhoneNumber,
+    recipient_phone: normalizedPhoneByOrderId.get(op.id) || op.receiverPhoneNumber,
     recipient_address: op.receiverAddress,
     cod_amount: op.totalReceiveAbleAmount,
     note: op.deliveryNote || 'N/A',
@@ -1563,12 +1764,6 @@ private async sendOrdersToSteadfast(
   let steadfastResults: any[] = [];
 
   try {
-    // NOTE: Confirmed in production that Steadfast's bulk endpoint expects
-    // the RAW array directly as the request body — NOT wrapped in a
-    // `{ data: [...] }` object. (The doc's PHP example passes
-    // json_encode($data) as the 'data' form field, which is a different
-    // shape than a raw JSON POST body — that led to an incorrect "fix"
-    // earlier that broke working orders. Reverted.)
     const response = await axios.post(
       'https://portal.packzy.com/api/v1/create_order/bulk-order',
       courierPayload,
@@ -1580,8 +1775,6 @@ private async sendOrdersToSteadfast(
       },
     );
 
-    // Response has been observed as either a bare array, or wrapped as
-    // { data: [...] } — handle both defensively.
     steadfastResults = Array.isArray(response.data)
       ? response.data
       : response.data?.data || [];
@@ -1592,77 +1785,96 @@ private async sendOrdersToSteadfast(
         .join(', ')}], ${steadfastResults.length} result(s) received`,
     );
   } catch (err: any) {
+    const errMsg = err?.response?.data ? JSON.stringify(err.response.data) : err.message;
     this.logger.error(
       `Steadfast bulk order request failed for invoices [${validOrders
         .map((o) => o.invoiceNumber)
-        .join(', ')}]: ${
-        err?.response?.data
-          ? JSON.stringify(err.response.data)
-          : err.message
-      }`,
+        .join(', ')}]: ${errMsg}`,
     );
-    // Whole courier request failed (network/auth/etc). Orders keep
-    // status 7 (in-transit) and null courier fields, so they can be
-    // identified and resent to the courier later without touching
-    // inventory again.
+    await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
+      courierStatus: 'error',
+      courierNotificationType: 'courier_request_failed',
+      trackingMessage: `Steadfast bulk request failed: ${errMsg}`,
+    });
     return;
   }
 
   if (!steadfastResults.length) {
     this.logger.warn(
-      `Steadfast returned no results for invoices [${validOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}]`,
+      `Steadfast returned no results for invoices [${validOrders.map((o) => o.invoiceNumber).join(', ')}]`,
     );
+    await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
+      courierStatus: 'error',
+      courierNotificationType: 'empty_courier_response',
+      trackingMessage: 'Steadfast returned an empty result set for this batch',
+    });
     return;
   }
 
-  // Match each courier result back to its order by invoice, NOT by array
-  // position — Steadfast doesn't guarantee response order matches
-  // request order 1:1, especially when some items error out.
   const resultsByInvoice = new Map<string, any>();
   for (const result of steadfastResults) {
-    if (result?.invoice) {
-      resultsByInvoice.set(String(result.invoice), result);
-    }
+    if (result?.invoice) resultsByInvoice.set(String(result.invoice), result);
   }
+
+  const succeededUpdates: Promise<any>[] = [];
+  const noResultOrders: Order[] = [];
+  const failedOrders: Order[] = [];
+  const failedReasons = new Map<number, string>();
 
   for (const op of validOrders) {
     const result = resultsByInvoice.get(String(op.invoiceNumber));
+
     if (!result) {
       this.logger.warn(
-        `No Steadfast result matched for invoice ${op.invoiceNumber} — courier fields left untouched, safe to retry`,
+        `No Steadfast result matched for invoice ${op.invoiceNumber} — reverting so it can be retried`,
       );
+      noResultOrders.push(op);
       continue;
     }
 
     if (result.status === 'success') {
-      await this.orderRepository.update(op.id, {
-        consignmentId: result.consignment_id
-          ? String(result.consignment_id)
-          : null,
-        trackingCode: result.tracking_code || null,
-        courierStatus: 'in_review', // Steadfast's initial state right after creation
-        courierNotificationType: 'order_created',
-        codAmount: op.totalReceiveAbleAmount,
-        courierUpdatedAt: new Date(),
-      });
+      succeededUpdates.push(
+        this.orderRepository.update(op.id, {
+          consignmentId: result.consignment_id ? String(result.consignment_id) : null,
+          trackingCode: result.tracking_code || null,
+          courierStatus: 'in_review',
+          courierNotificationType: 'order_created',
+          codAmount: op.totalReceiveAbleAmount,
+          courierUpdatedAt: new Date(),
+        }),
+      );
     } else {
-      // status === 'error' (or anything unexpected) — record the
-      // failure without touching deliveryCharge or other fields that
-      // only get populated once real delivery-status updates arrive.
-      await this.orderRepository.update(op.id, {
-        courierStatus: 'error',
-        courierNotificationType: 'order_create_failed',
-        trackingMessage: result?.message || 'Steadfast order creation failed',
-        courierUpdatedAt: new Date(),
-      });
+      failedOrders.push(op);
+      failedReasons.set(op.id, result?.message || 'Steadfast order creation failed');
       this.logger.warn(
         `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
       );
     }
   }
+
+  await Promise.all(succeededUpdates);
+
+  if (noResultOrders.length) {
+    await this.revertFailedCourierOrders(noResultOrders, revertToStatusId, {
+      courierStatus: 'error',
+      courierNotificationType: 'no_courier_response',
+      trackingMessage: 'No result returned by Steadfast for this invoice — safe to retry',
+    });
+  }
+
+  if (failedOrders.length) {
+    for (const op of failedOrders) {
+      await this.revertFailedCourierOrders([op], revertToStatusId, {
+        courierStatus: 'error',
+        courierNotificationType: 'order_create_failed',
+        trackingMessage: failedReasons.get(op.id) || 'Steadfast order creation failed',
+      });
+    }
+  }
 }
+
+// ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
+
   // change hold status
   async changeHoldStatus(
     orderIds: number[],
@@ -2239,6 +2451,34 @@ private async sendOrdersToSteadfast(
       endDate: utcEndDate,
     });
 
+    if (filterOptions?.statusId) {
+      const statusIds = Array.isArray(filterOptions.statusId)
+        ? filterOptions.statusId
+        : [filterOptions.statusId];
+      baseQuery.andWhere('orders.statusId IN (:...statusIds)', { statusIds });
+    }
+
+    if (filterOptions?.locationId) {
+      const locationIds = Array.isArray(filterOptions.locationId)
+        ? filterOptions.locationId
+        : [filterOptions.locationId];
+      baseQuery.andWhere('orders.locationId IN (:...locationIds)', { locationIds });
+    }
+
+    if (filterOptions?.agentIds) {
+      const agentIds = Array.isArray(filterOptions.agentIds)
+        ? filterOptions.agentIds
+        : [filterOptions.agentIds];
+      baseQuery.andWhere('orders.agentId IN (:...agentIds)', { agentIds });
+    }
+
+    if (filterOptions?.currier) {
+      const curierIds = Array.isArray(filterOptions.currier)
+        ? filterOptions.currier
+        : [filterOptions.currier];
+      baseQuery.andWhere('orders.currier IN (:...curierIds)', { curierIds });
+    }
+
     // ✅ Filter by products
     if (filterOptions?.productId) {
       const productIds = Array.isArray(filterOptions.productId)
@@ -2319,6 +2559,48 @@ private async sendOrdersToSteadfast(
     const totalResult = await countQuery.getRawOne();
     const total = Number(totalResult.cnt);
 
+    const productSummaryResult = await baseQuery
+      .clone()
+      .select('SUM(prod.productQuantity)', 'totalProductQuantity')
+      .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
+      .addSelect('COUNT(DISTINCT orders.id)', 'totalOrders')
+      .getRawOne();
+
+    const orderRows = await baseQuery
+      .clone()
+      .select('orders.id', 'orderId')
+      .addSelect('orders.totalPaidAmount', 'totalPaidAmount')
+      .addSelect('orders.totalPrice', 'totalOrderAmount')
+      .addSelect('orders.currier', 'currier')
+      .groupBy('orders.id')
+      .addGroupBy('orders.totalPaidAmount')
+      .addGroupBy('orders.totalPrice')
+      .addGroupBy('orders.currier')
+      .getRawMany();
+
+    const paidAmount = orderRows.reduce(
+      (total, order) => total + (Number(order.totalPaidAmount) || 0),
+      0,
+    );
+    const totalOrderAmount = orderRows.reduce(
+      (total, order) => total + (Number(order.totalOrderAmount) || 0),
+      0,
+    );
+    const courierOrderCount = orderRows.filter((order) => order.currier).length;
+
+    const courierBreakdown = await baseQuery
+      .clone()
+      .leftJoin('orders.partner', 'dp')
+      .select('orders.currier', 'courierId')
+      .addSelect('COALESCE(dp.partnerName, :unassigned)', 'courierName')
+      .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
+      .addSelect('SUM(prod.productQuantity)', 'productQuantity')
+      .addSelect('SUM(prod.subtotal)', 'saleAmount')
+      .setParameter('unassigned', 'Unassigned')
+      .groupBy('orders.currier')
+      .addGroupBy('dp.partnerName')
+      .getRawMany();
+
     return {
       data,
       total,
@@ -2326,6 +2608,22 @@ private async sendOrdersToSteadfast(
       limit,
       startDate: utcStartDate,
       endDate: utcEndDate,
+      summary: {
+        totalProducts: total,
+        totalProductQuantity: Number(productSummaryResult?.totalProductQuantity) || 0,
+        totalOrders: Number(productSummaryResult?.totalOrders) || 0,
+        courierOrderCount,
+        paidAmount,
+        salesAmount: Number(productSummaryResult?.totalSaleAmount) || 0,
+        totalOrderAmount,
+        courierBreakdown: courierBreakdown.map((item) => ({
+          courierId: item.courierId,
+          courierName: item.courierName,
+          orderCount: Number(item.orderCount) || 0,
+          productQuantity: Number(item.productQuantity) || 0,
+          saleAmount: Number(item.saleAmount) || 0,
+        })),
+      },
     };
   }
 
