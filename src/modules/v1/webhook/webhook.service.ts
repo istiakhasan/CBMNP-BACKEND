@@ -100,10 +100,21 @@ export class WebhookService {
 
     let internalStatus: OrderStatus | null = null;
 
+    /**
+     * Business rule:
+     * The order's main `statusId` should ONLY move forward when the
+     * courier confirms actual Delivery. Courier-side Hold / Cancel /
+     * Pending events are informational only — they are stored in
+     * `courierStatus` (see section above) so staff can see them, but
+     * they must NOT automatically flip the ERP's own order status.
+     * Hold/Cancel of the internal order remains a manual/admin action.
+     */
+    const AUTO_STATUS_LABELS = new Set(['Delivered']);
+
     if (status) {
       const internalStatusLabel = this.normalizeStatus(status);
 
-      if (internalStatusLabel) {
+      if (internalStatusLabel && AUTO_STATUS_LABELS.has(internalStatusLabel)) {
         internalStatus = await this.orderStatusRepository.findOne({
           where: {
             label: internalStatusLabel,
@@ -115,6 +126,11 @@ export class WebhookService {
             `Internal order status not found for label: ${internalStatusLabel}`,
           );
         }
+      } else if (internalStatusLabel) {
+        this.logger.log(
+          `Courier reported "${internalStatusLabel}" for invoice ${invoiceNumber} — ` +
+            `courierStatus updated, but order statusId left unchanged (manual action required).`,
+        );
       }
     }
 
@@ -189,6 +205,43 @@ export class WebhookService {
         `Order ${invoiceNumber} status changing: ` +
           `${previousStatusId} -> ${internalStatus.value} (${internalStatus.label})`,
       );
+
+      /**
+       * =====================================================
+       * Payment settlement on Delivery
+       * =====================================================
+       *
+       * When the courier confirms Delivered, the `cod_amount` in the
+       * payload is the cash the courier actually collected from the
+       * customer at the doorstep. That amount needs to be added to
+       * what was already paid (e.g. an earlier bKash partial payment)
+       * so `totalPaidAmount` reflects reality and `paymentStatus`
+       * flips from "Partial"/"Pending" to "Paid".
+       *
+       * We only do this for Delivered — Hold/Cancel never reach here
+       * because of the AUTO_STATUS_LABELS whitelist above.
+       */
+      if (internalStatus.label === 'Delivered') {
+        const alreadyPaid = Number(order.totalPaidAmount ?? 0);
+        const collectedNow = Number(cod_amount ?? order.codAmount ?? 0);
+
+        const newTotalPaid = alreadyPaid + collectedNow;
+        const newReceivable = Math.max(
+          Number(order.totalPrice ?? 0) - newTotalPaid,
+          0,
+        );
+
+        updateData.totalPaidAmount = newTotalPaid as any;
+        updateData.totalReceiveAbleAmount = newReceivable as any;
+        updateData.paymentStatus = newReceivable === 0 ? 'Paid' : 'Partial';
+
+        this.logger.log(
+          `Order ${invoiceNumber} payment settled on delivery: ` +
+            `already paid ৳${alreadyPaid} + COD collected ৳${collectedNow} ` +
+            `= ৳${newTotalPaid} paid, ৳${newReceivable} remaining, ` +
+            `paymentStatus -> ${updateData.paymentStatus}`,
+        );
+      }
     }
 
     /**
