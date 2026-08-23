@@ -2392,61 +2392,75 @@ private async sendOrdersToSteadfast(
 
     let utcStartDate: string;
     let utcEndDate: string;
+    const allowedDateFields = [
+      'createdAt',
+      'intransitTime',
+      'storeTime',
+      'packingTime',
+      'approvedTime',
+    ];
+    const dateField = allowedDateFields.includes(filterOptions?.dateField)
+      ? filterOptions.dateField
+      : 'createdAt';
+    const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 
     // ✅ Handle date filter or fallback to current date
     if (filterOptions?.startDate && filterOptions?.endDate) {
-      const localStartDate = new Date(filterOptions.startDate);
+      const rawStart = new Date(filterOptions.startDate);
+      const bdStart = new Date(rawStart.getTime() + BD_OFFSET_MS);
       utcStartDate = new Date(
         Date.UTC(
-          localStartDate.getFullYear(),
-          localStartDate.getMonth(),
-          localStartDate.getDate(),
+          bdStart.getUTCFullYear(),
+          bdStart.getUTCMonth(),
+          bdStart.getUTCDate(),
           0,
           0,
           0,
           0,
-        ),
+        ) - BD_OFFSET_MS,
       ).toISOString();
 
-      const localEndDate = new Date(filterOptions.endDate);
+      const rawEnd = new Date(filterOptions.endDate);
+      const bdEnd = new Date(rawEnd.getTime() + BD_OFFSET_MS);
       utcEndDate = new Date(
         Date.UTC(
-          localEndDate.getFullYear(),
-          localEndDate.getMonth(),
-          localEndDate.getDate(),
+          bdEnd.getUTCFullYear(),
+          bdEnd.getUTCMonth(),
+          bdEnd.getUTCDate(),
           23,
           59,
           59,
           999,
-        ),
+        ) - BD_OFFSET_MS,
       ).toISOString();
     } else {
       const today = new Date();
+      const bdToday = new Date(today.getTime() + BD_OFFSET_MS);
       utcStartDate = new Date(
         Date.UTC(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate(),
+          bdToday.getUTCFullYear(),
+          bdToday.getUTCMonth(),
+          bdToday.getUTCDate(),
           0,
           0,
           0,
           0,
-        ),
+        ) - BD_OFFSET_MS,
       ).toISOString();
       utcEndDate = new Date(
         Date.UTC(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate(),
+          bdToday.getUTCFullYear(),
+          bdToday.getUTCMonth(),
+          bdToday.getUTCDate(),
           23,
           59,
           59,
           999,
-        ),
+        ) - BD_OFFSET_MS,
       ).toISOString();
     }
 
-    baseQuery.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
+    baseQuery.andWhere(`orders.${dateField} BETWEEN :startDate AND :endDate`, {
       startDate: utcStartDate,
       endDate: utcEndDate,
     });
