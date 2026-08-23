@@ -1,4 +1,9 @@
-import { BadRequestException, HttpStatus, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  HttpStatus,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import { Order } from './entities/order.entity';
@@ -62,69 +67,69 @@ export class OrderService {
 
     private readonly requisitionService: RequisitionService,
   ) {}
- // আগের generateOrderNumber() টা এই দিয়ে replace করুন
-// ---------- Shared helper: organization এর prefix বের করা ----------
-private async getOrganizationPrefix(
-  manager: EntityManager,
-  organizationId: string,
-): Promise<string> {
-  const organization = await manager.findOne(Organization, {
-    where: { id: organizationId },
-  });
-  return organization?.invoicePrefix || 'ORD';
-}
+  // আগের generateOrderNumber() টা এই দিয়ে replace করুন
+  // ---------- Shared helper: organization এর prefix বের করা ----------
+  private async getOrganizationPrefix(
+    manager: EntityManager,
+    organizationId: string,
+  ): Promise<string> {
+    const organization = await manager.findOne(Organization, {
+      where: { id: organizationId },
+    });
+    return organization?.invoicePrefix || 'ORD';
+  }
 
-// ---------- Order Number ----------
-async generateOrderNumber(organizationId: string): Promise<string> {
-  return this.dataSource.transaction(async (manager) => {
-    const prefix = await this.getOrganizationPrefix(manager, organizationId);
+  // ---------- Order Number ----------
+  async generateOrderNumber(organizationId: string): Promise<string> {
+    return this.dataSource.transaction(async (manager) => {
+      const prefix = await this.getOrganizationPrefix(manager, organizationId);
 
-    const lastOrder = await manager
-      .createQueryBuilder(Order, 'order')
-      .setLock('pessimistic_write')
-      .where('order.organizationId = :organizationId', { organizationId })
-      .andWhere('order.orderNumber LIKE :prefix', { prefix: `${prefix}-%` })
-      .orderBy('order.id', 'DESC')
-      .take(1)
-      .getOne();
+      const lastOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.organizationId = :organizationId', { organizationId })
+        .andWhere('order.orderNumber LIKE :prefix', { prefix: `${prefix}-%` })
+        .orderBy('order.id', 'DESC')
+        .take(1)
+        .getOne();
 
-    let nextNumber = 10000; // order number এর default starting point আগের মতোই রাখলাম
-    if (lastOrder?.orderNumber) {
-      const lastNumStr = lastOrder.orderNumber.replace(`${prefix}-`, '');
-      const lastNum = parseInt(lastNumStr, 10);
-      if (!isNaN(lastNum)) nextNumber = lastNum + 1;
-    }
+      let nextNumber = 10000; // order number এর default starting point আগের মতোই রাখলাম
+      if (lastOrder?.orderNumber) {
+        const lastNumStr = lastOrder.orderNumber.replace(`${prefix}-`, '');
+        const lastNum = parseInt(lastNumStr, 10);
+        if (!isNaN(lastNum)) nextNumber = lastNum + 1;
+      }
 
-    // 8-digit zero-padded number, e.g. 00010000, 00010001 ...
-    return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
-  });
-}
+      // 8-digit zero-padded number, e.g. 00010000, 00010001 ...
+      return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
+    });
+  }
 
-// ---------- Invoice Number ----------
-async generateInvoiceNumber(organizationId: string): Promise<string> {
-  return this.dataSource.transaction(async (manager) => {
-    const prefix = await this.getOrganizationPrefix(manager, organizationId);
+  // ---------- Invoice Number ----------
+  async generateInvoiceNumber(organizationId: string): Promise<string> {
+    return this.dataSource.transaction(async (manager) => {
+      const prefix = await this.getOrganizationPrefix(manager, organizationId);
 
-    const lastOrder = await manager
-      .createQueryBuilder(Order, 'order')
-      .setLock('pessimistic_write')
-      .where('order.organizationId = :organizationId', { organizationId })
-      .andWhere('order.invoiceNumber LIKE :prefix', { prefix: `${prefix}-%` })
-      .orderBy('order.id', 'DESC')
-      .take(1)
-      .getOne();
+      const lastOrder = await manager
+        .createQueryBuilder(Order, 'order')
+        .setLock('pessimistic_write')
+        .where('order.organizationId = :organizationId', { organizationId })
+        .andWhere('order.invoiceNumber LIKE :prefix', { prefix: `${prefix}-%` })
+        .orderBy('order.id', 'DESC')
+        .take(1)
+        .getOne();
 
-    let nextNumber = 1;
-    if (lastOrder?.invoiceNumber) {
-      const lastNumStr = lastOrder.invoiceNumber.replace(`${prefix}-`, '');
-      const lastNum = parseInt(lastNumStr, 10);
-      if (!isNaN(lastNum)) nextNumber = lastNum + 1;
-    }
+      let nextNumber = 1;
+      if (lastOrder?.invoiceNumber) {
+        const lastNumStr = lastOrder.invoiceNumber.replace(`${prefix}-`, '');
+        const lastNum = parseInt(lastNumStr, 10);
+        if (!isNaN(lastNum)) nextNumber = lastNum + 1;
+      }
 
-    // 8-digit zero-padded number, e.g. 00000001, 00000002 ...
-    return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
-  });
-}
+      // 8-digit zero-padded number, e.g. 00000001, 00000002 ...
+      return `${prefix}-${nextNumber.toString().padStart(8, '0')}`;
+    });
+  }
 
   async createOrder(payload: Order, organizationId: string) {
     const {
@@ -181,8 +186,8 @@ async generateInvoiceNumber(organizationId: string): Promise<string> {
     const totalReceivableAmount = grandTotal - totalPaidAmount;
 
     // generate invoice number
-const orderNumber = await this.generateOrderNumber(organizationId);
-const incrementedId = await this.generateInvoiceNumber(organizationId);
+    const orderNumber = await this.generateOrderNumber(organizationId);
+    const incrementedId = await this.generateInvoiceNumber(organizationId);
     const result = await this.orderRepository.save({
       orderNumber,
       paymentHistory: paymentHistory,
@@ -257,70 +262,69 @@ const incrementedId = await this.generateInvoiceNumber(organizationId);
     //     }
     //   }
     // }
-if (payload?.statusId === 2) {
-  for (const item of products) {
-    const { productId, productQuantity } = item;
+    if (payload?.statusId === 2) {
+      for (const item of products) {
+        const { productId, productQuantity } = item;
 
-    let existingInventory = await this.inventoryRepository.findOne({
-      where: { productId },
-    });
-
-    // Inventory না থাকলে create
-    if (!existingInventory) {
-      existingInventory = await this.inventoryRepository.save({
-        productId,
-        organizationId,
-        orderQue: productQuantity,
-        hoildQue: 0,
-        processing: 0,
-        stock: 0,
-      });
-    } else {
-      await this.inventoryRepository.increment(
-        { productId },
-        'orderQue',
-        productQuantity,
-      );
-    }
-
-    // location অবশ্যই লাগবে
-    if (!rest?.locationId) {
-      throw new BadRequestException(
-        `Location is required for product ${productId}`,
-      );
-    }
-
-    const existingInventoryItem =
-      await this.InventoryItemItemRepository.findOne({
-        where: {
-          productId,
-          locationId: rest.locationId,
-        },
-      });
-
-    if (!existingInventoryItem) {
-      const newInventoryItem =
-        this.InventoryItemItemRepository.create({
-          locationId: rest.locationId,
-          productId,
-          quantity: 0,
-          orderQue: productQuantity,
-          inventoryId: existingInventory.id,
+        let existingInventory = await this.inventoryRepository.findOne({
+          where: { productId },
         });
 
-      await this.InventoryItemItemRepository.save(newInventoryItem);
-    } else {
-      await this.InventoryItemItemRepository.increment(
-        {
-          productId,
-          locationId: rest.locationId,
-        },
-        'orderQue',
-        productQuantity,
-      );
+        // Inventory না থাকলে create
+        if (!existingInventory) {
+          existingInventory = await this.inventoryRepository.save({
+            productId,
+            organizationId,
+            orderQue: productQuantity,
+            hoildQue: 0,
+            processing: 0,
+            stock: 0,
+          });
+        } else {
+          await this.inventoryRepository.increment(
+            { productId },
+            'orderQue',
+            productQuantity,
+          );
+        }
+
+        // location অবশ্যই লাগবে
+        if (!rest?.locationId) {
+          throw new BadRequestException(
+            `Location is required for product ${productId}`,
+          );
+        }
+
+        const existingInventoryItem =
+          await this.InventoryItemItemRepository.findOne({
+            where: {
+              productId,
+              locationId: rest.locationId,
+            },
+          });
+
+        if (!existingInventoryItem) {
+          const newInventoryItem = this.InventoryItemItemRepository.create({
+            locationId: rest.locationId,
+            productId,
+            quantity: 0,
+            orderQue: productQuantity,
+            inventoryId: existingInventory.id,
+          });
+
+          await this.InventoryItemItemRepository.save(newInventoryItem);
+        } else {
+          await this.InventoryItemItemRepository.increment(
+            {
+              productId,
+              locationId: rest.locationId,
+            },
+            'orderQue',
+            productQuantity,
+          );
+        }
+      }
     }
-  }
-}
     // if order status hold then this section will be execute
     if (payload?.statusId === 3) {
       for (const item of products) {
@@ -396,7 +400,7 @@ if (payload?.statusId === 2) {
       throw new ApiError(HttpStatus.BAD_REQUEST, 'You are not authorized ');
     }
 
-    const orderNumber =await this.generateOrderNumber(organizationId);
+    const orderNumber = await this.generateOrderNumber(organizationId);
     const validatedProducts: any[] = [];
     let productValue = 0;
 
@@ -427,7 +431,7 @@ if (payload?.statusId === 2) {
     const grandTotal = productValue + Number(shippingCharge) - Number(discount);
     const totalReceivableAmount = grandTotal - totalPaidAmount;
 
-  const incrementedId = await this.generateInvoiceNumber(organizationId);
+    const incrementedId = await this.generateInvoiceNumber(organizationId);
     const result = await this.orderRepository.save({
       orderNumber,
       paymentHistory: paymentHistory,
@@ -508,26 +512,31 @@ if (payload?.statusId === 2) {
     });
   }
 
-  async getOrders(options, filterOptions, organizationId,includeProducts = false) {
+ async getOrders(
+    options,
+    filterOptions,
+    organizationId,
+    includeProducts = false,
+  ) {
     const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-  
-  if (includeProducts) {
-    queryBuilder.leftJoinAndSelect('orders.products', 'products');
-    queryBuilder.leftJoinAndSelect('products.product', 'product');
-  }
-  if (filterOptions?.searchTerm) {
-  const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+      .where('orders.organizationId = :organizationId', { organizationId });
 
-  queryBuilder.andWhere(
-    '(orders.invoiceNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
-    {
-      searchTerm,
-    },
-  );
-}
+    if (includeProducts) {
+      queryBuilder.leftJoinAndSelect('orders.products', 'products');
+      queryBuilder.leftJoinAndSelect('products.product', 'product');
+    }
+    if (filterOptions?.searchTerm) {
+      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+
+      queryBuilder.andWhere(
+        '(orders.invoiceNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
+        {
+          searchTerm,
+        },
+      );
+    }
 
     if (filterOptions?.startDate && filterOptions?.endDate) {
       queryBuilder.andWhere(
@@ -593,10 +602,79 @@ if (payload?.statusId === 2) {
         locationIds,
       });
     }
+
+    /**
+     * =====================================================
+     * Delivery payment status filter — DERIVED, not a raw column
+     * =====================================================
+     *
+     * The frontend still sends the same three values it always has
+     * ('Pending' | 'Partial' | 'Paid' | '' for All), so no frontend
+     * change is needed. But we no longer trust `orders.paymentStatus`
+     * as a column — it doesn't capture "courier collected the cash
+     * but hasn't settled it to us yet" vs "product was returned".
+     *
+     * Business definitions (delivered orders only):
+     *
+     * - 'Pending'  -> Pay Due:
+     *     Delivered, no product return, but money actually in hand
+     *     (totalPaidAmount, built only from PaymentHistory rows —
+     *     advances + confirmed courier settlements) is LESS than
+     *     totalPrice. E.g. customer paid 2000 advance on a 4000 order,
+     *     courier collected the other 2000 from the customer, but
+     *     that 2000 hasn't been settled to us yet.
+     *
+     * - 'Partial'  -> Partial Delivered:
+     *     Order has at least one row in order_product_returns
+     *     (e.g. ordered 2 products, customer kept 1 and returned 1).
+     *     This takes priority over the money check — a return means
+     *     "partial delivered" regardless of how much cash came in.
+     *
+     * - 'Paid'     -> Pay Collected:
+     *     No product return, and totalPaidAmount fully covers
+     *     totalPrice (advance + confirmed courier settlement together
+     *     equal the full order value).
+     *
+     * NOTE: `order_product_returns` is assumed to use an `orderId`
+     * column (same naming convention as the rest of this schema, e.g.
+     * `payment_history.orderId`). Adjust the column name below if your
+     * actual table differs.
+     */
     if (filterOptions?.paymentStatus) {
-      queryBuilder.andWhere('orders.paymentStatus = :paymentStatus', {
-        paymentStatus: filterOptions?.paymentStatus,
-      });
+      const hasReturnSql = `EXISTS (
+        SELECT 1 FROM order_product_returns opr
+        WHERE opr."orderId" = orders.id
+      )`;
+
+      switch (filterOptions.paymentStatus) {
+        case 'Partial':
+          // Partial Delivered: has an active product return
+          queryBuilder.andWhere(hasReturnSql);
+          break;
+
+        case 'Paid':
+          // Pay Collected: no return, and fully paid
+          queryBuilder.andWhere(`NOT ${hasReturnSql}`);
+          queryBuilder.andWhere(
+            'COALESCE(orders.totalPaidAmount, 0) >= orders.totalPrice',
+          );
+          break;
+
+        case 'Pending':
+          // Pay Due: no return, and NOT fully paid yet
+          queryBuilder.andWhere(`NOT ${hasReturnSql}`);
+          queryBuilder.andWhere(
+            'COALESCE(orders.totalPaidAmount, 0) < orders.totalPrice',
+          );
+          break;
+
+        default:
+          // Unknown value — fall back to old raw-column behavior
+          // instead of silently ignoring the filter.
+          queryBuilder.andWhere('orders.paymentStatus = :paymentStatus', {
+            paymentStatus: filterOptions.paymentStatus,
+          });
+      }
     }
     // if (filterOptions?.locationId) {
     //   queryBuilder.andWhere('orders.locationId = :locationId', {
@@ -634,18 +712,48 @@ if (payload?.statusId === 2) {
     const agents = await this.usersRepository.findBy({
       userId: In(agentIds),
     });
+
+    // fetch which of these orders have an active product return, so we
+    // can attach a computed `deliveryPaymentStatus` label to each row
+    // for the frontend (independent of whatever filter was applied).
+    const orderIds = orders.map((order) => order.id);
+    const ordersWithReturns = orderIds.length
+      ? await this.orderProductReturnRepository
+          .createQueryBuilder('opr')
+          .select('DISTINCT opr.orderId', 'orderId')
+          .where('opr.orderId IN (:...orderIds)', { orderIds })
+          .getRawMany()
+      : [];
+    const returnedOrderIdSet = new Set(
+      ordersWithReturns.map((row) => row.orderId),
+    );
+
     const statusMap = new Map(statuses.map((status) => [status.value, status]));
     const customerMap = new Map(
       customers.map((customer) => [customer.customer_Id, customer]),
     );
     const agentMap = new Map(agents.map((order) => [order.userId, order]));
-    const modifiedData = orders.map((order) => ({
-      ...order,
-      status: statusMap.get(order.statusId),
-      customer: customerMap.get(order.customerId as any),
-      agent: agentMap.get(order.agentId as any),
-      partner: currierMap.get(order.currier as any),
-    }));
+    const modifiedData = orders.map((order) => {
+      const hasReturn = returnedOrderIdSet.has(order.id);
+      const totalPaid = Number(order.totalPaidAmount ?? 0);
+      const totalPrice = Number(order.totalPrice ?? 0);
+
+      // 'PayDue' | 'PartialDelivered' | 'PayCollected'
+      const deliveryPaymentStatus = hasReturn
+        ? 'PartialDelivered'
+        : totalPaid >= totalPrice
+          ? 'PayCollected'
+          : 'PayDue';
+
+      return {
+        ...order,
+        status: statusMap.get(order.statusId),
+        customer: customerMap.get(order.customerId as any),
+        agent: agentMap.get(order.agentId as any),
+        partner: currierMap.get(order.currier as any),
+        deliveryPaymentStatus,
+      };
+    });
 
     return {
       data: plainToInstance(Order, modifiedData),
@@ -655,7 +763,7 @@ if (payload?.statusId === 2) {
     };
   }
   // get order reports
-async getOrdersReports(options, filterOptions, organizationId) {
+  async getOrdersReports(options, filterOptions, organizationId) {
     const { sortBy, sortOrder, limit, page, skip } = paginationHelpers(options);
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
@@ -900,20 +1008,23 @@ async getOrdersReports(options, filterOptions, organizationId) {
       }),
     };
   }
-  async getScanOrderById(orderNumber: string): Promise<Order & { partner: any }> {
-    console.log(orderNumber,"order number");
+  async getScanOrderById(
+    orderNumber: string,
+  ): Promise<Order & { partner: any }> {
+    console.log(orderNumber, 'order number');
     const order = await this.orderRepository.findOne({
-      where: { orderNumber:orderNumber }
+      where: { orderNumber: orderNumber },
     });
-   console.log(order,"check");
+    console.log(order, 'check');
     if (!order) {
       throw new NotFoundException(`Order with ID ${orderNumber} not found`);
     }
     if (order.status.label !== 'Packing') {
-      throw new ApiError(HttpStatus.BAD_REQUEST,`Order with ID ${orderNumber} not in packing`);
+      throw new ApiError(
+        HttpStatus.BAD_REQUEST,
+        `Order with ID ${orderNumber} not in packing`,
+      );
     }
-
-
 
     return order;
   }
@@ -1164,716 +1275,741 @@ async getOrdersReports(options, filterOptions, organizationId) {
   // ===============================
   // ✅ Process Single Chunk of Orders
   // ===============================
-private async processOrdersChunk(
-  orderIds: number[],
-  mainData: any,
-  organizationId: string,
-) {
-  const { currentStatus, ...data } = mainData;
+  private async processOrdersChunk(
+    orderIds: number[],
+    mainData: any,
+    organizationId: string,
+  ) {
+    const { currentStatus, ...data } = mainData;
 
-  const orders = await this.orderRepository.find({
-    where: { id: In(orderIds) },
-    relations: ['status'],
-  });
-
-  if (orders.length !== orderIds.length) {
-    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-  }
-
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    const allProducts = await this.productsRepository.find({
-      where: { orderId: In(orderIds) },
+    const orders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
     });
 
-    // Bulk inventory updates
-    const inventoryUpdatePromises: Promise<any>[] = [];
+    if (orders.length !== orderIds.length) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+    }
 
-    for (const product of allProducts) {
-      const { productId, productQuantity } = product;
-      const order = orders.find((o) => o.id === product.orderId);
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-      const inventory = await this.inventoryRepository.findOne({
-        where: { productId },
+    try {
+      const allProducts = await this.productsRepository.find({
+        where: { orderId: In(orderIds) },
       });
-      const inventoryItem = await this.InventoryItemItemRepository.findOne({
-        where: { productId, locationId: order?.locationId },
-      });
 
-      // ========== STATUS 7: IN-TRANSIT ===========
-      if (data.statusId === 7) {
-        if (inventory) {
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.decrement(
-              { productId },
-              'processing',
-              productQuantity,
-            ),
-          );
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.decrement(
-              { productId },
-              'stock',
-              productQuantity,
-            ),
-          );
+      // Bulk inventory updates
+      const inventoryUpdatePromises: Promise<any>[] = [];
+
+      for (const product of allProducts) {
+        const { productId, productQuantity } = product;
+        const order = orders.find((o) => o.id === product.orderId);
+
+        const inventory = await this.inventoryRepository.findOne({
+          where: { productId },
+        });
+        const inventoryItem = await this.InventoryItemItemRepository.findOne({
+          where: { productId, locationId: order?.locationId },
+        });
+
+        // ========== STATUS 7: IN-TRANSIT ===========
+        if (data.statusId === 7) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'processing',
+                productQuantity,
+              ),
+            );
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'stock',
+                productQuantity,
+              ),
+            );
+          }
+
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'processing',
+                productQuantity,
+              ),
+            );
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'quantity',
+                productQuantity,
+              ),
+            );
+          }
         }
 
-        if (inventoryItem) {
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.decrement(
-              { productId, locationId: order.locationId },
-              'processing',
-              productQuantity,
-            ),
-          );
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.decrement(
-              { productId, locationId: order.locationId },
-              'quantity',
-              productQuantity,
-            ),
-          );
+        // ========== STATUS 4: CANCEL ===========
+        if (
+          data.statusId === 4 &&
+          (currentStatus === 5 || currentStatus === 6)
+        ) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'processing',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'processing',
+                productQuantity,
+              ),
+            );
+          }
         }
-      }
 
-      // ========== STATUS 4: CANCEL ===========
-      if (
-        data.statusId === 4 &&
-        (currentStatus === 5 || currentStatus === 6)
-      ) {
-        if (inventory) {
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.decrement(
-              { productId },
-              'processing',
-              productQuantity,
-            ),
-          );
+        // ========== STATUS 4: RETURN / ORDER QUE ===========
+        if (data.statusId === 4 && currentStatus === 2) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.decrement(
+                { productId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.decrement(
+                { productId, locationId: order.locationId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
         }
-        if (inventoryItem) {
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.decrement(
-              { productId, locationId: order.locationId },
-              'processing',
-              productQuantity,
-            ),
+
+        // ========== STATUS 3: HOLD ===========
+        if (data.statusId === 3 && currentStatus === 2) {
+          console.log(
+            'this block is execute properly=========================',
           );
-        }
-      }
 
-      // ========== STATUS 4: RETURN / ORDER QUE ===========
-      if (data.statusId === 4 && currentStatus === 2) {
-        if (inventory) {
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.decrement(
-              { productId },
-              'orderQue',
-              productQuantity,
-            ),
-          );
-        }
-        if (inventoryItem) {
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.decrement(
-              { productId, locationId: order.locationId },
-              'orderQue',
-              productQuantity,
-            ),
-          );
-        }
-      }
+          // ensure productQuantity is a number
+          const qty = Number(productQuantity) || 0;
 
-      // ========== STATUS 3: HOLD ===========
-      if (data.statusId === 3 && currentStatus === 2) {
-        console.log(
-          'this block is execute properly=========================',
-        );
-
-        // ensure productQuantity is a number
-        const qty = Number(productQuantity) || 0;
-
-        if (inventory) {
-          // update Inventory table (use parameterized query, COALESCE to handle NULLs)
-          inventoryUpdatePromises.push(
-            queryRunner.manager.query(
-              `UPDATE "inventory"
+          if (inventory) {
+            // update Inventory table (use parameterized query, COALESCE to handle NULLs)
+            inventoryUpdatePromises.push(
+              queryRunner.manager.query(
+                `UPDATE "inventory"
        SET "orderQue" = COALESCE("orderQue", 0) - $1,
            "hoildQue" = COALESCE("hoildQue", 0) + $1,
            "updatedAt" = now()
        WHERE "productId" = $2`,
-              [qty, productId],
-            ),
-          );
-        }
+                [qty, productId],
+              ),
+            );
+          }
 
-        if (inventoryItem) {
-          // inventoryItems table name from your entity: 'inventoryItems'
-          inventoryUpdatePromises.push(
-            queryRunner.manager.query(
-              `UPDATE "inventoryItems"
+          if (inventoryItem) {
+            // inventoryItems table name from your entity: 'inventoryItems'
+            inventoryUpdatePromises.push(
+              queryRunner.manager.query(
+                `UPDATE "inventoryItems"
        SET "orderQue" = COALESCE("orderQue", 0) - $1,
            "hoildQue" = COALESCE("hoildQue", 0) + $1,
            "updatedAt" = now()
        WHERE "productId" = $2 AND "locationId" = $3`,
-              [qty, productId, order.locationId],
-            ),
+                [qty, productId, order.locationId],
+              ),
+            );
+          }
+        }
+
+        // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
+        if (
+          data.statusId === 2 &&
+          (currentStatus === 1 || currentStatus === 4)
+        ) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.increment(
+                { productId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.increment(
+                { productId, locationId: order.locationId },
+                'orderQue',
+                productQuantity,
+              ),
+            );
+          } else if (inventory) {
+            // create new inventory item if missing
+            const newItem = this.InventoryItemItemRepository.create({
+              locationId: order.locationId,
+              productId,
+              quantity: 0,
+              orderQue: productQuantity,
+              inventoryId: inventory.id,
+            });
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.save(newItem),
+            );
+          }
+        }
+
+        // ========== STATUS 3 from 1 → HOLD QUE ===========
+        if (data.statusId === 3 && currentStatus === 1) {
+          if (inventory) {
+            inventoryUpdatePromises.push(
+              this.inventoryRepository.increment(
+                { productId },
+                'hoildQue',
+                productQuantity,
+              ),
+            );
+          }
+          if (inventoryItem) {
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.increment(
+                { productId, locationId: order.locationId },
+                'hoildQue',
+                productQuantity,
+              ),
+            );
+          } else if (inventory) {
+            const newItem = this.InventoryItemItemRepository.create({
+              locationId: order.locationId,
+              productId,
+              quantity: 0,
+              orderQue: 0,
+              hoildQue: productQuantity,
+              inventoryId: inventory.id,
+            });
+            inventoryUpdatePromises.push(
+              this.InventoryItemItemRepository.save(newItem),
+            );
+          }
+        }
+
+        // ========== STATUS 5: STORE ===========
+        if (data.statusId === 5) {
+          await this.requisitionService.createRequisition(
+            { orderIds, userId: data?.userId ?? data?.agentId },
+            organizationId,
+          );
+          await this.orderRepository.update(
+            { id: In(orderIds) },
+            { storeTime: new Date() },
+          );
+        }
+
+        // ========== STATUS 6: PACKING ===========
+        if (data.statusId === 6) {
+          await this.orderRepository.update(
+            { id: In(orderIds) },
+            { packingTime: new Date() },
           );
         }
       }
 
-      // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
-      if (
-        data.statusId === 2 &&
-        (currentStatus === 1 || currentStatus === 4)
-      ) {
-        if (inventory) {
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.increment(
-              { productId },
-              'orderQue',
-              productQuantity,
-            ),
-          );
-        }
-        if (inventoryItem) {
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.increment(
-              { productId, locationId: order.locationId },
-              'orderQue',
-              productQuantity,
-            ),
-          );
-        } else if (inventory) {
-          // create new inventory item if missing
-          const newItem = this.InventoryItemItemRepository.create({
-            locationId: order.locationId,
-            productId,
-            quantity: 0,
-            orderQue: productQuantity,
-            inventoryId: inventory.id,
-          });
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.save(newItem),
-          );
-        }
-      }
+      // Execute all bulk updates in parallel
+      await Promise.all(inventoryUpdatePromises);
 
-      // ========== STATUS 3 from 1 → HOLD QUE ===========
-      if (data.statusId === 3 && currentStatus === 1) {
-        if (inventory) {
-          inventoryUpdatePromises.push(
-            this.inventoryRepository.increment(
-              { productId },
-              'hoildQue',
-              productQuantity,
-            ),
-          );
-        }
-        if (inventoryItem) {
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.increment(
-              { productId, locationId: order.locationId },
-              'hoildQue',
-              productQuantity,
-            ),
-          );
-        } else if (inventory) {
-          const newItem = this.InventoryItemItemRepository.create({
-            locationId: order.locationId,
-            productId,
-            quantity: 0,
-            orderQue: 0,
-            hoildQue: productQuantity,
-            inventoryId: inventory.id,
-          });
-          inventoryUpdatePromises.push(
-            this.InventoryItemItemRepository.save(newItem),
-          );
-        }
-      }
-
-      // ========== STATUS 5: STORE ===========
-      if (data.statusId === 5) {
-        await this.requisitionService.createRequisition(
-          { orderIds, userId: data?.userId ?? data?.agentId },
-          organizationId,
-        );
+      // Update orders with new status & timestamps
+      if (data.statusId === 7) {
         await this.orderRepository.update(
           { id: In(orderIds) },
-          { storeTime: new Date() },
+          { intransitTime: new Date() },
         );
       }
 
-      // ========== STATUS 6: PACKING ===========
-      if (data.statusId === 6) {
-        await this.orderRepository.update(
-          { id: In(orderIds) },
-          { packingTime: new Date() },
-        );
-      }
-    }
-
-    // Execute all bulk updates in parallel
-    await Promise.all(inventoryUpdatePromises);
-
-    // Update orders with new status & timestamps
-    if (data.statusId === 7) {
+      // Finally, update orders general status & previousStatus
       await this.orderRepository.update(
         { id: In(orderIds) },
-        { intransitTime: new Date() },
+        { ...data, previousStatus: currentStatus },
       );
+
+      await queryRunner.commitTransaction();
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      throw new ApiError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        error.message || 'Failed to update inventory',
+      );
+    } finally {
+      await queryRunner.release();
     }
 
-    // Finally, update orders general status & previousStatus
-    await this.orderRepository.update(
-      { id: In(orderIds) },
-      { ...data, previousStatus: currentStatus },
-    );
-
-    await queryRunner.commitTransaction();
-  } catch (error: any) {
-    await queryRunner.rollbackTransaction();
-    throw new ApiError(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      error.message || 'Failed to update inventory',
-    );
-  } finally {
-    await queryRunner.release();
-  }
-
-  // ✅ Courier API call outside transaction — inventory/status changes are
-  // already committed, so a courier failure here never rolls those back.
-  if (data.statusId === 7) {
-    // IMPORTANT: different orders in the same chunk can have different
-    // couriers assigned. Grouping by orders[0].currier alone would
-    // silently send NOTHING for the whole chunk whenever the first order
-    // in the array happened to use a different (or no) courier partner —
-    // this was the actual bug. Group by each order's OWN currier id so
-    // every courier partner only ever gets its own orders.
-    const ordersByCourierPartnerId = new Map<string, typeof orders>();
-    for (const op of orders) {
-      const key = op.currier || 'unassigned';
-      if (!ordersByCourierPartnerId.has(key)) {
-        ordersByCourierPartnerId.set(key, []);
+    // ✅ Courier API call outside transaction — inventory/status changes are
+    // already committed, so a courier failure here never rolls those back.
+    if (data.statusId === 7) {
+      // IMPORTANT: different orders in the same chunk can have different
+      // couriers assigned. Grouping by orders[0].currier alone would
+      // silently send NOTHING for the whole chunk whenever the first order
+      // in the array happened to use a different (or no) courier partner —
+      // this was the actual bug. Group by each order's OWN currier id so
+      // every courier partner only ever gets its own orders.
+      const ordersByCourierPartnerId = new Map<string, typeof orders>();
+      for (const op of orders) {
+        const key = op.currier || 'unassigned';
+        if (!ordersByCourierPartnerId.has(key)) {
+          ordersByCourierPartnerId.set(key, []);
+        }
+        ordersByCourierPartnerId.get(key)!.push(op);
       }
-      ordersByCourierPartnerId.get(key)!.push(op);
+
+      for (const [partnerId, partnerOrders] of ordersByCourierPartnerId) {
+        if (partnerId === 'unassigned') {
+          this.logger.warn(
+            `Skipped ${partnerOrders.length} order(s) with no courier partner assigned: [${partnerOrders
+              .map((o) => o.invoiceNumber)
+              .join(', ')}]`,
+          );
+          continue;
+        }
+
+        const currierCompany = await this.deliveryPartnerRepository.findOne({
+          where: { organizationId, id: partnerId },
+        });
+
+        if (!currierCompany) {
+          this.logger.warn(
+            `Courier partner ${partnerId} not found for org ${organizationId}, skipping ${partnerOrders.length} order(s): [${partnerOrders
+              .map((o) => o.invoiceNumber)
+              .join(', ')}]`,
+          );
+          continue;
+        }
+
+        if (currierCompany.partnerName === 'SteadFast') {
+          await this.sendOrdersToSteadfast(
+            partnerOrders,
+            currierCompany,
+            currentStatus,
+          );
+        }
+        // else: other courier partners handled elsewhere / not yet integrated
+      }
     }
 
-    for (const [partnerId, partnerOrders] of ordersByCourierPartnerId) {
-      if (partnerId === 'unassigned') {
-        this.logger.warn(
-          `Skipped ${partnerOrders.length} order(s) with no courier partner assigned: [${partnerOrders
-            .map((o) => o.invoiceNumber)
-            .join(', ')}]`,
-        );
-        continue;
-      }
+    // Save order logs
+    const updatedOrders = await this.orderRepository.find({
+      where: { id: In(orderIds) },
+      relations: ['status'],
+    });
 
-      const currierCompany = await this.deliveryPartnerRepository.findOne({
-        where: { organizationId, id: partnerId },
-      });
+    const orderLogs = orders.map((order, index) => ({
+      orderId: order.id,
+      agentId: data.agentId,
+      action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
+      previousValue: null,
+    }));
 
-      if (!currierCompany) {
-        this.logger.warn(
-          `Courier partner ${partnerId} not found for org ${organizationId}, skipping ${partnerOrders.length} order(s): [${partnerOrders
-            .map((o) => o.invoiceNumber)
-            .join(', ')}]`,
-        );
-        continue;
-      }
+    await this.orderLogsRepository.save(orderLogs);
 
-      if (currierCompany.partnerName === 'SteadFast') {
-        await this.sendOrdersToSteadfast(partnerOrders, currierCompany,currentStatus);
-      }
-      // else: other courier partners handled elsewhere / not yet integrated
+    return updatedOrders;
+  }
+
+  // ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
+  /**
+   * FIX: Orders were staying at statusId 7 (In-Transit) even when they were
+   * never actually accepted by Steadfast — invalid phone numbers, a failed
+   * HTTP request, an empty response, a missing per-invoice result, or a
+   * per-item "error" result all left the order's main status untouched
+   * (only `courierStatus` was set), and inventory stayed decremented as if
+   * the order had shipped.
+   *
+   * This file contains:
+   *   1. A new private helper, `revertFailedCourierOrders`, that undoes the
+   *      status-7 side effects for any order that could not be confirmed as
+   *      sent to the courier.
+   *   2. A revised `sendOrdersToSteadfast` that calls it at every failure
+   *      point instead of leaving the order status inconsistent.
+   *
+   * Paste both methods into OrderService, replacing the existing
+   * `sendOrdersToSteadfast` method. No other files need to change — all
+   * repositories/imports used here (Inventory, InventoryItem, In, Order,
+   * axios, this.dataSource, this.logger, etc.) are already present in
+   * order.service.ts.
+   */
+
+  // ---------- Revert an order's status/inventory when courier dispatch fails ----------
+  // Called for any order that could NOT be confirmed as actually accepted by
+  // the courier: invalid phone, a per-item rejection from Steadfast, no
+  // matching result in the response, or a total request failure.
+  //
+  // Without this, changeStatusBulk's statusId === 7 branch (which runs in
+  // its own transaction BEFORE the courier call) leaves the order looking
+  // like it shipped — status 7, inventory decremented, intransitTime set —
+  // even though Steadfast never actually received it. This function undoes
+  // exactly that.
+  /**
+   * FIX v2 — root cause of "status change holeu courier a dhukloi na, but
+   * status stayed at In-Transit":
+   *
+   * revertFailedCourierOrders() was reverting statusId using
+   * `order.previousStatus` from an Order object fetched BEFORE the main
+   * status-7 transaction ran. That transaction is what actually WRITES
+   * `previousStatus = currentStatus` — so the in-memory value was stale
+   * (the previousStatus from some earlier transition, not this one).
+   *
+   * If that stale value happened to be invalid (e.g. 0, or a statusId that
+   * no longer exists in the status table), the UPDATE hit a foreign-key
+   * constraint violation, the revert transaction rolled back, the error was
+   * only logged (not thrown), and the outer code kept printing
+   * "Reverted N order(s)..." regardless — so the order silently stayed at
+   * statusId 7 with no visible failure.
+   *
+   * Fix: stop guessing from a stale field. Thread the real, known-correct
+   * `currentStatus` (already available in processOrdersChunk, and what
+   * actually gets written as `previousStatus` in the main transaction)
+   * explicitly through sendOrdersToSteadfast -> revertFailedCourierOrders.
+   *
+   * Changes needed in order.service.ts:
+   *   1. processOrdersChunk: pass `currentStatus` into sendOrdersToSteadfast.
+   *   2. sendOrdersToSteadfast: accept `revertToStatusId` param, pass it on.
+   *   3. revertFailedCourierOrders: accept `revertToStatusId` param, use it
+   *      directly instead of reading order.previousStatus.
+   */
+
+  // ============================================================
+  // 1) Inside processOrdersChunk — find this block:
+  // ============================================================
+  //
+  //     if (currierCompany.partnerName === 'SteadFast') {
+  //       await this.sendOrdersToSteadfast(partnerOrders, currierCompany);
+  //     }
+  //
+  // Replace with (note the third argument):
+  //
+  //     if (currierCompany.partnerName === 'SteadFast') {
+  //       await this.sendOrdersToSteadfast(
+  //         partnerOrders,
+  //         currierCompany,
+  //         currentStatus, // the known-correct status to revert to on failure
+  //       );
+  //     }
+
+  // ============================================================
+  // 2) Replace revertFailedCourierOrders with this version
+  // ============================================================
+  private async revertFailedCourierOrders(
+    failedOrders: Order[],
+    revertToStatusId: number,
+    reason: {
+      courierStatus: string;
+      courierNotificationType: string;
+      trackingMessage: string;
+    },
+  ): Promise<void> {
+    if (!failedOrders.length) return;
+
+    // Guard against an unusable revert target instead of writing garbage
+    // into statusId and hitting a silent FK-constraint rollback again.
+    if (
+      revertToStatusId === undefined ||
+      revertToStatusId === null ||
+      isNaN(revertToStatusId)
+    ) {
+      this.logger.error(
+        `CRITICAL: cannot revert courier-failed orders [${failedOrders
+          .map((o) => o.invoiceNumber)
+          .join(
+            ', ',
+          )}] — no valid revertToStatusId was provided (got: ${revertToStatusId}). Order(s) remain incorrectly at statusId 7.`,
+      );
+      return;
     }
-  }
 
-  // Save order logs
-  const updatedOrders = await this.orderRepository.find({
-    where: { id: In(orderIds) },
-    relations: ['status'],
-  });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-  const orderLogs = orders.map((order, index) => ({
-    orderId: order.id,
-    agentId: data.agentId,
-    action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
-    previousValue: null,
-  }));
+    try {
+      const orderIds = failedOrders.map((o) => o.id);
+      const products = await queryRunner.manager.find(
+        this.productsRepository.target,
+        { where: { orderId: In(orderIds) } },
+      );
 
-  await this.orderLogsRepository.save(orderLogs);
+      for (const order of failedOrders) {
+        const orderProducts = products.filter((p) => p.orderId === order.id);
 
-  return updatedOrders;
-}
+        for (const product of orderProducts) {
+          const { productId, productQuantity } = product;
 
-// ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
-/**
- * FIX: Orders were staying at statusId 7 (In-Transit) even when they were
- * never actually accepted by Steadfast — invalid phone numbers, a failed
- * HTTP request, an empty response, a missing per-invoice result, or a
- * per-item "error" result all left the order's main status untouched
- * (only `courierStatus` was set), and inventory stayed decremented as if
- * the order had shipped.
- *
- * This file contains:
- *   1. A new private helper, `revertFailedCourierOrders`, that undoes the
- *      status-7 side effects for any order that could not be confirmed as
- *      sent to the courier.
- *   2. A revised `sendOrdersToSteadfast` that calls it at every failure
- *      point instead of leaving the order status inconsistent.
- *
- * Paste both methods into OrderService, replacing the existing
- * `sendOrdersToSteadfast` method. No other files need to change — all
- * repositories/imports used here (Inventory, InventoryItem, In, Order,
- * axios, this.dataSource, this.logger, etc.) are already present in
- * order.service.ts.
- */
-
-// ---------- Revert an order's status/inventory when courier dispatch fails ----------
-// Called for any order that could NOT be confirmed as actually accepted by
-// the courier: invalid phone, a per-item rejection from Steadfast, no
-// matching result in the response, or a total request failure.
-//
-// Without this, changeStatusBulk's statusId === 7 branch (which runs in
-// its own transaction BEFORE the courier call) leaves the order looking
-// like it shipped — status 7, inventory decremented, intransitTime set —
-// even though Steadfast never actually received it. This function undoes
-// exactly that.
-/**
- * FIX v2 — root cause of "status change holeu courier a dhukloi na, but
- * status stayed at In-Transit":
- *
- * revertFailedCourierOrders() was reverting statusId using
- * `order.previousStatus` from an Order object fetched BEFORE the main
- * status-7 transaction ran. That transaction is what actually WRITES
- * `previousStatus = currentStatus` — so the in-memory value was stale
- * (the previousStatus from some earlier transition, not this one).
- *
- * If that stale value happened to be invalid (e.g. 0, or a statusId that
- * no longer exists in the status table), the UPDATE hit a foreign-key
- * constraint violation, the revert transaction rolled back, the error was
- * only logged (not thrown), and the outer code kept printing
- * "Reverted N order(s)..." regardless — so the order silently stayed at
- * statusId 7 with no visible failure.
- *
- * Fix: stop guessing from a stale field. Thread the real, known-correct
- * `currentStatus` (already available in processOrdersChunk, and what
- * actually gets written as `previousStatus` in the main transaction)
- * explicitly through sendOrdersToSteadfast -> revertFailedCourierOrders.
- *
- * Changes needed in order.service.ts:
- *   1. processOrdersChunk: pass `currentStatus` into sendOrdersToSteadfast.
- *   2. sendOrdersToSteadfast: accept `revertToStatusId` param, pass it on.
- *   3. revertFailedCourierOrders: accept `revertToStatusId` param, use it
- *      directly instead of reading order.previousStatus.
- */
-
-// ============================================================
-// 1) Inside processOrdersChunk — find this block:
-// ============================================================
-//
-//     if (currierCompany.partnerName === 'SteadFast') {
-//       await this.sendOrdersToSteadfast(partnerOrders, currierCompany);
-//     }
-//
-// Replace with (note the third argument):
-//
-//     if (currierCompany.partnerName === 'SteadFast') {
-//       await this.sendOrdersToSteadfast(
-//         partnerOrders,
-//         currierCompany,
-//         currentStatus, // the known-correct status to revert to on failure
-//       );
-//     }
-
-// ============================================================
-// 2) Replace revertFailedCourierOrders with this version
-// ============================================================
-private async revertFailedCourierOrders(
-  failedOrders: Order[],
-  revertToStatusId: number,
-  reason: {
-    courierStatus: string;
-    courierNotificationType: string;
-    trackingMessage: string;
-  },
-): Promise<void> {
-  if (!failedOrders.length) return;
-
-  // Guard against an unusable revert target instead of writing garbage
-  // into statusId and hitting a silent FK-constraint rollback again.
-  if (revertToStatusId === undefined || revertToStatusId === null || isNaN(revertToStatusId)) {
-    this.logger.error(
-      `CRITICAL: cannot revert courier-failed orders [${failedOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}] — no valid revertToStatusId was provided (got: ${revertToStatusId}). Order(s) remain incorrectly at statusId 7.`,
-    );
-    return;
-  }
-
-  const queryRunner = this.dataSource.createQueryRunner();
-  await queryRunner.connect();
-  await queryRunner.startTransaction();
-
-  try {
-    const orderIds = failedOrders.map((o) => o.id);
-    const products = await queryRunner.manager.find(
-      this.productsRepository.target,
-      { where: { orderId: In(orderIds) } },
-    );
-
-    for (const order of failedOrders) {
-      const orderProducts = products.filter((p) => p.orderId === order.id);
-
-      for (const product of orderProducts) {
-        const { productId, productQuantity } = product;
-
-        await queryRunner.manager.increment(
-          Inventory,
-          { productId },
-          'processing',
-          productQuantity,
-        );
-        await queryRunner.manager.increment(
-          Inventory,
-          { productId },
-          'stock',
-          productQuantity,
-        );
-
-        if (order.locationId) {
           await queryRunner.manager.increment(
-            InventoryItem,
-            { productId, locationId: order.locationId },
+            Inventory,
+            { productId },
             'processing',
             productQuantity,
           );
           await queryRunner.manager.increment(
-            InventoryItem,
-            { productId, locationId: order.locationId },
-            'quantity',
+            Inventory,
+            { productId },
+            'stock',
             productQuantity,
           );
+
+          if (order.locationId) {
+            await queryRunner.manager.increment(
+              InventoryItem,
+              { productId, locationId: order.locationId },
+              'processing',
+              productQuantity,
+            );
+            await queryRunner.manager.increment(
+              InventoryItem,
+              { productId, locationId: order.locationId },
+              'quantity',
+              productQuantity,
+            );
+          }
         }
+
+        await queryRunner.manager.update(
+          Order,
+          { id: order.id },
+          {
+            statusId: revertToStatusId,
+            previousStatus: null, // this transition never actually completed
+            intransitTime: null,
+            courierStatus: reason.courierStatus,
+            courierNotificationType: reason.courierNotificationType,
+            trackingMessage: reason.trackingMessage,
+            courierUpdatedAt: new Date(),
+          },
+        );
+
+        await queryRunner.manager.save(this.orderLogsRepository.target, {
+          orderId: order.id,
+          agentId: null,
+          action: `Courier dispatch failed (${reason.courierNotificationType}: ${reason.trackingMessage}). Status reverted from In-Transit to ${revertToStatusId}, inventory restored.`,
+          previousValue: null,
+        });
       }
 
-      await queryRunner.manager.update(
-        Order,
-        { id: order.id },
-        {
-          statusId: revertToStatusId,
-          previousStatus: null, // this transition never actually completed
-          intransitTime: null,
-          courierStatus: reason.courierStatus,
-          courierNotificationType: reason.courierNotificationType,
-          trackingMessage: reason.trackingMessage,
-          courierUpdatedAt: new Date(),
-        },
+      await queryRunner.commitTransaction();
+    } catch (err: any) {
+      await queryRunner.rollbackTransaction();
+      // Log the FULL error (including stack / driver error) this time —
+      // a bare err.message hides FK/constraint details needed to diagnose
+      // exactly this kind of silent-rollback bug.
+      this.logger.error(
+        `CRITICAL: failed to revert courier-failed orders [${failedOrders
+          .map((o) => o.invoiceNumber)
+          .join(
+            ', ',
+          )}] to statusId ${revertToStatusId} — they remain incorrectly at statusId 7: ${err.message}`,
+        err.stack,
       );
-
-      await queryRunner.manager.save(this.orderLogsRepository.target, {
-        orderId: order.id,
-        agentId: null,
-        action: `Courier dispatch failed (${reason.courierNotificationType}: ${reason.trackingMessage}). Status reverted from In-Transit to ${revertToStatusId}, inventory restored.`,
-        previousValue: null,
-      });
-    }
-
-    await queryRunner.commitTransaction();
-  } catch (err: any) {
-    await queryRunner.rollbackTransaction();
-    // Log the FULL error (including stack / driver error) this time —
-    // a bare err.message hides FK/constraint details needed to diagnose
-    // exactly this kind of silent-rollback bug.
-    this.logger.error(
-      `CRITICAL: failed to revert courier-failed orders [${failedOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}] to statusId ${revertToStatusId} — they remain incorrectly at statusId 7: ${err.message}`,
-      err.stack,
-    );
-  } finally {
-    await queryRunner.release();
-  }
-}
-
-// ============================================================
-// 3) Replace sendOrdersToSteadfast's signature and every
-//    revertFailedCourierOrders(...) call site to pass revertToStatusId
-// ============================================================
-private async sendOrdersToSteadfast(
-  orders: any[],
-  currierCompany: any,
-  revertToStatusId: number, // NEW — the status to fall back to on any failure
-): Promise<void> {
-  const normalizeBdPhone = (raw: string): string | null => {
-    if (!raw) return null;
-    let digits = raw.replace(/\D/g, '');
-    if (digits.startsWith('00')) digits = digits.slice(2);
-    if (digits.startsWith('880')) digits = digits.slice(3);
-    if (digits.length === 10 && !digits.startsWith('0')) digits = '0' + digits;
-    return /^0[0-9]{10}$/.test(digits) ? digits : null;
-  };
-
-  const ordersWithPhone = orders.map((op) => ({
-    op,
-    normalizedPhone: normalizeBdPhone(op.receiverPhoneNumber),
-  }));
-
-  const validOrders = ordersWithPhone
-    .filter((x) => x.normalizedPhone !== null)
-    .map((x) => x.op);
-  const invalidOrders = ordersWithPhone
-    .filter((x) => x.normalizedPhone === null)
-    .map((x) => x.op);
-
-  const normalizedPhoneByOrderId = new Map<number, string>();
-  for (const x of ordersWithPhone) {
-    if (x.normalizedPhone) normalizedPhoneByOrderId.set(x.op.id, x.normalizedPhone);
-  }
-
-  if (invalidOrders.length) {
-    await this.revertFailedCourierOrders(invalidOrders, revertToStatusId, {
-      courierStatus: 'error',
-      courierNotificationType: 'invalid_phone',
-      trackingMessage:
-        'Recipient phone number is not a valid 11-digit BD number — not sent to courier',
-    });
-    this.logger.warn(
-      `Reverted ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}]`,
-    );
-  }
-
-  if (!validOrders.length) return;
-
-  const courierPayload = validOrders.map((op) => ({
-    invoice: op.invoiceNumber,
-    recipient_name: op.receiverName,
-    recipient_phone: normalizedPhoneByOrderId.get(op.id) || op.receiverPhoneNumber,
-    recipient_address: op.receiverAddress,
-    cod_amount: op.totalReceiveAbleAmount,
-    note: op.deliveryNote || 'N/A',
-  }));
-
-  let steadfastResults: any[] = [];
-
-  try {
-    const response = await axios.post(
-      'https://portal.packzy.com/api/v1/create_order/bulk-order',
-      courierPayload,
-      {
-        headers: {
-          'Api-Key': currierCompany.api_key,
-          'Secret-Key': currierCompany.secret_key,
-        },
-      },
-    );
-
-    steadfastResults = Array.isArray(response.data)
-      ? response.data
-      : response.data?.data || [];
-
-    this.logger.log(
-      `Steadfast bulk order request sent: ${validOrders.length} order(s), invoices [${validOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}], ${steadfastResults.length} result(s) received`,
-    );
-  } catch (err: any) {
-    const errMsg = err?.response?.data ? JSON.stringify(err.response.data) : err.message;
-    this.logger.error(
-      `Steadfast bulk order request failed for invoices [${validOrders
-        .map((o) => o.invoiceNumber)
-        .join(', ')}]: ${errMsg}`,
-    );
-    await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
-      courierStatus: 'error',
-      courierNotificationType: 'courier_request_failed',
-      trackingMessage: `Steadfast bulk request failed: ${errMsg}`,
-    });
-    return;
-  }
-
-  if (!steadfastResults.length) {
-    this.logger.warn(
-      `Steadfast returned no results for invoices [${validOrders.map((o) => o.invoiceNumber).join(', ')}]`,
-    );
-    await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
-      courierStatus: 'error',
-      courierNotificationType: 'empty_courier_response',
-      trackingMessage: 'Steadfast returned an empty result set for this batch',
-    });
-    return;
-  }
-
-  const resultsByInvoice = new Map<string, any>();
-  for (const result of steadfastResults) {
-    if (result?.invoice) resultsByInvoice.set(String(result.invoice), result);
-  }
-
-  const succeededUpdates: Promise<any>[] = [];
-  const noResultOrders: Order[] = [];
-  const failedOrders: Order[] = [];
-  const failedReasons = new Map<number, string>();
-
-  for (const op of validOrders) {
-    const result = resultsByInvoice.get(String(op.invoiceNumber));
-
-    if (!result) {
-      this.logger.warn(
-        `No Steadfast result matched for invoice ${op.invoiceNumber} — reverting so it can be retried`,
-      );
-      noResultOrders.push(op);
-      continue;
-    }
-
-    if (result.status === 'success') {
-      succeededUpdates.push(
-        this.orderRepository.update(op.id, {
-          consignmentId: result.consignment_id ? String(result.consignment_id) : null,
-          trackingCode: result.tracking_code || null,
-          courierStatus: 'in_review',
-          courierNotificationType: 'order_created',
-          codAmount: op.totalReceiveAbleAmount,
-          courierUpdatedAt: new Date(),
-        }),
-      );
-    } else {
-      failedOrders.push(op);
-      failedReasons.set(op.id, result?.message || 'Steadfast order creation failed');
-      this.logger.warn(
-        `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
-      );
+    } finally {
+      await queryRunner.release();
     }
   }
 
-  await Promise.all(succeededUpdates);
+  // ============================================================
+  // 3) Replace sendOrdersToSteadfast's signature and every
+  //    revertFailedCourierOrders(...) call site to pass revertToStatusId
+  // ============================================================
+  private async sendOrdersToSteadfast(
+    orders: any[],
+    currierCompany: any,
+    revertToStatusId: number, // NEW — the status to fall back to on any failure
+  ): Promise<void> {
+    const normalizeBdPhone = (raw: string): string | null => {
+      if (!raw) return null;
+      let digits = raw.replace(/\D/g, '');
+      if (digits.startsWith('00')) digits = digits.slice(2);
+      if (digits.startsWith('880')) digits = digits.slice(3);
+      if (digits.length === 10 && !digits.startsWith('0'))
+        digits = '0' + digits;
+      return /^0[0-9]{10}$/.test(digits) ? digits : null;
+    };
 
-  if (noResultOrders.length) {
-    await this.revertFailedCourierOrders(noResultOrders, revertToStatusId, {
-      courierStatus: 'error',
-      courierNotificationType: 'no_courier_response',
-      trackingMessage: 'No result returned by Steadfast for this invoice — safe to retry',
-    });
-  }
+    const ordersWithPhone = orders.map((op) => ({
+      op,
+      normalizedPhone: normalizeBdPhone(op.receiverPhoneNumber),
+    }));
 
-  if (failedOrders.length) {
-    for (const op of failedOrders) {
-      await this.revertFailedCourierOrders([op], revertToStatusId, {
+    const validOrders = ordersWithPhone
+      .filter((x) => x.normalizedPhone !== null)
+      .map((x) => x.op);
+    const invalidOrders = ordersWithPhone
+      .filter((x) => x.normalizedPhone === null)
+      .map((x) => x.op);
+
+    const normalizedPhoneByOrderId = new Map<number, string>();
+    for (const x of ordersWithPhone) {
+      if (x.normalizedPhone)
+        normalizedPhoneByOrderId.set(x.op.id, x.normalizedPhone);
+    }
+
+    if (invalidOrders.length) {
+      await this.revertFailedCourierOrders(invalidOrders, revertToStatusId, {
         courierStatus: 'error',
-        courierNotificationType: 'order_create_failed',
-        trackingMessage: failedReasons.get(op.id) || 'Steadfast order creation failed',
+        courierNotificationType: 'invalid_phone',
+        trackingMessage:
+          'Recipient phone number is not a valid 11-digit BD number — not sent to courier',
+      });
+      this.logger.warn(
+        `Reverted ${invalidOrders.length} order(s) with invalid phone number for Steadfast: [${invalidOrders
+          .map((o) => o.invoiceNumber)
+          .join(', ')}]`,
+      );
+    }
+
+    if (!validOrders.length) return;
+
+    const courierPayload = validOrders.map((op) => ({
+      invoice: op.invoiceNumber,
+      recipient_name: op.receiverName,
+      recipient_phone:
+        normalizedPhoneByOrderId.get(op.id) || op.receiverPhoneNumber,
+      recipient_address: op.receiverAddress,
+      cod_amount: op.totalReceiveAbleAmount,
+      note: op.deliveryNote || 'N/A',
+    }));
+
+    let steadfastResults: any[] = [];
+
+    try {
+      const response = await axios.post(
+        'https://portal.packzy.com/api/v1/create_order/bulk-order',
+        courierPayload,
+        {
+          headers: {
+            'Api-Key': currierCompany.api_key,
+            'Secret-Key': currierCompany.secret_key,
+          },
+        },
+      );
+
+      steadfastResults = Array.isArray(response.data)
+        ? response.data
+        : response.data?.data || [];
+
+      this.logger.log(
+        `Steadfast bulk order request sent: ${validOrders.length} order(s), invoices [${validOrders
+          .map((o) => o.invoiceNumber)
+          .join(', ')}], ${steadfastResults.length} result(s) received`,
+      );
+    } catch (err: any) {
+      const errMsg = err?.response?.data
+        ? JSON.stringify(err.response.data)
+        : err.message;
+      this.logger.error(
+        `Steadfast bulk order request failed for invoices [${validOrders
+          .map((o) => o.invoiceNumber)
+          .join(', ')}]: ${errMsg}`,
+      );
+      await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
+        courierStatus: 'error',
+        courierNotificationType: 'courier_request_failed',
+        trackingMessage: `Steadfast bulk request failed: ${errMsg}`,
+      });
+      return;
+    }
+
+    if (!steadfastResults.length) {
+      this.logger.warn(
+        `Steadfast returned no results for invoices [${validOrders.map((o) => o.invoiceNumber).join(', ')}]`,
+      );
+      await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
+        courierStatus: 'error',
+        courierNotificationType: 'empty_courier_response',
+        trackingMessage:
+          'Steadfast returned an empty result set for this batch',
+      });
+      return;
+    }
+
+    const resultsByInvoice = new Map<string, any>();
+    for (const result of steadfastResults) {
+      if (result?.invoice) resultsByInvoice.set(String(result.invoice), result);
+    }
+
+    const succeededUpdates: Promise<any>[] = [];
+    const noResultOrders: Order[] = [];
+    const failedOrders: Order[] = [];
+    const failedReasons = new Map<number, string>();
+
+    for (const op of validOrders) {
+      const result = resultsByInvoice.get(String(op.invoiceNumber));
+
+      if (!result) {
+        this.logger.warn(
+          `No Steadfast result matched for invoice ${op.invoiceNumber} — reverting so it can be retried`,
+        );
+        noResultOrders.push(op);
+        continue;
+      }
+
+      if (result.status === 'success') {
+        succeededUpdates.push(
+          this.orderRepository.update(op.id, {
+            consignmentId: result.consignment_id
+              ? String(result.consignment_id)
+              : null,
+            trackingCode: result.tracking_code || null,
+            courierStatus: 'in_review',
+            courierNotificationType: 'order_created',
+            codAmount: op.totalReceiveAbleAmount,
+            courierUpdatedAt: new Date(),
+          }),
+        );
+      } else {
+        failedOrders.push(op);
+        failedReasons.set(
+          op.id,
+          result?.message || 'Steadfast order creation failed',
+        );
+        this.logger.warn(
+          `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
+        );
+      }
+    }
+
+    await Promise.all(succeededUpdates);
+
+    if (noResultOrders.length) {
+      await this.revertFailedCourierOrders(noResultOrders, revertToStatusId, {
+        courierStatus: 'error',
+        courierNotificationType: 'no_courier_response',
+        trackingMessage:
+          'No result returned by Steadfast for this invoice — safe to retry',
       });
     }
-  }
-}
 
-// ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
+    if (failedOrders.length) {
+      for (const op of failedOrders) {
+        await this.revertFailedCourierOrders([op], revertToStatusId, {
+          courierStatus: 'error',
+          courierNotificationType: 'order_create_failed',
+          trackingMessage:
+            failedReasons.get(op.id) || 'Steadfast order creation failed',
+        });
+      }
+    }
+  }
+
+  // ---------- Send a batch of orders to Steadfast, all belonging to the SAME courier partner ----------
 
   // change hold status
   async changeHoldStatus(
@@ -2028,7 +2164,7 @@ private async sendOrdersToSteadfast(
 
       // Commit transaction
       await queryRunner.commitTransaction();
-    } catch (error:any) {
+    } catch (error: any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -2231,7 +2367,7 @@ private async sendOrdersToSteadfast(
       await queryRunner.commitTransaction();
 
       return updatedOrders;
-    } catch (error:any) {
+    } catch (error: any) {
       await queryRunner.rollbackTransaction();
       throw new ApiError(
         HttpStatus.INTERNAL_SERVER_ERROR,
@@ -2476,7 +2612,9 @@ private async sendOrdersToSteadfast(
       const locationIds = Array.isArray(filterOptions.locationId)
         ? filterOptions.locationId
         : [filterOptions.locationId];
-      baseQuery.andWhere('orders.locationId IN (:...locationIds)', { locationIds });
+      baseQuery.andWhere('orders.locationId IN (:...locationIds)', {
+        locationIds,
+      });
     }
 
     if (filterOptions?.agentIds) {
@@ -2624,7 +2762,8 @@ private async sendOrdersToSteadfast(
       endDate: utcEndDate,
       summary: {
         totalProducts: total,
-        totalProductQuantity: Number(productSummaryResult?.totalProductQuantity) || 0,
+        totalProductQuantity:
+          Number(productSummaryResult?.totalProductQuantity) || 0,
         totalOrders: Number(productSummaryResult?.totalOrders) || 0,
         courierOrderCount,
         paidAmount,

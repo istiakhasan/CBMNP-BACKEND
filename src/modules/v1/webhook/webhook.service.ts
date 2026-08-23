@@ -171,6 +171,24 @@ export class WebhookService {
       }
     }
 
+    /**
+     * =====================================================
+     * cod_amount — INFORMATIONAL ONLY
+     * =====================================================
+     *
+     * This is what the courier says they collected (or will collect)
+     * from the customer at the doorstep. It does NOT mean that money
+     * has reached the company yet — Steadfast settles COD separately,
+     * later, in batches (via their /payments API or an excel report).
+     *
+     * We store it on the order purely as a record of what the courier
+     * reported. We must NEVER derive `totalPaidAmount`,
+     * `totalReceiveAbleAmount`, or `paymentStatus` from this value.
+     * Those three fields represent money actually in hand and must
+     * only ever be driven by real PaymentHistory rows (advance
+     * payments, and later, courier settlement payments recorded
+     * once Steadfast's settlement/payments report confirms them).
+     */
     if (cod_amount !== undefined && cod_amount !== null) {
       updateData.codAmount = Number(cod_amount) as any;
     }
@@ -208,40 +226,35 @@ export class WebhookService {
 
       /**
        * =====================================================
-       * Payment settlement on Delivery
+       * REMOVED: auto payment-settlement on Delivery
        * =====================================================
        *
-       * When the courier confirms Delivered, the `cod_amount` in the
-       * payload is the cash the courier actually collected from the
-       * customer at the doorstep. That amount needs to be added to
-       * what was already paid (e.g. an earlier bKash partial payment)
-       * so `totalPaidAmount` reflects reality and `paymentStatus`
-       * flips from "Partial"/"Pending" to "Paid".
+       * This block used to add `cod_amount` straight into
+       * `totalPaidAmount` and flip `paymentStatus` to 'Paid' the
+       * moment the courier reported Delivered. That was WRONG:
+       * the courier collecting cash from the customer is not the
+       * same as the company having received that money. Steadfast
+       * (or any courier) settles COD separately and later, in
+       * batches. Until that settlement is confirmed and recorded
+       * as a PaymentHistory row, the order must stay "Pay Due"
+       * even though it is Delivered.
        *
-       * We only do this for Delivered — Hold/Cancel never reach here
-       * because of the AUTO_STATUS_LABELS whitelist above.
+       * `paymentStatus` / `totalPaidAmount` / `totalReceiveAbleAmount`
+       * are intentionally left untouched here. They only change when:
+       *   1. A customer advance payment is recorded (existing flow), or
+       *   2. A courier settlement payment is recorded as a
+       *      PaymentHistory row once confirmed via Steadfast's
+       *      /payments API or settlement report (separate, manual
+       *      or scheduled process — NOT this webhook).
+       *
+       * The delivered-but-unpaid vs delivered-and-paid distinction
+       * for display purposes ("Pay Due" / "Partial Delivered" /
+       * "Pay Collected") is computed on read (in getOrders), from:
+       *   - order.totalPrice vs order.totalPaidAmount (money actually
+       *     in hand, from PaymentHistory), and
+       *   - whether the order has an active row in
+       *     order_product_returns (quantity-wise partial delivery).
        */
-      if (internalStatus.label === 'Delivered') {
-        const alreadyPaid = Number(order.totalPaidAmount ?? 0);
-        const collectedNow = Number(cod_amount ?? order.codAmount ?? 0);
-
-        const newTotalPaid = alreadyPaid + collectedNow;
-        const newReceivable = Math.max(
-          Number(order.totalPrice ?? 0) - newTotalPaid,
-          0,
-        );
-
-        updateData.totalPaidAmount = newTotalPaid as any;
-        updateData.totalReceiveAbleAmount = newReceivable as any;
-        updateData.paymentStatus = newReceivable === 0 ? 'Paid' : 'Partial';
-
-        this.logger.log(
-          `Order ${invoiceNumber} payment settled on delivery: ` +
-            `already paid ৳${alreadyPaid} + COD collected ৳${collectedNow} ` +
-            `= ৳${newTotalPaid} paid, ৳${newReceivable} remaining, ` +
-            `paymentStatus -> ${updateData.paymentStatus}`,
-        );
-      }
     }
 
     /**
