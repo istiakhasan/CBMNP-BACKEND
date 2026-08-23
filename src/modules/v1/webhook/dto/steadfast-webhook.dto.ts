@@ -1,8 +1,4 @@
-import {
-  IsNumber,
-  IsOptional,
-  IsString,
-} from 'class-validator';
+import { IsNumber, IsOptional, IsString } from 'class-validator';
 
 export class SteadfastWebhookDto {
   @IsOptional()
@@ -40,4 +36,8 @@ export class SteadfastWebhookDto {
   @IsOptional()
   @IsString()
   updated_at?: string;
+
+  @IsOptional()
+  @IsString()
+  tracking_id?: string; // Steadfast এই নামেও পাঠায়
 }

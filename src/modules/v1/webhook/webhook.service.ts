@@ -29,9 +29,14 @@ export class WebhookService {
       status,
       delivery_charge,
       tracking_code,
+      tracking_id,
       tracking_message,
       updated_at,
     } = payload;
+
+    // Steadfast sometimes sends `tracking_code`, sometimes `tracking_id`
+    // depending on notification_type. Normalize to a single value.
+    const finalTrackingCode = tracking_code ?? tracking_id;
 
     /**
      * =====================================================
@@ -90,10 +95,13 @@ export class WebhookService {
      * =====================================================
      * 4. Save tracking code
      * =====================================================
+     *
+     * Steadfast payload sometimes has `tracking_code`,
+     * sometimes `tracking_id`. Use whichever is present.
      */
 
-    if (tracking_code) {
-      order.trackingCode = tracking_code;
+    if (finalTrackingCode) {
+      order.trackingCode = finalTrackingCode;
     }
 
     /**
@@ -260,7 +268,7 @@ export class WebhookService {
           }
         : null,
 
-      tracking_code: tracking_code ?? null,
+      tracking_code: finalTrackingCode ?? null,
 
       notification_type: notification_type ?? null,
     };
