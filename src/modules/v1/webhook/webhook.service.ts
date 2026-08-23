@@ -83,105 +83,19 @@ export class WebhookService {
 
     /**
      * =====================================================
-     * 3. Save Steadfast consignment information
-     * =====================================================
-     */
-
-    if (consignment_id !== undefined && consignment_id !== null) {
-      order.consignmentId = String(consignment_id);
-    }
-
-    /**
-     * =====================================================
-     * 4. Save tracking code
+     * 3. Resolve internal status (if Steadfast sent one)
      * =====================================================
      *
-     * Steadfast payload sometimes has `tracking_code`,
-     * sometimes `tracking_id`. Use whichever is present.
-     */
-
-    if (finalTrackingCode) {
-      order.trackingCode = finalTrackingCode;
-    }
-
-    /**
-     * =====================================================
-     * 5. Save delivery charge
-     * =====================================================
-     */
-
-    if (delivery_charge !== undefined && delivery_charge !== null) {
-      order.deliveryCharge = Number(delivery_charge);
-    }
-
-    /**
-     * =====================================================
-     * 6. Save tracking message
-     * =====================================================
-     */
-
-    if (tracking_message) {
-      order.trackingMessage = tracking_message;
-    }
-
-    /**
-     * =====================================================
-     * 7. Save courier updated time
-     * =====================================================
-     */
-
-    if (updated_at) {
-      const parsedDate = this.parseDate(updated_at);
-
-      if (parsedDate) {
-        order.courierUpdatedAt = parsedDate;
-      } else {
-        this.logger.warn(`Invalid updated_at received: ${updated_at}`);
-      }
-    }
-
-    /**
-     * =====================================================
-     * 8. Save COD amount
-     * =====================================================
-     */
-
-    if (cod_amount !== undefined && cod_amount !== null) {
-      order.codAmount = Number(cod_amount);
-    }
-
-    /**
-     * =====================================================
-     * 9. Save notification type
-     * =====================================================
-     */
-
-    if (notification_type) {
-      order.courierNotificationType = notification_type;
-    }
-
-    /**
-     * =====================================================
-     * 10. Save original Steadfast status
-     * =====================================================
+     * IMPORTANT:
+     * We resolve this BEFORE saving, but we do NOT assign it
+     * onto the loaded `order` entity directly. The Order entity's
+     * `status` relation is eager-loaded, and assigning a stale/partial
+     * relation object alongside a manually-changed `statusId` column
+     * causes TypeORM to override the raw column back to the old value
+     * on save. This was the root cause of statusId not persisting.
      *
-     * Example:
-     *
-     * Delivered
-     * Cancelled
-     * Pending
-     * Hold
-     */
-
-    if (status) {
-      order.courierStatus = status.trim();
-    }
-
-    /**
-     * =====================================================
-     * 11. Convert Steadfast status
-     *     to internal OrderStatus
-     * =====================================================
+     * Fix: use repository.update() with plain columns only, never
+     * mixing it with the loaded relation object.
      */
 
     let internalStatus: OrderStatus | null = null;
@@ -190,39 +104,13 @@ export class WebhookService {
       const internalStatusLabel = this.normalizeStatus(status);
 
       if (internalStatusLabel) {
-        /**
-         * Find:
-         *
-         * order_status.label
-         *
-         * Example:
-         *
-         * Delivered
-         * Cancel
-         * Hold
-         * Pending
-         */
-
         internalStatus = await this.orderStatusRepository.findOne({
           where: {
             label: internalStatusLabel,
           },
         });
 
-        if (internalStatus) {
-          /**
-           * order_status.value
-           *        ↓
-           * orders.statusId
-           */
-
-          order.statusId = internalStatus.value;
-
-          this.logger.log(
-            `Order ${invoiceNumber} status changed: ` +
-              `${internalStatus.label} (${internalStatus.value})`,
-          );
-        } else {
+        if (!internalStatus) {
           this.logger.warn(
             `Internal order status not found for label: ${internalStatusLabel}`,
           );
@@ -232,20 +120,107 @@ export class WebhookService {
 
     /**
      * =====================================================
-     * 12. Save order
+     * 4. Build the update payload
+     * =====================================================
+     *
+     * Only include fields that were actually present in the
+     * webhook payload — everything else stays untouched.
+     */
+
+    const updateData: Partial<Order> = {};
+
+    if (consignment_id !== undefined && consignment_id !== null) {
+      updateData.consignmentId = String(consignment_id);
+    }
+
+    if (finalTrackingCode) {
+      updateData.trackingCode = finalTrackingCode;
+    }
+
+    if (delivery_charge !== undefined && delivery_charge !== null) {
+      updateData.deliveryCharge = Number(delivery_charge) as any;
+    }
+
+    if (tracking_message) {
+      updateData.trackingMessage = tracking_message;
+    }
+
+    if (updated_at) {
+      const parsedDate = this.parseDate(updated_at);
+
+      if (parsedDate) {
+        updateData.courierUpdatedAt = parsedDate;
+      } else {
+        this.logger.warn(`Invalid updated_at received: ${updated_at}`);
+      }
+    }
+
+    if (cod_amount !== undefined && cod_amount !== null) {
+      updateData.codAmount = Number(cod_amount) as any;
+    }
+
+    if (notification_type) {
+      updateData.courierNotificationType = notification_type;
+    }
+
+    if (status) {
+      updateData.courierStatus = status.trim();
+    }
+
+    const previousStatusId = order.statusId;
+
+    if (internalStatus) {
+      /**
+       * NOTE: On the OrderStatus entity, `value` IS the primary key
+       * (@PrimaryGeneratedColumn() value: number;) — there is no
+       * separate `id` field. So `internalStatus.value` is correct here.
+       *
+       * The real bug was NOT this field — it was that `order.statusId`
+       * was being changed on an entity loaded with an eager `status`
+       * relation, then saved with `.save()`. TypeORM re-derived the FK
+       * from the stale relation object and silently reverted `statusId`
+       * back to its old value. Using a targeted `.update()` call below
+       * (instead of `.save()`) avoids that entirely.
+       */
+      updateData.statusId = internalStatus.value;
+      updateData.previousStatus = String(previousStatusId);
+
+      this.logger.log(
+        `Order ${invoiceNumber} status changing: ` +
+          `${previousStatusId} -> ${internalStatus.value} (${internalStatus.label})`,
+      );
+    }
+
+    /**
+     * =====================================================
+     * 5. Persist via targeted update (no stale relation issues)
      * =====================================================
      */
 
-    const savedOrder = await this.orderRepository.save(order);
+    await this.orderRepository.update({ id: order.id }, updateData);
 
     this.logger.log(
-      `Order ${savedOrder.id} updated successfully. ` +
-        `Invoice: ${invoiceNumber}`,
+      `Order ${order.id} updated successfully. Invoice: ${invoiceNumber}`,
     );
 
     /**
      * =====================================================
-     * 13. Return response
+     * 6. Re-fetch to confirm persisted state (also refreshes
+     *    the eager `status` relation for an accurate response)
+     * =====================================================
+     */
+
+    const savedOrder = await this.orderRepository.findOne({
+      where: { id: order.id },
+    });
+
+    this.logger.log(
+      `Order ${order.id} confirmed statusId in DB: ${savedOrder?.statusId}`,
+    );
+
+    /**
+     * =====================================================
+     * 7. Return response
      * =====================================================
      */
 
@@ -255,7 +230,7 @@ export class WebhookService {
 
       invoice: invoiceNumber,
 
-      orderId: savedOrder.id,
+      orderId: order.id,
 
       consignment_id: consignment_id ?? null,
 
