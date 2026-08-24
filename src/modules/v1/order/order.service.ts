@@ -2788,57 +2788,18 @@ export class OrderService {
     let utcEndDate: string;
 
     // ✅ Handle date filter or fallback to current date
-    if (filterOptions?.startDate && filterOptions?.endDate) {
-      const localStartDate = new Date(filterOptions.startDate);
-      utcStartDate = new Date(
-        Date.UTC(
-          localStartDate.getFullYear(),
-          localStartDate.getMonth(),
-          localStartDate.getDate(),
-          0,
-          0,
-          0,
-          0,
-        ),
-      ).toISOString();
-
-      const localEndDate = new Date(filterOptions.endDate);
-      utcEndDate = new Date(
-        Date.UTC(
-          localEndDate.getFullYear(),
-          localEndDate.getMonth(),
-          localEndDate.getDate(),
-          23,
-          59,
-          59,
-          999,
-        ),
-      ).toISOString();
-    } else {
-      const today = new Date();
-      utcStartDate = new Date(
-        Date.UTC(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate(),
-          0,
-          0,
-          0,
-          0,
-        ),
-      ).toISOString();
-      utcEndDate = new Date(
-        Date.UTC(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate(),
-          23,
-          59,
-          59,
-          999,
-        ),
-      ).toISOString();
-    }
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+  utcStartDate = new Date(filterOptions.startDate).toISOString();
+  utcEndDate = new Date(filterOptions.endDate).toISOString();
+} else {
+  const today = new Date();
+  utcStartDate = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0),
+  ).toISOString();
+  utcEndDate = new Date(
+    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999),
+  ).toISOString();
+}
 
     /** 1) Orders aggregation */
     const ordersQb = this.orderRepository
