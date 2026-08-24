@@ -9,11 +9,14 @@ import {
   Query,
   Req,
   HttpStatus,
+  UseGuards,
 } from '@nestjs/common';
 import { DashboardService } from './dashboard.service';
 import { CreateDashboardDto } from './dto/create-dashboard.dto';
 import { UpdateDashboardDto } from './dto/update-dashboard.dto';
 import { Request } from 'express';
+import { AuthGuard } from 'src/middleware/auth.guard';
+import { Roles } from 'src/middleware/roles.decorator';
 
 @Controller('v1/dashboard')
 export class DashboardController {
@@ -82,14 +85,17 @@ export class DashboardController {
       data: data,
     };
   }
+
+  @UseGuards(AuthGuard)
+  @Roles('user')
   @Get('agent-summary')
-async getAgentDashboardSummary(@Req() req: any) {
-  const organizationId = req.headers['x-organization-id'];
-  return this.dashboardService.getAgentDashboardSummary(
-    organizationId,
-    req.user.userId,
-  );
-}
+  async getAgentDashboardSummary(@Req() req: any) {
+    const organizationId = req.headers['x-organization-id'];
+    return this.dashboardService.getAgentDashboardSummary(
+      organizationId,
+      req.user.userId,
+    );
+  }
   @Post()
   create(@Body() createDashboardDto: CreateDashboardDto) {
     return this.dashboardService.create(createDashboardDto);
