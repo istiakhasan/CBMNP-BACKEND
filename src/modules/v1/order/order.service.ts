@@ -2916,6 +2916,7 @@ if (filterOptions?.startDate && filterOptions?.endDate) {
       const total = deliveryCharge + productPrice;
 
       return {
+        partnerId: r.partnerId,
         inTransitDate: `${r.inTransitStartDate} - ${r.inTransitEndDate}`,
         deliveryPartner: r.deliveryPartner,
         deliveryCharge,
