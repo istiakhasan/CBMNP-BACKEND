@@ -1047,6 +1047,7 @@ export class OrderService {
       products,
       discount = 0,
       shippingCharge = 0,
+      agentId: actingAgentId,
       ...rest
     } = data;
 
@@ -1172,7 +1173,7 @@ export class OrderService {
     // Log the update
     await this.orderLogsRepository.save({
       orderId: orderId,
-      agentId: data.agentId,
+      agentId: actingAgentId,
       action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
       previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
       newValue: JSON.stringify(data),
@@ -1280,7 +1281,7 @@ export class OrderService {
     mainData: any,
     organizationId: string,
   ) {
-    const { currentStatus, ...data } = mainData;
+    const { currentStatus,agentId: actingAgentId, ...data } = mainData;
 
     const orders = await this.orderRepository.find({
       where: { id: In(orderIds) },
@@ -1616,7 +1617,7 @@ export class OrderService {
 
     const orderLogs = orders.map((order, index) => ({
       orderId: order.id,
-      agentId: data.agentId,
+      agentId: actingAgentId,
       action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
       previousValue: null,
     }));
