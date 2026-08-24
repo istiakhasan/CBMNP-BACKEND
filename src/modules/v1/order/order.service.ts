@@ -2788,9 +2788,14 @@ export class OrderService {
     let utcEndDate: string;
 
     // ✅ Handle date filter or fallback to current date
-  if (filterOptions?.startDate && filterOptions?.endDate) {
+if (filterOptions?.startDate && filterOptions?.endDate) {
+  // startDate marker itself IS the correct UTC instant for day-start
   utcStartDate = new Date(filterOptions.startDate).toISOString();
-  utcEndDate = new Date(filterOptions.endDate).toISOString();
+
+  // day-end = day-start + 24h - 1ms (timezone-agnostic, no getFullYear/getMonth/getDate)
+  utcEndDate = new Date(
+    new Date(filterOptions.endDate).getTime() + 24 * 60 * 60 * 1000 - 1,
+  ).toISOString();
 } else {
   const today = new Date();
   utcStartDate = new Date(
@@ -2800,7 +2805,6 @@ export class OrderService {
     Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999),
   ).toISOString();
 }
-
     /** 1) Orders aggregation */
     const ordersQb = this.orderRepository
       .createQueryBuilder('o')
