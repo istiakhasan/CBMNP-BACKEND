@@ -240,42 +240,221 @@ export class DashboardService {
     return queryRunner;
   }
 
+  async getTopSellingItems(organizationId: string) {
+    const cacheDuration = 5 * 60 * 1000;
+    const now = Date.now();
+    const cached = topSellingCache[organizationId];
+    const result = await this.orderproductsRepository
+      .createQueryBuilder('op')
+      .innerJoin('op.order', 'o')
+      .where('o.organizationId = :organizationId', { organizationId })
+      .select('op.productId', 'productId')
+      .addSelect('COUNT(op.orderId)', 'orders')
+      .addSelect('SUM(op.subtotal)', 'totalSales')
+      .groupBy('op.productId')
+      .orderBy('SUM(op.subtotal)', 'DESC')
+      .limit(5)
+      .getRawMany();
 
-async getTopSellingItems(organizationId: string) {
-  const cacheDuration = 5 * 60 * 1000;
-  const now = Date.now();
-  const cached = topSellingCache[organizationId];
-  const result = await this.orderproductsRepository
-    .createQueryBuilder('op')
-    .innerJoin('op.order', 'o')
-    .where('o.organizationId = :organizationId', { organizationId })
-    .select('op.productId', 'productId')
-    .addSelect('COUNT(op.orderId)', 'orders')
-    .addSelect('SUM(op.subtotal)', 'totalSales')
-    .groupBy('op.productId')
-    .orderBy('SUM(op.subtotal)', 'DESC')
-    .limit(5)
-    .getRawMany();
+    const productIds = result.map((item) => item.productId);
+    const products = await this.productRepository.findBy({
+      id: In(productIds),
+    });
+    const productMap = new Map(products.map((p) => [p.id, p]));
 
-  const productIds = result.map(item => item.productId);
-  const products = await this.productRepository.findBy({ id: In(productIds) });
-  const productMap = new Map(products.map(p => [p.id, p]));
+    const mapped = result.map((item) => ({
+      label: productMap.get(item.productId)?.name ?? 'Unknown',
+      orders: +item.orders,
+      totalSales: parseFloat(item.totalSales).toFixed(2),
+      url: productMap.get(item.productId)?.images?.[0]?.url ?? null,
+    }));
 
-  const mapped = result.map(item => ({
-    label: productMap.get(item.productId)?.name ?? "Unknown",
-    orders: +item.orders,
-    totalSales: parseFloat(item.totalSales).toFixed(2),
-    url: productMap.get(item.productId)?.images?.[0]?.url ?? null,
-  }));
+    topSellingCache[organizationId] = {
+      data: mapped,
+      timestamp: now,
+    };
 
-  topSellingCache[organizationId] = {
-    data: mapped,
-    timestamp: now,
-  };
+    return mapped;
+  }
 
-  return mapped;
-}
+  async getAgentDashboardSummary(organizationId: string, agentId: string) {
+    if (!organizationId || !agentId) {
+      throw new Error('organizationId and agentId are required');
+    }
 
+    const now = new Date();
+    const todayStart = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        0,
+        0,
+        0,
+        0,
+      ),
+    );
+    const todayEnd = new Date(
+      Date.UTC(
+        now.getUTCFullYear(),
+        now.getUTCMonth(),
+        now.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ),
+    );
 
+    const weekStart = new Date(todayStart);
+    weekStart.setUTCDate(weekStart.getUTCDate() - weekStart.getUTCDay()); // Sunday start
 
+    const monthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0),
+    );
+
+    const baseQb = () =>
+      this.orderRepository
+        .createQueryBuilder('orders')
+        .where('orders.organizationId = :organizationId', { organizationId })
+        .andWhere('orders.agentId = :agentId', { agentId });
+
+    const todayPromise = baseQb()
+      .andWhere('orders.createdAt BETWEEN :start AND :end', {
+        start: todayStart.toISOString(),
+        end: todayEnd.toISOString(),
+      })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .getRawOne();
+
+    const weekPromise = baseQb()
+      .andWhere('orders.createdAt >= :start', {
+        start: weekStart.toISOString(),
+      })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .getRawOne();
+
+    const monthPromise = baseQb()
+      .andWhere('orders.createdAt >= :start', {
+        start: monthStart.toISOString(),
+      })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .getRawOne();
+
+    const totalPromise = baseQb()
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .getRawOne();
+
+    const statusBreakdownPromise = baseQb()
+      .leftJoin('orders.status', 'status')
+      .select('status.label', 'label')
+      .addSelect('COUNT(orders.id)', 'count')
+      .groupBy('status.label')
+      .getRawMany();
+
+    const sevenDaysAgo = new Date(todayStart);
+    sevenDaysAgo.setUTCDate(sevenDaysAgo.getUTCDate() - 6);
+    const dailyTrendPromise = baseQb()
+      .andWhere('orders.createdAt >= :start', {
+        start: sevenDaysAgo.toISOString(),
+      })
+      .select("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'date')
+      .addSelect('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .groupBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')")
+      .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'ASC')
+      .getRawMany();
+
+    const sixMonthsAgo = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1),
+    );
+    const monthlyTrendPromise = baseQb()
+      .andWhere('orders.createdAt >= :start', {
+        start: sixMonthsAgo.toISOString(),
+      })
+      .select("TO_CHAR(orders.createdAt, 'Mon YYYY')", 'month')
+      .addSelect("TO_CHAR(orders.createdAt, 'YYYY-MM')", 'sortKey')
+      .addSelect('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+      .groupBy("TO_CHAR(orders.createdAt, 'Mon YYYY')")
+      .addGroupBy("TO_CHAR(orders.createdAt, 'YYYY-MM')")
+      .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM')", 'ASC')
+      .getRawMany();
+
+    const recentOrdersPromise = baseQb()
+      .leftJoin('orders.customer', 'customer')
+      .leftJoin('orders.status', 'status')
+      .select('orders.id', 'id')
+      .addSelect('orders.orderNumber', 'orderNumber')
+      .addSelect('orders.totalPrice', 'totalPrice')
+      .addSelect('orders.createdAt', 'createdAt')
+      .addSelect('customer.customerName', 'customerName')
+      .addSelect('status.label', 'statusLabel')
+      .orderBy('orders.createdAt', 'DESC')
+      .limit(10)
+      .getRawMany();
+
+    const [
+      today,
+      week,
+      month,
+      total,
+      statusBreakdown,
+      dailyTrend,
+      monthlyTrend,
+      recentOrders,
+    ] = await Promise.all([
+      todayPromise,
+      weekPromise,
+      monthPromise,
+      totalPromise,
+      statusBreakdownPromise,
+      dailyTrendPromise,
+      monthlyTrendPromise,
+      recentOrdersPromise,
+    ]);
+
+    return {
+      today: {
+        orders: Number(today?.count) || 0,
+        revenue: Number(today?.revenue) || 0,
+      },
+      thisWeek: {
+        orders: Number(week?.count) || 0,
+        revenue: Number(week?.revenue) || 0,
+      },
+      thisMonth: {
+        orders: Number(month?.count) || 0,
+        revenue: Number(month?.revenue) || 0,
+      },
+      totalOrdersServed: Number(total?.count) || 0,
+      totalRevenue: Number(total?.revenue) || 0,
+      statusBreakdown: statusBreakdown.map((s) => ({
+        label: s.label,
+        count: Number(s.count) || 0,
+      })),
+      dailyTrend: dailyTrend.map((d) => ({
+        date: d.date,
+        orders: Number(d.count) || 0,
+        revenue: Number(d.revenue) || 0,
+      })),
+      monthlyTrend: monthlyTrend.map((m) => ({
+        month: m.month,
+        orders: Number(m.count) || 0,
+        revenue: Number(m.revenue) || 0,
+      })),
+      recentOrders: recentOrders.map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        totalPrice: Number(o.totalPrice) || 0,
+        createdAt: o.createdAt,
+        customerName: o.customerName,
+        status: o.statusLabel,
+      })),
+    };
+  }
 }

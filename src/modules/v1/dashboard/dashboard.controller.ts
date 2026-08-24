@@ -82,6 +82,14 @@ export class DashboardController {
       data: data,
     };
   }
+  @Get('agent-summary')
+async getAgentDashboardSummary(@Req() req: any) {
+  const organizationId = req.headers['x-organization-id'];
+  return this.dashboardService.getAgentDashboardSummary(
+    organizationId,
+    req.user.userId,
+  );
+}
   @Post()
   create(@Body() createDashboardDto: CreateDashboardDto) {
     return this.dashboardService.create(createDashboardDto);
