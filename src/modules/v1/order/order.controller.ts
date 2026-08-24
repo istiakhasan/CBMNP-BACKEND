@@ -141,8 +141,9 @@ async getDeliveryPartnerOrderDetails(
   @Query() query: any,
   @Req() req: any,
 ) {
+  const organizationId=req.headers['x-organization-id']
   return this.orderService.getDeliveryPartnerOrderDetails(
-    req.user.organizationId,
+    organizationId,
     partnerId,
     query,
   );
