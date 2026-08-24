@@ -134,6 +134,19 @@ export class OrderController {
 
    }
   }
+
+  @Get('delivery-partner-order-details/:partnerId')
+async getDeliveryPartnerOrderDetails(
+  @Param('partnerId') partnerId: string,
+  @Query() query: any,
+  @Req() req: any,
+) {
+  return this.orderService.getDeliveryPartnerOrderDetails(
+    req.user.organizationId,
+    partnerId,
+    query,
+  );
+}
 @Get('/download-reports')
 async downloadReports(@Query() query, @Req() req: Request, @Res() res: Response) {
   const organizationId: any = req.headers['x-organization-id'];

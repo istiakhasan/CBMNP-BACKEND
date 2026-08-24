@@ -2932,4 +2932,64 @@ if (filterOptions?.startDate && filterOptions?.endDate) {
 
     return result;
   }
+  async getDeliveryPartnerOrderDetails(
+  organizationId: string,
+  partnerId: string,
+  filterOptions: any,
+) {
+  let utcStartDate: string;
+  let utcEndDate: string;
+
+  if (filterOptions?.startDate && filterOptions?.endDate) {
+    utcStartDate = new Date(filterOptions.startDate).toISOString();
+    utcEndDate = new Date(
+      new Date(filterOptions.endDate).getTime() + 24 * 60 * 60 * 1000 - 1,
+    ).toISOString();
+  } else {
+    const today = new Date();
+    utcStartDate = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 0, 0, 0, 0),
+    ).toISOString();
+    utcEndDate = new Date(
+      Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate(), 23, 59, 59, 999),
+    ).toISOString();
+  }
+
+  const locationId = filterOptions?.locationId?.length
+    ? filterOptions.locationId
+    : null;
+
+  const qb = this.orderRepository
+    .createQueryBuilder('o')
+    .leftJoin('o.partner', 'dp')
+    .where('o.organizationId = :organizationId', { organizationId })
+    .andWhere('dp.id = :partnerId', { partnerId })
+    .andWhere('o.intransitTime BETWEEN :startDate AND :endDate', {
+      startDate: utcStartDate,
+      endDate: utcEndDate,
+    });
+
+  if (locationId) {
+    qb.andWhere('o.locationId IN (:...locationId)', { locationId });
+  }
+
+  const rows = await qb
+    .select('o.intransitTime', 'inTransitDate')
+    .addSelect('o.invoiceNumber', 'invoiceNumber')
+    .addSelect('o.trackingCode', 'trackingId')
+    .addSelect('o.receiverName', 'name')
+    .addSelect('o.receiverPhoneNumber', 'mobileNo')
+    .addSelect('COALESCE(o.codAmount, o.totalPaidAmount, 0)', 'codAmount')
+    .orderBy('o.intransitTime', 'ASC')
+    .getRawMany();
+
+  return rows.map((r) => ({
+    inTransitDate: r.inTransitDate,
+    invoiceNumber: r.invoiceNumber,
+    trackingId: r.trackingId || 'N/A',
+    name: r.name,
+    mobileNo: r.mobileNo,
+    codAmount: Number(r.codAmount) || 0,
+  }));
+}
 }
