@@ -386,6 +386,10 @@ export class ShopifyWebhookService {
       null;
 
     const phone = this.normalizeBangladeshPhone(rawPhone);
+      const address =
+    webhookData.shipping_address?.address1 ||
+    webhookData.billing_address?.address1 ||
+    '';
     let customer: Customers | null = null;
 
     if (shopifyCustomerId) {
@@ -414,6 +418,7 @@ export class ShopifyWebhookService {
       'Shopify Customer';
 
     const baseCustomerData = {
+      address,
       customerName: name,
       customerPhoneNumber: phone || '',
       division: webhookData.shipping_address?.province || '',
