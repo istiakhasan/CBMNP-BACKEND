@@ -355,6 +355,7 @@ export class RequisitionService {
           productMap[key] = {
             productId: key,
             name: p.product.name,
+            sku: p.product.sku,
             packSize: `${p.product.weight} ${p.product.unit}`,
             orders: [],
             totalQty: 0,
