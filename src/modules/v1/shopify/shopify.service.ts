@@ -71,43 +71,44 @@ export class ShopifyWebhookService {
     return { valid: this.timingSafeEqual(calculatedHmac, shopifyHmac), shop };
   }
   private normalizeBangladeshPhone(phone?: string | null): string {
-    if (!phone) return '';
+  if (!phone) return '';
 
-    const value = String(phone).trim();
+  const value = String(phone).trim();
 
-    // Already Bangladesh local format: 01XXXXXXXXX
-    if (/^01\d{9}$/.test(value)) {
-      return value;
-    }
-
-    // +88001XXXXXXXXX -> 01XXXXXXXXX
-    if (/^\+88001\d{9}$/.test(value)) {
-      return value.substring(3);
-    }
-
-    // 88001XXXXXXXXX -> 01XXXXXXXXX
-    if (/^88001\d{9}$/.test(value)) {
-      return value.substring(3);
-    }
-
-    // +8801XXXXXXXXX -> 01XXXXXXXXX
-    if (/^\+8801\d{9}$/.test(value)) {
-      return `0${value.substring(4)}`;
-    }
-
-    // 8801XXXXXXXXX -> 01XXXXXXXXX
-    if (/^8801\d{9}$/.test(value)) {
-      return `0${value.substring(3)}`;
-    }
-
-    // 1XXXXXXXXX -> 01XXXXXXXXX
-    if (/^1\d{9}$/.test(value)) {
-      return `0${value}`;
-    }
-
-    // Non-Bangladesh number → preserve it exactly
+  // Already Bangladesh local number.
+  // IMPORTANT: return immediately, do not modify it.
+  if (/^01\d{9}$/.test(value)) {
     return value;
   }
+
+  // +88001XXXXXXXXX -> 01XXXXXXXXX
+  if (/^\+88001\d{9}$/.test(value)) {
+    return value.substring(3);
+  }
+
+  // 88001XXXXXXXXX -> 01XXXXXXXXX
+  if (/^88001\d{9}$/.test(value)) {
+    return value.substring(3);
+  }
+
+  // +8801XXXXXXXXX -> 01XXXXXXXXX
+  if (/^\+8801\d{9}$/.test(value)) {
+    return `0${value.substring(4)}`;
+  }
+
+  // 8801XXXXXXXXX -> 01XXXXXXXXX
+  if (/^8801\d{9}$/.test(value)) {
+    return `0${value.substring(3)}`;
+  }
+
+  // 1XXXXXXXXX -> 01XXXXXXXXX
+  if (/^1\d{9}$/.test(value)) {
+    return `0${value}`;
+  }
+
+  // Other country / unknown format → preserve original
+  return value;
+}
   private timingSafeEqual(a: string, b: string): boolean {
     const bufA = Buffer.from(a, 'utf8');
     const bufB = Buffer.from(b, 'utf8');
