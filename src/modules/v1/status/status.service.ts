@@ -45,7 +45,8 @@ export class StatusService {
     if(query?.label==="Approved"){
         result = await this.statusRepository.findBy({
         // label: Not("Approved")
-        label: In(["Store","Hold","Cancel","Unreachable"])
+        // label: In(["Store","Hold","Cancel","Unreachable"])
+        label: In(["Hold","Cancel","Unreachable"])
     });
     }
     if(query?.label==="Cancel"){
