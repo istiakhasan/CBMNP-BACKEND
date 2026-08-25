@@ -70,7 +70,44 @@ export class ShopifyWebhookService {
       .digest('base64');
     return { valid: this.timingSafeEqual(calculatedHmac, shopifyHmac), shop };
   }
+  private normalizeBangladeshPhone(phone?: string | null): string {
+    if (!phone) return '';
 
+    const value = String(phone).trim();
+
+    // Already Bangladesh local format: 01XXXXXXXXX
+    if (/^01\d{9}$/.test(value)) {
+      return value;
+    }
+
+    // +88001XXXXXXXXX -> 01XXXXXXXXX
+    if (/^\+88001\d{9}$/.test(value)) {
+      return value.substring(3);
+    }
+
+    // 88001XXXXXXXXX -> 01XXXXXXXXX
+    if (/^88001\d{9}$/.test(value)) {
+      return value.substring(3);
+    }
+
+    // +8801XXXXXXXXX -> 01XXXXXXXXX
+    if (/^\+8801\d{9}$/.test(value)) {
+      return `0${value.substring(4)}`;
+    }
+
+    // 8801XXXXXXXXX -> 01XXXXXXXXX
+    if (/^8801\d{9}$/.test(value)) {
+      return `0${value.substring(3)}`;
+    }
+
+    // 1XXXXXXXXX -> 01XXXXXXXXX
+    if (/^1\d{9}$/.test(value)) {
+      return `0${value}`;
+    }
+
+    // Non-Bangladesh number → preserve it exactly
+    return value;
+  }
   private timingSafeEqual(a: string, b: string): boolean {
     const bufA = Buffer.from(a, 'utf8');
     const bufB = Buffer.from(b, 'utf8');
@@ -138,9 +175,12 @@ export class ShopifyWebhookService {
       // is expected and NOT a real failure, so we resolve it gracefully
       // instead of bubbling up a 500 (which would just make Shopify retry
       // and spam error logs/alerts for something that already succeeded).
-      if (isUniqueViolation(error) && /shopifyOrderId|shopify_order/i.test(
-        error?.detail || error?.message || '',
-      )) {
+      if (
+        isUniqueViolation(error) &&
+        /shopifyOrderId|shopify_order/i.test(
+          error?.detail || error?.message || '',
+        )
+      ) {
         const existing = await this.orderRepository.findOne({
           where: { shopifyOrderId, organizationId: shop.organizationId },
         });
@@ -238,10 +278,16 @@ export class ShopifyWebhookService {
     const result = await this.orderRepository.save({
       locationId: warehouseId,
       customerId: customer.customer_Id || undefined,
-      receiverPhoneNumber:
+      // receiverPhoneNumber:
+      //   webhookData.shipping_address?.phone ||
+      //   webhookData.billing_address?.phone ||
+      //   '',
+      receiverPhoneNumber: this.normalizeBangladeshPhone(
         webhookData.shipping_address?.phone ||
-        webhookData.billing_address?.phone ||
-        '',
+          webhookData.billing_address?.phone ||
+          customer.customerPhoneNumber ||
+          '',
+      ),
       receiverName:
         webhookData.shipping_address?.name ||
         webhookData.billing_address?.name ||
@@ -327,12 +373,18 @@ export class ShopifyWebhookService {
     const shopifyCustomerId = shopifyCustomer?.id
       ? String(shopifyCustomer.id)
       : null;
-    const phone =
+    // const phone =
+    //   webhookData.shipping_address?.phone ||
+    //   webhookData.billing_address?.phone ||
+    //   shopifyCustomer?.phone ||
+    //   null;
+    const rawPhone =
       webhookData.shipping_address?.phone ||
       webhookData.billing_address?.phone ||
       shopifyCustomer?.phone ||
       null;
 
+    const phone = this.normalizeBangladeshPhone(rawPhone);
     let customer: Customers | null = null;
 
     if (shopifyCustomerId) {
@@ -651,14 +703,17 @@ export class ShopifyWebhookService {
     if (!shopifyImages.length) return [];
 
     const hasAnyVariantMapping = shopifyImages.some(
-      (img: any) => Array.isArray(img.variant_ids) && img.variant_ids.length > 0,
+      (img: any) =>
+        Array.isArray(img.variant_ids) && img.variant_ids.length > 0,
     );
 
     if (hasAnyVariantMapping) {
       const mapped = shopifyImages.filter(
         (img: any) =>
           Array.isArray(img.variant_ids) &&
-          img.variant_ids.some((vid: any) => String(vid) === String(variant.id)),
+          img.variant_ids.some(
+            (vid: any) => String(vid) === String(variant.id),
+          ),
       );
       // Trust Shopify's mapping even if it's empty for this variant —
       // do NOT fall back to all images here, that's exactly the bug
