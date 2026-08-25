@@ -362,6 +362,7 @@ export class RequisitionService {
         }
         productMap[key].orders.push({
           orderId: order.orderNumber,
+          invoiceNumber: order.invoiceNumber,
           qty: p.productQuantity,
         });
         productMap[key].totalQty += p.productQuantity;
