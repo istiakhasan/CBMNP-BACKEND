@@ -1041,169 +1041,175 @@ export class OrderService {
   }
 
   async update(orderId: number, data: Order) {
-    const {
-      customerId,
-      receiverPhoneNumber,
-      products,
-      discount = 0,
-      shippingCharge = 0,
-      agentId: actingAgentId,
-      ...rest
-    } = data;
+  const {
+    customerId,
+    receiverPhoneNumber,
+    products,
+    discount = 0,
+    shippingCharge = 0,
+    agentId: actingAgentId,
+    ...rest
+  } = data;
 
-    const existingOrder = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: ['products'],
-    });
-    if (!existingOrder) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
-    }
+  const existingOrder = await this.orderRepository.findOne({
+    where: { id: orderId },
+    relations: ['products', 'status'],
+  });
+  if (!existingOrder) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
+  }
 
-    if (!products || products.length === 0) {
-      throw new Error('Order must include at least one product');
-    }
+  if (!products || products.length === 0) {
+    throw new Error('Order must include at least one product');
+  }
 
-    const existingProducts = await this.productsRepository.find({
-      where: { orderId },
-    });
+  const existingProducts = await this.productsRepository.find({
+    where: { orderId },
+  });
 
-    const validatedProducts: any[] = [];
-    let productValue = 0;
+  // union of old + new productIds so REMOVED products are also processed
+  const newProductMap = new Map(products.map((p) => [p.productId, p]));
+  const existingProductMap = new Map(
+    existingProducts.map((p) => [p.productId, p]),
+  );
+  const allProductIds = new Set([
+    ...newProductMap.keys(),
+    ...existingProductMap.keys(),
+  ]);
 
-    for (const product of products) {
-      const existingProduct = await this.productRepository.findOne({
-        where: { id: product.productId },
+  const validatedProducts: any[] = [];
+  let productValue = 0;
+
+  for (const productId of allProductIds) {
+    const newItem = newProductMap.get(productId);
+    const prevItem = existingProductMap.get(productId);
+
+    const prevQuantity = prevItem ? prevItem.productQuantity : 0;
+    const newQuantity = newItem ? newItem.productQuantity : 0;
+    // + মানে quantity বেড়েছে/নতুন added, - মানে কমেছে/removed
+    const quantityDiff = newQuantity - prevQuantity;
+
+    if (quantityDiff !== 0) {
+      const inventory = await this.inventoryRepository.findOne({
+        where: { productId },
       });
-      if (!existingProduct) {
-        throw new NotFoundException(
-          `Product with ID ${product.productId} not found`,
-        );
-      }
-
-      // Find previous product quantity
-      const prevProduct = existingProducts.find(
-        (p) => p.productId === product.productId,
-      );
-      const prevQuantity = prevProduct ? prevProduct.productQuantity : 0;
-      const quantityDiff = product.productQuantity - prevQuantity;
+      const inventoryItem = await this.InventoryItemItemRepository.findOne({
+        where: { productId, locationId: existingOrder.locationId },
+      });
 
       if (existingOrder.statusId === 2) {
-        // Adjust stock based on change in order quantity
-        const inventory = await this.inventoryRepository.findOne({
-          where: { productId: product.productId },
-        });
-
-        const inventoryItem = await this.InventoryItemItemRepository.findOne({
-          where: {
-            productId: product.productId,
-            locationId: existingOrder.locationId,
-          },
-        });
-
         if (inventory) {
           await this.inventoryRepository.update(
-            { productId: product.productId },
+            { productId },
             { orderQue: inventory.orderQue + quantityDiff },
           );
         }
-
         if (inventoryItem) {
           await this.InventoryItemItemRepository.update(
-            {
-              productId: product.productId,
-              locationId: existingOrder.locationId,
-            },
+            { productId, locationId: existingOrder.locationId },
             { orderQue: inventoryItem.orderQue + quantityDiff },
           );
         }
       }
+
       if (
         (existingOrder.statusId === 5 &&
           existingOrder.status.label === 'Store') ||
         existingOrder.statusId === 6
       ) {
-        // Adjust stock based on change in order quantity
-        const inventory = await this.inventoryRepository.findOne({
-          where: { productId: product.productId },
-        });
-
-        const inventoryItem = await this.InventoryItemItemRepository.findOne({
-          where: {
-            productId: product.productId,
-            locationId: existingOrder.locationId,
-          },
-        });
-
         if (inventory) {
           await this.inventoryRepository.update(
-            { productId: product.productId },
+            { productId },
             { processing: inventory.processing + quantityDiff },
           );
         }
-
         if (inventoryItem) {
           await this.InventoryItemItemRepository.update(
-            {
-              productId: product.productId,
-              locationId: existingOrder.locationId,
-            },
+            { productId, locationId: existingOrder.locationId },
             { processing: inventoryItem.processing + quantityDiff },
           );
         }
       }
 
-      // Calculate new subtotal
-      const subtotal = product.productQuantity * existingProduct.salePrice;
+      // ✅ NEW: In-Transit — stock ইতিমধ্যে বের হয়ে গেছে ওয়্যারহাউস থেকে।
+      // quantity বাড়লে (diff > 0) → আরও শিপ হচ্ছে → stock আরও কমবে
+      // quantity কমলে/remove হলে (diff < 0) → কম শিপ হচ্ছে → stock ফেরত (বাড়বে)
+      if (existingOrder.statusId === 7) {
+        if (inventory) {
+          await this.inventoryRepository.update(
+            { productId },
+            { stock: inventory.stock - quantityDiff },
+          );
+        }
+        if (inventoryItem) {
+          await this.InventoryItemItemRepository.update(
+            { productId, locationId: existingOrder.locationId },
+            { quantity: inventoryItem.quantity - quantityDiff },
+          );
+        }
+      }
+    }
+
+    // শুধু নতুন payload-এ থাকা product-গুলোর জন্যই validatedProducts/subtotal বানাও
+    if (newItem) {
+      const existingProduct = await this.productRepository.findOne({
+        where: { id: productId },
+      });
+      if (!existingProduct) {
+        throw new NotFoundException(`Product with ID ${productId} not found`);
+      }
+
+      const subtotal = newItem.productQuantity * existingProduct.salePrice;
       productValue += subtotal;
+
       validatedProducts.push({
         orderId,
-        productId: product.productId,
-        productQuantity: product.productQuantity,
+        productId,
+        productQuantity: newItem.productQuantity,
         productPrice: existingProduct.salePrice,
         subtotal,
       });
     }
-
-    // Delete old products & insert new ones
-    await this.productsRepository.delete({ orderId });
-    if (validatedProducts.length > 0) {
-      await this.productsRepository.save(validatedProducts);
-    }
-
-    // Log the update
-    await this.orderLogsRepository.save({
-      orderId: orderId,
-      agentId: actingAgentId,
-      action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
-      previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
-      newValue: JSON.stringify(data),
-    });
-
-    // Calculate totals
-    const grandTotal = productValue + Number(shippingCharge) - Number(discount);
-    const totalReceivableAmount = grandTotal - rest.totalPaidAmount;
-
-    // Update order
-    await this.orderRepository.update(
-      { id: orderId },
-      {
-        ...rest,
-        customerId,
-        receiverPhoneNumber,
-        discount,
-        shippingCharge,
-        totalPrice: grandTotal,
-        productValue,
-        totalReceiveAbleAmount: totalReceivableAmount,
-      },
-    );
-
-    // Return updated order
-    return await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: ['products'],
-    });
   }
+
+  // Delete old products & insert new ones
+  await this.productsRepository.delete({ orderId });
+  if (validatedProducts.length > 0) {
+    await this.productsRepository.save(validatedProducts);
+  }
+
+  // Log the update
+  await this.orderLogsRepository.save({
+    orderId: orderId,
+    agentId: actingAgentId,
+    action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
+    previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
+    newValue: JSON.stringify(data),
+  });
+
+  // Calculate totals
+  const grandTotal = productValue + Number(shippingCharge) - Number(discount);
+  const totalReceivableAmount = grandTotal - rest.totalPaidAmount;
+
+  await this.orderRepository.update(
+    { id: orderId },
+    {
+      ...rest,
+      customerId,
+      receiverPhoneNumber,
+      discount,
+      shippingCharge,
+      totalPrice: grandTotal,
+      productValue,
+      totalReceiveAbleAmount: totalReceivableAmount,
+    },
+  );
+
+  return await this.orderRepository.findOne({
+    where: { id: orderId },
+    relations: ['products'],
+  });
+}
 
   // update payment
   async addPayment(orderId: number, data: PaymentHistory) {
