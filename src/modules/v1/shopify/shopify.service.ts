@@ -18,6 +18,7 @@ import {
 } from '../customers/entities/customers.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { OrderService } from '../order/order.service';
+import { ProductPriceHistory } from '../product/entity/productPriceHistory.entity';
 
 // Postgres unique_violation error code — used everywhere we need to detect
 // a duplicate-key race instead of pattern-matching error.message (locale/driver safe).
@@ -50,8 +51,45 @@ export class ShopifyWebhookService {
     @InjectRepository(Warehouse)
     private readonly warehouseRepository: Repository<Warehouse>,
     private readonly orderService: OrderService,
+    // constructor এ add করুন
+    @InjectRepository(ProductPriceHistory)
+    private readonly priceHistoryRepository: Repository<ProductPriceHistory>,
   ) {}
+  private async logPriceChangeIfAny(
+    existing: Product,
+    productData: Partial<Product>,
+    organizationId: string,
+    source: string, // 'shopify-webhook' ইত্যাদি context এর জন্য
+  ) {
+    const priceChanged =
+      (productData.regularPrice !== undefined &&
+        Number(productData.regularPrice) !== Number(existing.regularPrice)) ||
+      (productData.salePrice !== undefined &&
+        Number(productData.salePrice) !== Number(existing.salePrice)) ||
+      (productData.purchasePrice !== undefined &&
+        Number(productData.purchasePrice) !== Number(existing.purchasePrice));
 
+    if (!priceChanged) return;
+
+    try {
+      await this.priceHistoryRepository.save({
+        productId: existing.id,
+        organizationId,
+        oldRegularPrice: existing.regularPrice,
+        newRegularPrice: productData.regularPrice ?? existing.regularPrice,
+        oldSalePrice: existing.salePrice,
+        newSalePrice: productData.salePrice ?? existing.salePrice,
+        oldPurchasePrice: existing.purchasePrice,
+        newPurchasePrice: productData.purchasePrice ?? existing.purchasePrice,
+        note: source,
+      });
+    } catch (err: any) {
+      // history log fail হলেও মূল product save যেন block না হয়
+      this.logger.error(
+        `Price history log failed for product ${existing.id}: ${err.message}`,
+      );
+    }
+  }
   // ---------- HMAC ----------
   async verifyShopifyWebhookSignature(
     body: string,
@@ -71,44 +109,44 @@ export class ShopifyWebhookService {
     return { valid: this.timingSafeEqual(calculatedHmac, shopifyHmac), shop };
   }
   private normalizeBangladeshPhone(phone?: string | null): string {
-  if (!phone) return '';
+    if (!phone) return '';
 
-  const value = String(phone).trim();
+    const value = String(phone).trim();
 
-  // Already Bangladesh local number.
-  // IMPORTANT: return immediately, do not modify it.
-  if (/^01\d{9}$/.test(value)) {
+    // Already Bangladesh local number.
+    // IMPORTANT: return immediately, do not modify it.
+    if (/^01\d{9}$/.test(value)) {
+      return value;
+    }
+
+    // +88001XXXXXXXXX -> 01XXXXXXXXX
+    if (/^\+88001\d{9}$/.test(value)) {
+      return value.substring(3);
+    }
+
+    // 88001XXXXXXXXX -> 01XXXXXXXXX
+    if (/^88001\d{9}$/.test(value)) {
+      return value.substring(3);
+    }
+
+    // +8801XXXXXXXXX -> 01XXXXXXXXX
+    if (/^\+8801\d{9}$/.test(value)) {
+      return `0${value.substring(4)}`;
+    }
+
+    // 8801XXXXXXXXX -> 01XXXXXXXXX
+    if (/^8801\d{9}$/.test(value)) {
+      return `0${value.substring(3)}`;
+    }
+
+    // 1XXXXXXXXX -> 01XXXXXXXXX
+    if (/^1\d{9}$/.test(value)) {
+      return `0${value}`;
+    }
+
+    // Other country / unknown format → preserve original
     return value;
   }
-
-  // +88001XXXXXXXXX -> 01XXXXXXXXX
-  if (/^\+88001\d{9}$/.test(value)) {
-    return value.substring(3);
-  }
-
-  // 88001XXXXXXXXX -> 01XXXXXXXXX
-  if (/^88001\d{9}$/.test(value)) {
-    return value.substring(3);
-  }
-
-  // +8801XXXXXXXXX -> 01XXXXXXXXX
-  if (/^\+8801\d{9}$/.test(value)) {
-    return `0${value.substring(4)}`;
-  }
-
-  // 8801XXXXXXXXX -> 01XXXXXXXXX
-  if (/^8801\d{9}$/.test(value)) {
-    return `0${value.substring(3)}`;
-  }
-
-  // 1XXXXXXXXX -> 01XXXXXXXXX
-  if (/^1\d{9}$/.test(value)) {
-    return `0${value}`;
-  }
-
-  // Other country / unknown format → preserve original
-  return value;
-}
   private timingSafeEqual(a: string, b: string): boolean {
     const bufA = Buffer.from(a, 'utf8');
     const bufB = Buffer.from(b, 'utf8');
@@ -386,10 +424,10 @@ export class ShopifyWebhookService {
       null;
 
     const phone = this.normalizeBangladeshPhone(rawPhone);
-      const address =
-    webhookData.shipping_address?.address1 ||
-    webhookData.billing_address?.address1 ||
-    '';
+    const address =
+      webhookData.shipping_address?.address1 ||
+      webhookData.billing_address?.address1 ||
+      '';
     let customer: Customers | null = null;
 
     if (shopifyCustomerId) {
@@ -641,6 +679,7 @@ export class ShopifyWebhookService {
 
       try {
         if (existing) {
+          await this.logPriceChangeIfAny(existing, productData, organizationId, 'shopify-product-webhook');
           lastSaved = await this.productCatalogRepository.save({
             ...existing,
             ...productData,
@@ -662,6 +701,7 @@ export class ShopifyWebhookService {
                 where: { shopifyProductId, organizationId },
               });
           if (concurrent) {
+             await this.logPriceChangeIfAny(concurrent, productData, organizationId, 'shopify-product-webhook-retry');
             lastSaved = await this.productCatalogRepository.save({
               ...concurrent,
               ...productData,

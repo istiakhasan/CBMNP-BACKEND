@@ -37,6 +37,14 @@ export class StatusService {
           ])
     });
     }
+    if(query?.label==="Delivered"){
+        result = await this.statusRepository.findBy({
+          label: In([
+            "Returned",
+            "Partial-Return"
+          ])
+    });
+    }
     if(query?.label==="Pending"){
         result = await this.statusRepository.findBy({
           label: In(["Hold", "Approved","Cancel"])

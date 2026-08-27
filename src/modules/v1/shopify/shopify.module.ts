@@ -10,8 +10,9 @@ import { Product } from '../product/entity/product.entity';
 import { ProductImages } from '../product/entity/image.entity';
 import { Customers } from '../customers/entities/customers.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
+import { ProductPriceHistory } from '../product/entity/productPriceHistory.entity';
 @Module({
-  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product,ProductImages,Customers,Warehouse]), OrderModule],
+  imports: [TypeOrmModule.forFeature([Order,Products,Shopify,Product,ProductImages,Customers,Warehouse,ProductPriceHistory]), OrderModule],
   providers: [ShopifyWebhookService],
   controllers: [WebhookController],
 })

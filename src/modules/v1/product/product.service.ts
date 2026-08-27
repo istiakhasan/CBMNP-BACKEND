@@ -7,6 +7,7 @@ import paginationHelpers from '../../../helpers/paginationHelpers';
 import { ApiError } from '../../../middleware/ApiError';
 import { ProductImages } from './entity/image.entity';
 import axios from 'axios';
+import { ProductPriceHistory } from './entity/productPriceHistory.entity';
 
 @Injectable()
 export class ProductService {
@@ -16,12 +17,19 @@ export class ProductService {
     @InjectRepository(ProductImages)
     private readonly productImageRepository: Repository<ProductImages>,
     private readonly dataSource: DataSource,
+    @InjectRepository(ProductPriceHistory)
+    private readonly priceHistoryRepository: Repository<ProductPriceHistory>,
   ) {}
 
   async createSimpleProduct(payload: Product): Promise<Product> {
-    const isSkuAlreadyExist=await this.productRepository.findOne({where:{organizationId:payload.organizationId,internalId:payload.internalId}})
-    if(!!isSkuAlreadyExist){
-       throw new ApiError(HttpStatus.BAD_REQUEST,'Internal id already exist')
+    const isSkuAlreadyExist = await this.productRepository.findOne({
+      where: {
+        organizationId: payload.organizationId,
+        internalId: payload.internalId,
+      },
+    });
+    if (!!isSkuAlreadyExist) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Internal id already exist');
     }
     return await this.productRepository.save(payload);
   }
@@ -45,7 +53,7 @@ export class ProductService {
         ...baseProductData,
         isBaseProduct: true,
         variants: savedVariants,
-        organizationId
+        organizationId,
       });
       const savedBaseProduct = await manager.save(baseProduct);
 
@@ -161,6 +169,30 @@ export class ProductService {
     if (!existingProduct) {
       throw new ApiError(HttpStatus.BAD_GATEWAY, 'Product does not exist');
     }
+
+    // price change history - independent table, no relation/join
+    const priceChanged =
+      (data.regularPrice !== undefined &&
+        data.regularPrice !== existingProduct.regularPrice) ||
+      (data.salePrice !== undefined &&
+        data.salePrice !== existingProduct.salePrice) ||
+      (data.purchasePrice !== undefined &&
+        data.purchasePrice !== existingProduct.purchasePrice);
+
+    if (priceChanged) {
+      await this.priceHistoryRepository.save({
+        productId: existingProduct.id,
+        organizationId: existingProduct.organizationId,
+        oldRegularPrice: existingProduct.regularPrice,
+        newRegularPrice: data.regularPrice ?? existingProduct.regularPrice,
+        oldSalePrice: existingProduct.salePrice,
+        newSalePrice: data.salePrice ?? existingProduct.salePrice,
+        oldPurchasePrice: existingProduct.purchasePrice,
+        newPurchasePrice: data.purchasePrice ?? existingProduct.purchasePrice,
+        // changedByUserId: এখানে req.user থেকে পাস করতে হবে (controller থেকে)
+      });
+    }
+
     if (data.images) {
       await this.productImageRepository.delete({ productId: id });
       for (const image of data.images) {
@@ -172,6 +204,7 @@ export class ProductService {
       }
       delete data.images;
     }
+
     const result = await this.productRepository.update({ id }, data);
     if (result.affected > 0) {
       return await this.productRepository.findOne({
@@ -234,7 +267,7 @@ export class ProductService {
       try {
         const response = await axios.get(deleteUrl);
         console.log('Image deleted successfully', response.data);
-      } catch (error) {
+      } catch (error:any) {
         console.error('Error deleting image:', error.message);
       }
     };
