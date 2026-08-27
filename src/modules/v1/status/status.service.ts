@@ -78,10 +78,14 @@ export class StatusService {
     }
     return result;
   }
-async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
+async getAllOrdersCountByStatus(
+  organizationId: string,
+  filterOptions: any,
+) {
   const queryBuilder = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
+    .leftJoin('orders.customer', 'customer')
     .where('orders.organizationId = :organizationId', { organizationId });
 
   // Apply filters
@@ -112,6 +116,7 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
       },
     );
   }
+
   if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
     queryBuilder.andWhere(
       'orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd',
@@ -122,20 +127,32 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
     );
   }
 
+  // 🔍 Search invoice + receiver phone + customer phone
   if (filterOptions.searchTerm) {
-    queryBuilder.andWhere(`(orders.invoiceNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)`, {
-      searchTerm: `%${filterOptions.searchTerm}%`,
-    });
+    queryBuilder.andWhere(
+      `(
+        orders.invoiceNumber ILIKE :searchTerm
+        OR orders.receiverPhoneNumber ILIKE :searchTerm
+        OR customer.customerPhoneNumber ILIKE :searchTerm
+      )`,
+      {
+        searchTerm: `%${filterOptions.searchTerm.trim()}%`,
+      },
+    );
   }
 
-  // 🔥 Optimized product filter using subquery
+  // Product filter
   if (filterOptions.productIds?.length) {
-    queryBuilder.andWhere(qb => {
-      const subQuery = qb.subQuery()
+    queryBuilder.andWhere((qb) => {
+      const subQuery = qb
+        .subQuery()
         .select('p.orderId')
         .from(Products, 'p')
-        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .where('p.productId IN (:...productIds)', {
+          productIds: filterOptions.productIds,
+        })
         .getQuery();
+
       return 'orders.id IN ' + subQuery;
     });
   }
@@ -144,16 +161,20 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
   const statusCounts = await queryBuilder
     .select('status.label', 'label')
     .addSelect('status.value', 'id')
-    .addSelect('COUNT(orders.id)', 'count') // no DISTINCT needed due to subquery
+    .addSelect('COUNT(orders.id)', 'count')
     .groupBy('status.value')
     .addGroupBy('status.label')
     .getRawMany();
 
   // -------- Total Count Query --------
+
   const totalQuery = this.statusRepository
     .createQueryBuilder('status')
     .leftJoin('status.orders', 'orders')
-    .where('orders.organizationId = :organizationId', { organizationId });
+    .leftJoin('orders.customer', 'customer')
+    .where('orders.organizationId = :organizationId', {
+      organizationId,
+    });
 
   if (filterOptions.statusId?.length) {
     totalQuery.andWhere('orders.statusId IN (:...statusIds)', {
@@ -183,20 +204,42 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
     );
   }
 
-  if (filterOptions.searchTerm) {
-    totalQuery.andWhere(`orders.invoiceNumber ILIKE :searchTerm`, {
-      searchTerm: `%${filterOptions.searchTerm}%`,
-    });
+  if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
+    totalQuery.andWhere(
+      'orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd',
+      {
+        createdAtStart: new Date(filterOptions.createdAtStart),
+        createdAtEnd: new Date(filterOptions.createdAtEnd),
+      },
+    );
   }
 
-  // 🔥 Product filter in total count using subquery
+  // 🔍 Search invoice + receiver phone + customer phone
+  if (filterOptions.searchTerm) {
+    totalQuery.andWhere(
+      `(
+        orders.invoiceNumber ILIKE :searchTerm
+        OR orders.receiverPhoneNumber ILIKE :searchTerm
+        OR customer.customerPhoneNumber ILIKE :searchTerm
+      )`,
+      {
+        searchTerm: `%${filterOptions.searchTerm.trim()}%`,
+      },
+    );
+  }
+
+  // Product filter
   if (filterOptions.productIds?.length) {
-    totalQuery.andWhere(qb => {
-      const subQuery = qb.subQuery()
+    totalQuery.andWhere((qb) => {
+      const subQuery = qb
+        .subQuery()
         .select('p.orderId')
         .from(Products, 'p')
-        .where('p.productId IN (:...productIds)', { productIds: filterOptions.productIds })
+        .where('p.productId IN (:...productIds)', {
+          productIds: filterOptions.productIds,
+        })
         .getQuery();
+
       return 'orders.id IN ' + subQuery;
     });
   }
@@ -205,7 +248,13 @@ async getAllOrdersCountByStatus(organizationId: string, filterOptions: any) {
     .select('COUNT(orders.id)', 'count')
     .getRawOne();
 
-  return [...statusCounts, { label: 'All', count: totalOrders?.count }];
+  return [
+    ...statusCounts,
+    {
+      label: 'All',
+      count: totalOrders?.count,
+    },
+  ];
 }
 
 

@@ -527,16 +527,22 @@ export class OrderService {
       queryBuilder.leftJoinAndSelect('orders.products', 'products');
       queryBuilder.leftJoinAndSelect('products.product', 'product');
     }
-    if (filterOptions?.searchTerm) {
-      const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
+   if (filterOptions?.searchTerm) {
+  const searchTerm = `%${filterOptions.searchTerm.toString().trim()}%`;
 
-      queryBuilder.andWhere(
-        '(orders.invoiceNumber LIKE :searchTerm OR orders.receiverPhoneNumber LIKE :searchTerm)',
-        {
-          searchTerm,
-        },
-      );
-    }
+  queryBuilder.leftJoin('orders.customer', 'customer');
+
+  queryBuilder.andWhere(
+    `(
+      orders.invoiceNumber LIKE :searchTerm
+      OR orders.receiverPhoneNumber LIKE :searchTerm
+      OR customer.customerPhoneNumber LIKE :searchTerm
+    )`,
+    {
+      searchTerm,
+    },
+  );
+}
 
     if (filterOptions?.startDate && filterOptions?.endDate) {
       queryBuilder.andWhere(
