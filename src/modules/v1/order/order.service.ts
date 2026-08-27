@@ -2221,169 +2221,180 @@ export class OrderService {
 
   // return order
 
-  async returnOrders(payload: {
-    orderIds: string[];
-    agentId: string;
-    statusId: number;
-    warehouse: string;
-    returnableProducts: any;
-  }) {
-    const { orderIds, agentId, statusId, warehouse, returnableProducts } =
-      payload;
-    // Pre-fetch orders with status
-    const orders = await this.orderRepository.find({
-      where: { id: In(orderIds) },
-      relations: ['status'],
-    });
+async returnOrders(payload: {
+  orderIds: string[];
+  agentId: string;
+  statusId: number;
+  warehouse: string;
+  returnableProducts: any;
+  reason?: string; // optional: pass from frontend if you want custom reason
+}) {
+  const { orderIds, agentId, statusId, warehouse, returnableProducts, reason } =
+    payload;
 
-    if (orders.length !== orderIds.length) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-    }
+  // Pre-fetch orders with status
+  const orders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+  if (orders.length !== orderIds.length) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+  }
 
-    try {
-      for (const order of orders) {
-        const products = await queryRunner.manager.find(
-          this.productsRepository.target,
-          {
-            where: { orderId: order.id },
-          },
-        );
-        // if full return then execute this part
-        if (statusId === 10) {
-          for (const product of products) {
-            // Fetch inventory and inventoryItem within the transaction
-            const inventory = await queryRunner.manager.findOne(
-              this.inventoryRepository.target,
-              {
-                where: { productId: product.productId },
-              },
-            );
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
 
-            const inventoryItem = await queryRunner.manager.findOne(
-              this.InventoryItemItemRepository.target,
-              {
-                where: {
-                  productId: product.productId,
-                  locationId: warehouse,
-                },
-              },
-            );
-
-            // Update inventory stock
-            if (inventory) {
-              inventory.stock += product.productQuantity;
-              await queryRunner.manager.save(
-                this.inventoryRepository.target,
-                inventory,
-              );
-            }
-
-            // Update inventory item quantity
-            if (inventoryItem) {
-              inventoryItem.quantity += product.productQuantity;
-              await queryRunner.manager.save(
-                this.InventoryItemItemRepository.target,
-                inventoryItem,
-              );
-            }
-          }
-        }
-
-        //if partial  return then ex ecute this part
-
-        if (statusId === 12) {
-          for (const product of returnableProducts) {
-            const inventory = await queryRunner.manager.findOne(
-              this.inventoryRepository.target,
-              {
-                where: { productId: product.productId },
-              },
-            );
-            const inventoryItem = await queryRunner.manager.findOne(
-              this.InventoryItemItemRepository.target,
-              {
-                where: {
-                  productId: product.productId,
-                  locationId: warehouse,
-                },
-              },
-            );
-
-            if (inventory) {
-              inventory.stock += product.returnQuantity;
-              await queryRunner.manager.save(
-                this.inventoryRepository.target,
-                inventory,
-              );
-            }
-
-            if (inventoryItem) {
-              inventoryItem.quantity += product.returnQuantity;
-              await queryRunner.manager.save(
-                this.InventoryItemItemRepository.target,
-                inventoryItem,
-              );
-            }
-            const returnDamagePayload = {
-              orderId: Number(orderIds[0]),
-              productId: product?.productId,
-              returnQuantity: product?.returnQuantity,
-              damageQuantity: product?.damageQuantity,
-              reason:
-                'Customer returned due to wrong size and one item was damaged',
-              remarks: 'Item returned via courier on 2025-07-25',
-              returnDate: new Date(),
-            };
-            await this.orderProductReturnRepository.save(returnDamagePayload);
-          }
-        }
-
-        await queryRunner.manager.update(
-          this.orderRepository.target,
-          { id: order.id },
-          { statusId: statusId },
-        );
-      }
-
-      const updatedOrders = await queryRunner.manager.find(
-        this.orderRepository.target,
+  try {
+    for (const order of orders) {
+      const products = await queryRunner.manager.find(
+        this.productsRepository.target,
         {
-          where: { id: In(orderIds) },
-          relations: ['status'],
+          where: { orderId: order.id },
         },
       );
-      const orderLogs = updatedOrders.map((updatedOrder) => {
-        const originalOrder = orders.find((o) => o.id === updatedOrder.id);
-        return {
-          orderId: updatedOrder.id,
-          agentId,
-          action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
-          previousValue: null,
-        };
-      });
 
-      await queryRunner.manager.save(
-        this.orderLogsRepository.target,
-        orderLogs,
+      // ---- FULL RETURN ----
+      if (statusId === 10) {
+        for (const product of products) {
+          const inventory = await queryRunner.manager.findOne(
+            this.inventoryRepository.target,
+            { where: { productId: product.productId } },
+          );
+
+          const inventoryItem = await queryRunner.manager.findOne(
+            this.InventoryItemItemRepository.target,
+            {
+              where: {
+                productId: product.productId,
+                locationId: warehouse,
+              },
+            },
+          );
+
+          if (inventory) {
+            inventory.stock += product.productQuantity;
+            await queryRunner.manager.save(
+              this.inventoryRepository.target,
+              inventory,
+            );
+          }
+
+          if (inventoryItem) {
+            inventoryItem.quantity += product.productQuantity;
+            await queryRunner.manager.save(
+              this.InventoryItemItemRepository.target,
+              inventoryItem,
+            );
+          }
+
+          // ✅ now saving a return record for full returns too
+          const returnDamagePayload = {
+            orderId: order.id, // ✅ correct orderId per order, not orderIds[0]
+            productId: product.productId,
+            returnQuantity: product.productQuantity,
+            damageQuantity: 0,
+            reason: reason || 'Full order returned',
+            remarks: `Order fully returned from ${order.status.label} status`,
+            returnDate: new Date(),
+          };
+          await this.orderProductReturnRepository.save(returnDamagePayload);
+        }
+      }
+
+      // ---- PARTIAL RETURN ----
+      if (statusId === 12) {
+        for (const product of returnableProducts) {
+          const inventory = await queryRunner.manager.findOne(
+            this.inventoryRepository.target,
+            { where: { productId: product.productId } },
+          );
+          const inventoryItem = await queryRunner.manager.findOne(
+            this.InventoryItemItemRepository.target,
+            {
+              where: {
+                productId: product.productId,
+                locationId: warehouse,
+              },
+            },
+          );
+
+          if (inventory) {
+            inventory.stock += product.returnQuantity;
+            await queryRunner.manager.save(
+              this.inventoryRepository.target,
+              inventory,
+            );
+          }
+
+          if (inventoryItem) {
+            inventoryItem.quantity += product.returnQuantity;
+            await queryRunner.manager.save(
+              this.InventoryItemItemRepository.target,
+              inventoryItem,
+            );
+          }
+
+          const returnDamagePayload = {
+            orderId: order.id, // ✅ fixed: was hardcoded Number(orderIds[0])
+            productId: product?.productId,
+            returnQuantity: product?.returnQuantity,
+            damageQuantity: product?.damageQuantity,
+            reason:
+              reason ||
+              (product?.damageQuantity > 0
+                ? 'Customer returned; item(s) damaged'
+                : 'Customer returned'),
+            remarks: `Item returned via courier on ${new Date().toISOString().split('T')[0]}`,
+            returnDate: new Date(),
+          };
+          await this.orderProductReturnRepository.save(returnDamagePayload);
+        }
+      }
+
+      await queryRunner.manager.update(
+        this.orderRepository.target,
+        { id: order.id },
+        { statusId: statusId },
       );
-
-      await queryRunner.commitTransaction();
-
-      return updatedOrders;
-    } catch (error: any) {
-      await queryRunner.rollbackTransaction();
-      throw new ApiError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        error.message || 'Failed to return orders',
-      );
-    } finally {
-      await queryRunner.release();
     }
+
+    const updatedOrders = await queryRunner.manager.find(
+      this.orderRepository.target,
+      {
+        where: { id: In(orderIds) },
+        relations: ['status'],
+      },
+    );
+    const orderLogs = updatedOrders.map((updatedOrder) => {
+      const originalOrder = orders.find((o) => o.id === updatedOrder.id);
+      return {
+        orderId: updatedOrder.id,
+        agentId,
+        action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
+        previousValue: null,
+      };
+    });
+
+    await queryRunner.manager.save(
+      this.orderLogsRepository.target,
+      orderLogs,
+    );
+
+    await queryRunner.commitTransaction();
+
+    return updatedOrders;
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to return orders',
+    );
+  } finally {
+    await queryRunner.release();
   }
+}
 
   // download excel
 
