@@ -3036,6 +3036,7 @@ if (filterOptions?.startDate && filterOptions?.endDate) {
     .addSelect('o.invoiceNumber', 'invoiceNumber')
     .addSelect('o.trackingCode', 'trackingId')
     .addSelect('o.receiverName', 'name')
+    .addSelect('o.paymentStatus', 'paymentStatus')
     .addSelect('o.receiverPhoneNumber', 'mobileNo')
     .addSelect('COALESCE(o.codAmount, o.totalPaidAmount, 0)', 'codAmount')
     .orderBy('o.intransitTime', 'ASC')
@@ -3048,6 +3049,7 @@ if (filterOptions?.startDate && filterOptions?.endDate) {
     name: r.name,
     mobileNo: r.mobileNo,
     codAmount: Number(r.codAmount) || 0,
+    paymentStatus: r.paymentStatus || "N/A",
   }));
 }
 

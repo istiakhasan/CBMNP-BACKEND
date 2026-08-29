@@ -91,7 +91,7 @@ export class UserService {
     if (filterOptions?.searchTerm) {
       const searchTerm = `%${filterOptions.searchTerm.toString()}%`;
       queryBuilder.andWhere(
-        '(users.name LIKE :searchTerm OR users.userId LIKE :searchTerm)',
+        '(users.name LIKE :searchTerm OR users.userId LIKE :searchTerm OR users.phone LIKE :searchTerm OR users.email LIKE :searchTerm)',
         { searchTerm },
       );
     }
