@@ -31,6 +31,7 @@ import { OrderProductReturn } from './entities/return_damage.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { Response } from 'express';
 import * as _ from 'lodash';
+import { OrderExchange } from './entities/orderExchannge.entity';
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -62,8 +63,12 @@ export class OrderService {
     private readonly deliveryPartnerRepository: Repository<DeliveryPartner>,
     @InjectRepository(OrderProductReturn)
     private readonly orderProductReturnRepository: Repository<OrderProductReturn>,
+    @InjectRepository(OrderExchange)
+    private readonly OrderExchange: Repository<OrderExchange>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepository: Repository<Warehouse>,
+    @InjectRepository(OrderExchange)
+    private readonly orderExchangeRepository: Repository<OrderExchange>,
 
     private readonly requisitionService: RequisitionService,
   ) {}
@@ -965,55 +970,83 @@ export class OrderService {
     };
   }
 
-  async getOrderById(orderId: number): Promise<Order & { partner: any }> {
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: [
-        'paymentHistory',
-        'comments',
-        'comments.user',
-        'productReturns',
-        'productReturns.product',
-        'warehouse',
-      ],
-    });
+async getOrderById(orderId: number): Promise<Order & { partner: any }> {
+  const order = await this.orderRepository.findOne({
+    where: { id: orderId },
+    relations: [
+      'paymentHistory',
+      'comments',
+      'comments.user',
+      'productReturns',
+      'productReturns.product',
+      'warehouse',
+    ],
+  });
 
-    if (!order) {
-      throw new NotFoundException(`Order with ID ${orderId} not found`);
-    }
-
-    if (order.comments && order.comments.length > 0) {
-      order.comments.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      );
-    }
-
-    const [products, customer] = await Promise.all([
-      this.productsRepository.find({
-        where: { orderId: order.id },
-        relations: ['product'],
-      }),
-      this.customerRepository.findOne({
-        where: { customer_Id: order.customerId },
-      }),
-    ]);
-
-    // if (!customer) {
-    //   throw new NotFoundException(
-    //     `Customer with ID ${order.customerId} not found`,
-    //   );
-    // }
-
-    return {
-      ...order,
-      products: products || [],
-      customer,
-      partner: await this.deliveryPartnerRepository.findOne({
-        where: { id: order?.currier },
-      }),
-    };
+  if (!order) {
+    throw new NotFoundException(`Order with ID ${orderId} not found`);
   }
+
+  if (order.comments && order.comments.length > 0) {
+    order.comments.sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+    );
+  }
+
+  const [products, customer] = await Promise.all([
+    this.productsRepository.find({
+      where: { orderId: order.id },
+      relations: ['product'],
+    }),
+    this.customerRepository.findOne({
+      where: { customer_Id: order.customerId },
+    }),
+  ]);
+
+  // ✅ এই order-টা কোনো exchange-এর OLD (original) পাশে আছে কিনা —
+  //    অর্থাৎ এই order থেকে নতুন কোনো exchange-order তৈরি হয়েছে কিনা
+  const exchangesAsOriginal = await this.orderExchangeRepository.find({
+    where: { originalOrderId: order.id },
+  });
+
+  // ✅ এই order-টা নিজেই কোনো exchange-এর ফলে তৈরি হওয়া NEW order কিনা
+  const exchangeAsNew = await this.orderExchangeRepository.findOne({
+    where: { newOrderId: order.id },
+  });
+
+  // ✅ ২টাতেই referenced orderNumber/invoiceNumber সহ দিলে frontend-এ লিংক করা সহজ হবে
+  let exchangedIntoOrders: any[] = [];
+  if (exchangesAsOriginal.length) {
+    const newOrderIds = exchangesAsOriginal.map((e) => e.newOrderId);
+    const newOrders = await this.orderRepository.find({
+      where: { id: In(newOrderIds) },
+    });
+    const newOrderMap = new Map(newOrders.map((o) => [o.id, o]));
+    exchangedIntoOrders = exchangesAsOriginal.map((e) => ({
+      ...e,
+      newOrder: newOrderMap.get(e.newOrderId),
+    }));
+  }
+
+  let exchangedFromOrder: any = null;
+  if (exchangeAsNew) {
+    const originalOrder = await this.orderRepository.findOne({
+      where: { id: exchangeAsNew.originalOrderId },
+    });
+    exchangedFromOrder = { ...exchangeAsNew, originalOrder };
+  }
+
+  return {
+    ...order,
+    products: products || [],
+    customer,
+    partner: await this.deliveryPartnerRepository.findOne({
+      where: { id: order?.currier },
+    }),
+    exchangedIntoOrders, // এই order থেকে যেসব নতুন order তৈরি হয়েছে
+    exchangedFromOrder,  // এই order নিজে কোনো exchange থেকে তৈরি হলে তার তথ্য
+  } as any;
+}
   async getScanOrderById(
     orderNumber: string,
   ): Promise<Order & { partner: any }> {
@@ -3016,5 +3049,204 @@ if (filterOptions?.startDate && filterOptions?.endDate) {
     mobileNo: r.mobileNo,
     codAmount: Number(r.codAmount) || 0,
   }));
+}
+
+async exchangeOrderProduct(payload: {
+  orderId: number;
+  oldProductId: string;
+  oldQuantity: number;
+  newProductId: string;
+  newQuantity: number;
+  agentId: string;
+  reason?: string;
+}) {
+  const { orderId, oldProductId, oldQuantity, newProductId, newQuantity, agentId, reason } = payload;
+
+  const originalOrder = await this.orderRepository.findOne({
+    where: { id: orderId },
+    relations: ['status'],
+  });
+  if (!originalOrder) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
+  }
+  if (!originalOrder.status || originalOrder.status.label !== 'Delivered') {
+    throw new ApiError(
+      HttpStatus.BAD_REQUEST,
+      `Order must be in "Delivered" status to exchange (current: ${originalOrder.status?.label || 'unknown'})`,
+    );
+  }
+
+  const orderProduct = await this.productsRepository.findOne({
+    where: { orderId, productId: oldProductId },
+  });
+  if (!orderProduct) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Product not found in this order');
+  }
+  if (oldQuantity > orderProduct.productQuantity) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Exchange quantity exceeds ordered quantity');
+  }
+
+  const newProductInfo = await this.productRepository.findOne({ where: { id: newProductId } });
+  if (!newProductInfo) {
+    throw new NotFoundException(`Product with ID ${newProductId} not found`);
+  }
+
+  const oldSubtotal = orderProduct.productPrice * oldQuantity;
+  const newSubtotal = newProductInfo.salePrice * newQuantity;
+  const priceDifference = newSubtotal - oldSubtotal;
+
+  // ✅ FIX: এই দুটো call তাদের নিজস্ব ছোট transaction ব্যবহার করে,
+  //    আর সম্পূর্ণ শেষ হয়ে commit হয়ে যায় — মূল queryRunner transaction শুরুর আগেই।
+  //    তাই আর কোনো lock-competition/deadlock হবে না।
+  const newOrderNumber = await this.generateOrderNumber(originalOrder.organizationId);
+  const newInvoiceNumber = await this.generateInvoiceNumber(originalOrder.organizationId);
+
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  try {
+    // ---- ধাপ ১: পুরনো product return করা ----
+    const oldInventory = await queryRunner.manager.findOne(Inventory, { where: { productId: oldProductId } });
+    const oldInventoryItem = await queryRunner.manager.findOne(InventoryItem, {
+      where: { productId: oldProductId, locationId: originalOrder.locationId },
+    });
+
+    if (oldInventory) {
+      await queryRunner.manager.increment(Inventory, { productId: oldProductId }, 'stock', oldQuantity);
+    }
+    if (oldInventoryItem) {
+      await queryRunner.manager.increment(
+        InventoryItem,
+        { productId: oldProductId, locationId: originalOrder.locationId },
+        'quantity',
+        oldQuantity,
+      );
+    }
+
+    await queryRunner.manager.save(OrderProductReturn, {
+      orderId: originalOrder.id,
+      productId: oldProductId,
+      returnQuantity: oldQuantity,
+      damageQuantity: 0,
+      reason: reason || 'Exchanged for another product',
+      remarks: 'Returned as part of a product exchange',
+      returnDate: new Date(),
+    });
+
+    const fullyReturned = oldQuantity === orderProduct.productQuantity;
+    await queryRunner.manager.update(
+      Order,
+      { id: originalOrder.id },
+      { statusId: fullyReturned ? 10 : 12 },
+    );
+
+    // ---- ধাপ ২: নতুন order তৈরি (numbers আগেই generate হয়ে গেছে) ----
+    const newOrder = await queryRunner.manager.save(Order, {
+      orderNumber: newOrderNumber,
+      invoiceNumber: newInvoiceNumber,
+      parentOrderId: originalOrder.id,
+      customerId: originalOrder.customerId,
+      receiverName: originalOrder.receiverName,
+      receiverPhoneNumber: originalOrder.receiverPhoneNumber,
+      receiverAddress: originalOrder.receiverAddress,
+      receiverDivision: originalOrder.receiverDivision,
+      receiverDistrict: originalOrder.receiverDistrict,
+      receiverThana: originalOrder.receiverThana,
+      organizationId: originalOrder.organizationId,
+      locationId: originalOrder.locationId,
+      currier: originalOrder.currier,
+      addressId: originalOrder.addressId,
+      orderSource: 'Exchange',
+      orderType: 'Exchange',
+      statusId: 2,
+      shippingCharge: 0,
+      discount: 0,
+      productValue: newSubtotal,
+      totalPrice: newSubtotal,
+      totalPaidAmount: 0,
+      totalReceiveAbleAmount: newSubtotal,
+      agentId,
+    });
+
+    await queryRunner.manager.save(Products, {
+      orderId: newOrder.id,
+      productId: newProductId,
+      productQuantity: newQuantity,
+      productPrice: newProductInfo.salePrice,
+      subtotal: newSubtotal,
+    });
+
+    const newInventory = await queryRunner.manager.findOne(Inventory, { where: { productId: newProductId } });
+    if (newInventory) {
+      await queryRunner.manager.increment(Inventory, { productId: newProductId }, 'orderQue', newQuantity);
+    } else {
+      await queryRunner.manager.save(Inventory, {
+        productId: newProductId,
+        organizationId: originalOrder.organizationId,
+        orderQue: newQuantity,
+        hoildQue: 0,
+        processing: 0,
+        stock: 0,
+      });
+    }
+
+    const newInventoryItem = await queryRunner.manager.findOne(InventoryItem, {
+      where: { productId: newProductId, locationId: originalOrder.locationId },
+    });
+    if (newInventoryItem) {
+      await queryRunner.manager.increment(
+        InventoryItem,
+        { productId: newProductId, locationId: originalOrder.locationId },
+        'orderQue',
+        newQuantity,
+      );
+    } else if (newInventory) {
+      // ✅ আগেরবার এই else block বাদ পড়েছিল — নতুন location-এ প্রথমবার হলে এখন তৈরি হবে
+      await queryRunner.manager.save(InventoryItem, {
+        locationId: originalOrder.locationId,
+        productId: newProductId,
+        quantity: 0,
+        orderQue: newQuantity,
+        inventoryId: newInventory.id,
+      });
+    }
+
+    await queryRunner.manager.save(OrderExchange, {
+      originalOrderId: originalOrder.id,
+      newOrderId: newOrder.id,
+      oldProductId,
+      oldQuantity,
+      newProductId,
+      newQuantity,
+      priceDifference,
+      reason: reason || 'Customer requested exchange',
+      agentId,
+    });
+
+    await queryRunner.manager.save(OrdersLog, [
+      {
+        orderId: originalOrder.id,
+        agentId,
+        action: `${oldQuantity} unit(s) of product ${oldProductId} returned for exchange. New order ${newOrderNumber} created for ${newQuantity} unit(s) of ${newProductId}.`,
+        previousValue: null,
+      },
+      {
+        orderId: newOrder.id,
+        agentId,
+        action: `Order created as an exchange for order ${originalOrder.orderNumber}. Price difference: ${priceDifference}.`,
+        previousValue: null,
+      },
+    ]);
+
+    await queryRunner.commitTransaction();
+
+    return { originalOrderId: originalOrder.id, newOrder, priceDifference };
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+    throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to process exchange');
+  } finally {
+    await queryRunner.release();
+  }
 }
 }

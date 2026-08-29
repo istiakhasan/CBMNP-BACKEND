@@ -22,6 +22,7 @@ import { DeliveryPartner } from '../../delivery-partner/entities/delivery-partne
 import { OrderProductReturn } from './return_damage.entity';
 import { AddressBook } from '../../customers/entities/addressbook.entity';
 import { Warehouse } from '../../warehouse/entities/warehouse.entity';
+import { OrderExchange } from './orderExchannge.entity';
 
 @Entity({ name: 'orders' })
 @Unique(['organizationId', 'orderNumber'])
@@ -236,4 +237,9 @@ export class Order {
 
   @Column({ nullable: true })
   courierNotificationType: string;
+
+
+// order.entity.ts — বাকি সব অপরিবর্তিত, শুধু এই একটা কলাম যোগ করুন
+@Column({ nullable: true })
+parentOrderId: number; // exchange হয়ে তৈরি হলে, মূল order-এর id
 }

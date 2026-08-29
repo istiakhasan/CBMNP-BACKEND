@@ -17,6 +17,7 @@ import { RequsitionModule } from '../requsition/requsition.module';
 import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
 import { OrderProductReturn } from './entities/return_damage.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
+import { OrderExchange } from './entities/orderExchannge.entity';
 
 @Module({
   imports: [
@@ -34,7 +35,8 @@ import { Warehouse } from '../warehouse/entities/warehouse.entity';
       Inventory,
       InventoryItem,
       OrderProductReturn,
-      Warehouse
+      Warehouse,
+      OrderExchange
     ]),
     RequsitionModule,
   ],
