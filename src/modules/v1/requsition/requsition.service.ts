@@ -271,6 +271,7 @@ export class RequisitionService {
         'op.productQuantity',
         'product.id',
         'product.name',
+        'product.sku',
         'product.weight',
         'product.unit',
         'user.name',
@@ -288,6 +289,7 @@ export class RequisitionService {
         if (!acc[key]) {
           acc[key] = {
             productName: row.product_name,
+            sku: row.product_sku,
             packSize: `${row.product_weight} ${row.product_unit}`, // ← build pack size here
             availableQty: row.product_purchasePrice ?? 0, // replace with inventory.availableQty if needed
             orders: [],
