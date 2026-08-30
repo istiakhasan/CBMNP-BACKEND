@@ -274,6 +274,7 @@ export class RequisitionService {
         'product.weight',
         'product.unit',
         'user.name',
+        'order.invoiceNumber',
         // if you have available qty in inventory instead of product table
         'product.purchasePrice', // or join inventory if availableQty is there
       ])
