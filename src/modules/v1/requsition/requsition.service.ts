@@ -295,6 +295,7 @@ export class RequisitionService {
         }
         acc[key].orders.push({
           orderNumber: row.order_orderNumber,
+          invoiceNumber: row.order_invoiceNumber,
           qty: row.op_productQuantity,
         });
         acc[key].totalQty += row.op_productQuantity;
