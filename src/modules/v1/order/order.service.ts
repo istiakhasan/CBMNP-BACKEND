@@ -1755,6 +1755,108 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
   // ============================================================
   // 2) Replace revertFailedCourierOrders with this version
   // ============================================================
+
+
+  // ============================================================
+  // 3) Replace sendOrdersToSteadfast's signature and every
+  //    revertFailedCourierOrders(...) call site to pass revertToStatusId
+  // ============================================================
+  // ============================================================
+  // Reconcile a batch of orders whose Steadfast outcome is uncertain
+  // (network failure, timeout, empty response) OR that Steadfast
+  // rejected as duplicate (THIS_INVOICE_ALREADY_EXISTS).
+  //
+  // This is the single source of truth for "is this order actually
+  // in Steadfast or not" — it NEVER guesses. It calls Steadfast's
+  // status-by-invoice endpoint per order and classifies each one as
+  // either CONFIRMED-IN-COURIER or CONFIRMED-NOT-IN-COURIER.
+  // ============================================================
+  private async reconcileWithSteadfast(
+    orders: Order[],
+    currierCompany: any,
+  ): Promise<{ confirmedInCourier: Map<number, any>; confirmedFailed: Order[] }> {
+    const confirmedInCourier = new Map<number, any>(); // orderId -> steadfast status payload
+    const confirmedFailed: Order[] = [];
+
+    for (const op of orders) {
+      try {
+        const res = await axios.get(
+          `https://portal.packzy.com/api/v1/status_by_invoice/${encodeURIComponent(op.invoiceNumber)}`,
+          {
+            headers: {
+              'Api-Key': currierCompany.api_key,
+              'Secret-Key': currierCompany.secret_key,
+            },
+            timeout: 15000,
+          },
+        );
+
+        // Steadfast returns status: 200 + a delivery_status when the
+        // invoice genuinely exists in their system; anything else (404,
+        // status:'no_data', etc.) means it was never actually created.
+        const data = res.data;
+        const exists =
+          data?.status === 200 &&
+          (data?.delivery_status || data?.consignment_id);
+
+        if (exists) {
+          confirmedInCourier.set(op.id, data);
+        } else {
+          confirmedFailed.push(op);
+        }
+      } catch (err: any) {
+        // Steadfast explicitly says "not found" via 404 -> definitely not created.
+        if (err?.response?.status === 404) {
+          confirmedFailed.push(op);
+          continue;
+        }
+
+        // Any other error (network/timeout/5xx) means we STILL don't know.
+        // Do not guess in either direction — retry the check once after
+        // a short backoff before giving up and treating it as unresolved.
+        try {
+          await new Promise((r) => setTimeout(r, 2000));
+          const retryRes = await axios.get(
+            `https://portal.packzy.com/api/v1/status_by_invoice/${encodeURIComponent(op.invoiceNumber)}`,
+            {
+              headers: {
+                'Api-Key': currierCompany.api_key,
+                'Secret-Key': currierCompany.secret_key,
+              },
+              timeout: 15000,
+            },
+          );
+          const data = retryRes.data;
+          const exists =
+            data?.status === 200 &&
+            (data?.delivery_status || data?.consignment_id);
+          if (exists) {
+            confirmedInCourier.set(op.id, data);
+          } else {
+            confirmedFailed.push(op);
+          }
+        } catch (err2: any) {
+          if (err2?.response?.status === 404) {
+            confirmedFailed.push(op);
+          } else {
+            // Genuinely unresolved after retry — log loudly, do NOT
+            // touch this order's status at all (leave it exactly as it
+            // is right now so a human/cron can re-check later, instead
+            // of falsely marking it success or failed).
+            this.logger.error(
+              `UNRESOLVED: could not confirm Steadfast state for invoice ${op.invoiceNumber} after retry — leaving order ${op.id} untouched. Needs manual/cron reconciliation. Error: ${err2.message}`,
+            );
+          }
+        }
+      }
+    }
+
+    return { confirmedInCourier, confirmedFailed };
+  }
+
+  // ---------- Revert an order's status/inventory — ONLY called for
+  // CONFIRMED failures (verified via reconcileWithSteadfast, or an
+  // outright rejection reason from Steadfast that isn't a duplicate) ----------
   private async revertFailedCourierOrders(
     failedOrders: Order[],
     revertToStatusId: number,
@@ -1766,8 +1868,6 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
   ): Promise<void> {
     if (!failedOrders.length) return;
 
-    // Guard against an unusable revert target instead of writing garbage
-    // into statusId and hitting a silent FK-constraint rollback again.
     if (
       revertToStatusId === undefined ||
       revertToStatusId === null ||
@@ -1776,9 +1876,7 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       this.logger.error(
         `CRITICAL: cannot revert courier-failed orders [${failedOrders
           .map((o) => o.invoiceNumber)
-          .join(
-            ', ',
-          )}] — no valid revertToStatusId was provided (got: ${revertToStatusId}). Order(s) remain incorrectly at statusId 7.`,
+          .join(', ')}] — no valid revertToStatusId was provided (got: ${revertToStatusId}). Order(s) remain incorrectly at statusId 7.`,
       );
       return;
     }
@@ -1834,7 +1932,7 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
           { id: order.id },
           {
             statusId: revertToStatusId,
-            previousStatus: null, // this transition never actually completed
+            previousStatus: null,
             intransitTime: null,
             courierStatus: reason.courierStatus,
             courierNotificationType: reason.courierNotificationType,
@@ -1846,7 +1944,7 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
         await queryRunner.manager.save(this.orderLogsRepository.target, {
           orderId: order.id,
           agentId: null,
-          action: `Courier dispatch failed (${reason.courierNotificationType}: ${reason.trackingMessage}). Status reverted from In-Transit to ${revertToStatusId}, inventory restored.`,
+          action: `Courier dispatch confirmed failed (${reason.courierNotificationType}: ${reason.trackingMessage}). Status reverted from In-Transit to ${revertToStatusId}, inventory restored.`,
           previousValue: null,
         });
       }
@@ -1854,15 +1952,10 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       await queryRunner.commitTransaction();
     } catch (err: any) {
       await queryRunner.rollbackTransaction();
-      // Log the FULL error (including stack / driver error) this time —
-      // a bare err.message hides FK/constraint details needed to diagnose
-      // exactly this kind of silent-rollback bug.
       this.logger.error(
         `CRITICAL: failed to revert courier-failed orders [${failedOrders
           .map((o) => o.invoiceNumber)
-          .join(
-            ', ',
-          )}] to statusId ${revertToStatusId} — they remain incorrectly at statusId 7: ${err.message}`,
+          .join(', ')}] to statusId ${revertToStatusId} — they remain incorrectly at statusId 7: ${err.message}`,
         err.stack,
       );
     } finally {
@@ -1870,22 +1963,38 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     }
   }
 
-  // ============================================================
-  // 3) Replace sendOrdersToSteadfast's signature and every
-  //    revertFailedCourierOrders(...) call site to pass revertToStatusId
-  // ============================================================
+  // ---------- Confirm success: write consignment_id/tracking_code
+  // for orders we've VERIFIED are genuinely in Steadfast (either a
+  // fresh 'success' response, or reconciled via status_by_invoice) ----------
+  private async confirmCourierSuccess(
+    confirmedInCourier: Map<number, any>,
+  ): Promise<void> {
+    const updates: Promise<any>[] = [];
+    for (const [orderId, data] of confirmedInCourier) {
+      updates.push(
+        this.orderRepository.update(orderId, {
+          consignmentId: data.consignment_id ? String(data.consignment_id) : null,
+          trackingCode: data.tracking_code || null,
+          courierStatus: data.delivery_status || 'in_review',
+          courierNotificationType: 'order_created',
+          courierUpdatedAt: new Date(),
+        }),
+      );
+    }
+    await Promise.all(updates);
+  }
+
   private async sendOrdersToSteadfast(
     orders: any[],
     currierCompany: any,
-    revertToStatusId: number, // NEW — the status to fall back to on any failure
+    revertToStatusId: number,
   ): Promise<void> {
     const normalizeBdPhone = (raw: string): string | null => {
       if (!raw) return null;
       let digits = raw.replace(/\D/g, '');
       if (digits.startsWith('00')) digits = digits.slice(2);
       if (digits.startsWith('880')) digits = digits.slice(3);
-      if (digits.length === 10 && !digits.startsWith('0'))
-        digits = '0' + digits;
+      if (digits.length === 10 && !digits.startsWith('0')) digits = '0' + digits;
       return /^0[0-9]{10}$/.test(digits) ? digits : null;
     };
 
@@ -1903,10 +2012,10 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
 
     const normalizedPhoneByOrderId = new Map<number, string>();
     for (const x of ordersWithPhone) {
-      if (x.normalizedPhone)
-        normalizedPhoneByOrderId.set(x.op.id, x.normalizedPhone);
+      if (x.normalizedPhone) normalizedPhoneByOrderId.set(x.op.id, x.normalizedPhone);
     }
 
+    // Invalid phone -> CONFIRMED failure, no ambiguity, revert immediately.
     if (invalidOrders.length) {
       await this.revertFailedCourierOrders(invalidOrders, revertToStatusId, {
         courierStatus: 'error',
@@ -1926,14 +2035,14 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     const courierPayload = validOrders.map((op) => ({
       invoice: op.invoiceNumber,
       recipient_name: op.receiverName,
-      recipient_phone:
-        normalizedPhoneByOrderId.get(op.id) || op.receiverPhoneNumber,
+      recipient_phone: normalizedPhoneByOrderId.get(op.id) || op.receiverPhoneNumber,
       recipient_address: op.receiverAddress,
       cod_amount: op.totalReceiveAbleAmount,
       note: op.deliveryNote || 'N/A',
     }));
 
     let steadfastResults: any[] = [];
+    let requestSucceeded = false;
 
     try {
       const response = await axios.post(
@@ -1944,12 +2053,14 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
             'Api-Key': currierCompany.api_key,
             'Secret-Key': currierCompany.secret_key,
           },
+          timeout: 30000,
         },
       );
 
       steadfastResults = Array.isArray(response.data)
         ? response.data
         : response.data?.data || [];
+      requestSucceeded = true;
 
       this.logger.log(
         `Steadfast bulk order request sent: ${validOrders.length} order(s), invoices [${validOrders
@@ -1957,19 +2068,36 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
           .join(', ')}], ${steadfastResults.length} result(s) received`,
       );
     } catch (err: any) {
-      const errMsg = err?.response?.data
-        ? JSON.stringify(err.response.data)
-        : err.message;
+      const errMsg = err?.response?.data ? JSON.stringify(err.response.data) : err.message;
       this.logger.error(
         `Steadfast bulk order request failed for invoices [${validOrders
           .map((o) => o.invoiceNumber)
           .join(', ')}]: ${errMsg}`,
       );
-      await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
-        courierStatus: 'error',
-        courierNotificationType: 'courier_request_failed',
-        trackingMessage: `Steadfast bulk request failed: ${errMsg}`,
-      });
+
+      // ✅ THE ACTUAL BUG: we do NOT know if Steadfast received this
+      // before the network died. Verify per-order instead of assuming
+      // failure and reverting blindly.
+      const { confirmedInCourier, confirmedFailed } =
+        await this.reconcileWithSteadfast(validOrders, currierCompany);
+
+      if (confirmedInCourier.size) {
+        await this.confirmCourierSuccess(confirmedInCourier);
+        this.logger.log(
+          `Reconciled ${confirmedInCourier.size} order(s) as ALREADY IN COURIER despite request error: [${[
+            ...confirmedInCourier.keys(),
+          ].join(', ')}]`,
+        );
+      }
+
+      if (confirmedFailed.length) {
+        await this.revertFailedCourierOrders(confirmedFailed, revertToStatusId, {
+          courierStatus: 'error',
+          courierNotificationType: 'courier_request_failed',
+          trackingMessage: `Steadfast bulk request failed and reconciliation confirmed non-delivery: ${errMsg}`,
+        });
+      }
+
       return;
     }
 
@@ -1977,12 +2105,17 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       this.logger.warn(
         `Steadfast returned no results for invoices [${validOrders.map((o) => o.invoiceNumber).join(', ')}]`,
       );
-      await this.revertFailedCourierOrders(validOrders, revertToStatusId, {
-        courierStatus: 'error',
-        courierNotificationType: 'empty_courier_response',
-        trackingMessage:
-          'Steadfast returned an empty result set for this batch',
-      });
+      const { confirmedInCourier, confirmedFailed } =
+        await this.reconcileWithSteadfast(validOrders, currierCompany);
+
+      if (confirmedInCourier.size) await this.confirmCourierSuccess(confirmedInCourier);
+      if (confirmedFailed.length) {
+        await this.revertFailedCourierOrders(confirmedFailed, revertToStatusId, {
+          courierStatus: 'error',
+          courierNotificationType: 'empty_courier_response',
+          trackingMessage: 'Steadfast returned an empty result set; reconciliation confirmed non-delivery',
+        });
+      }
       return;
     }
 
@@ -1993,16 +2126,14 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
 
     const succeededUpdates: Promise<any>[] = [];
     const noResultOrders: Order[] = [];
-    const failedOrders: Order[] = [];
+    const duplicateOrders: Order[] = []; // THIS_INVOICE_ALREADY_EXISTS -> needs reconciliation, NOT auto-fail
+    const genuineFailedOrders: Order[] = [];
     const failedReasons = new Map<number, string>();
 
     for (const op of validOrders) {
       const result = resultsByInvoice.get(String(op.invoiceNumber));
 
       if (!result) {
-        this.logger.warn(
-          `No Steadfast result matched for invoice ${op.invoiceNumber} — reverting so it can be retried`,
-        );
         noResultOrders.push(op);
         continue;
       }
@@ -2010,9 +2141,7 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       if (result.status === 'success') {
         succeededUpdates.push(
           this.orderRepository.update(op.id, {
-            consignmentId: result.consignment_id
-              ? String(result.consignment_id)
-              : null,
+            consignmentId: result.consignment_id ? String(result.consignment_id) : null,
             trackingCode: result.tracking_code || null,
             courierStatus: 'in_review',
             courierNotificationType: 'order_created',
@@ -2020,36 +2149,69 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
             courierUpdatedAt: new Date(),
           }),
         );
-      } else {
-        failedOrders.push(op);
-        failedReasons.set(
-          op.id,
-          result?.message || 'Steadfast order creation failed',
-        );
-        this.logger.warn(
-          `Steadfast order creation failed for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
-        );
+        continue;
       }
+
+      // Steadfast's error field can be a JSON-stringified array like
+      // '["THIS_INVOICE_ALREADY_EXISTS"]' or a plain string — check both.
+      const errStr = Array.isArray(result?.error)
+        ? result.error.join(',')
+        : String(result?.error || '');
+
+      if (errStr.includes('THIS_INVOICE_ALREADY_EXISTS')) {
+        // NOT a confirmed failure — the invoice genuinely exists on
+        // Steadfast's side already. Must verify via status_by_invoice
+        // before deciding success or failure; never assume either.
+        duplicateOrders.push(op);
+      } else {
+        // Any other explicit Steadfast error (bad address, balance,
+        // etc.) IS a confirmed failure — Steadfast told us directly.
+        genuineFailedOrders.push(op);
+        failedReasons.set(op.id, result?.message || errStr || 'Steadfast order creation failed');
+      }
+
+      this.logger.warn(
+        `Steadfast order creation not successful for invoice ${op.invoiceNumber}: ${JSON.stringify(result)}`,
+      );
     }
 
     await Promise.all(succeededUpdates);
 
-    if (noResultOrders.length) {
-      await this.revertFailedCourierOrders(noResultOrders, revertToStatusId, {
-        courierStatus: 'error',
-        courierNotificationType: 'no_courier_response',
-        trackingMessage:
-          'No result returned by Steadfast for this invoice — safe to retry',
-      });
+    // Reconcile the ambiguous buckets (no-result + duplicate) together —
+    // for both, we genuinely don't know the true state without asking
+    // Steadfast directly.
+    const toReconcile = [...noResultOrders, ...duplicateOrders];
+    if (toReconcile.length) {
+      const { confirmedInCourier, confirmedFailed } =
+        await this.reconcileWithSteadfast(toReconcile, currierCompany);
+
+      if (confirmedInCourier.size) {
+        await this.confirmCourierSuccess(confirmedInCourier);
+        this.logger.log(
+          `Reconciled ${confirmedInCourier.size} order(s) as ALREADY IN COURIER (duplicate/no-result case): [${[
+            ...confirmedInCourier.keys(),
+          ].join(', ')}]`,
+        );
+      }
+
+      if (confirmedFailed.length) {
+        await this.revertFailedCourierOrders(confirmedFailed, revertToStatusId, {
+          courierStatus: 'error',
+          courierNotificationType: 'reconciled_not_found',
+          trackingMessage:
+            'Reconciliation via status_by_invoice confirmed this order was never created at Steadfast',
+        });
+      }
     }
 
-    if (failedOrders.length) {
-      for (const op of failedOrders) {
+    // Genuine, Steadfast-confirmed failures — revert directly, no need
+    // to double-check since Steadfast already gave us a definitive reason.
+    if (genuineFailedOrders.length) {
+      for (const op of genuineFailedOrders) {
         await this.revertFailedCourierOrders([op], revertToStatusId, {
           courierStatus: 'error',
           courierNotificationType: 'order_create_failed',
-          trackingMessage:
-            failedReasons.get(op.id) || 'Steadfast order creation failed',
+          trackingMessage: failedReasons.get(op.id) || 'Steadfast order creation failed',
         });
       }
     }
