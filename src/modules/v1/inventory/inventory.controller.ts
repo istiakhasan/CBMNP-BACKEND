@@ -23,19 +23,14 @@ export class InventoryController {
           };
         });
   }
-  @Get()
-  loadStock(@Req() req:Request) {
-    const organizationId=req.headers['x-organization-id']
-       return catchAsync(async ():Promise<IResponse<Inventory[]>> => {
-          const result = await this.inventoryService.loadInventory(organizationId);
-          return {
-            success: true,
-            message: 'stock update successfully',
-            statusCode: HttpStatus.OK,
-            data: result,
-          };
-        });
-  }
+@Get()
+async loadAllInventory(
+  @Req() req:any,
+  @Query() query: { page?: number; limit?: number; searchProducts?: string },
+) {
+   const organizationId=req.headers['x-organization-id']
+  return this.inventoryService.loadInventory(organizationId, query);
+}
   @Get('/getbywarehouseproduct')
   loadStockByWarehouseAndProduct(@Query() query) {
        return catchAsync(async ():Promise<IResponse<InventoryItem>> => {

@@ -142,20 +142,35 @@ export class InventoryService {
     }
   }
 
-  async loadInventory(organizationId) {
-    const result = await this.inventoryRepository.find({
-      where: { organizationId },
-      // relations:['product','product.transactions']
-      relations: [
-        'product',
-        'transactions',
-        'inventoryItems',
-        'inventoryItems.location',
-      ],
-    });
+async loadInventory(organizationId, query) {
+  const { page = 1, limit = 10, searchProducts, warehouseId } = query;
 
-    return result;
+  const qb = this.inventoryRepository
+    .createQueryBuilder('inventory')
+    .leftJoinAndSelect('inventory.product', 'product')
+    .leftJoinAndSelect('inventory.transactions', 'transactions')
+    .leftJoinAndSelect('inventory.inventoryItems', 'inventoryItems')
+    .leftJoinAndSelect('inventoryItems.location', 'location')
+    .where('inventory.organizationId = :organizationId', { organizationId });
+
+  if (searchProducts) {
+    qb.andWhere(
+      '(product.name ILIKE :search OR product.sku ILIKE :search)',
+      { search: `%${searchProducts}%` },
+    );
   }
+
+  if (warehouseId) {
+    qb.andWhere('location.id = :warehouseId', { warehouseId });
+  }
+
+  const [data, total] = await qb
+    .skip((page - 1) * limit)
+    .take(limit)
+    .getManyAndCount();
+
+  return { data, total };
+}
   async loadInventoryByProductId(productId: string) {
     const result = await this.inventoryRepository.findOne({
       where: { productId: productId },
