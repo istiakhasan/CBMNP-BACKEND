@@ -111,45 +111,54 @@ export class ShopifyWebhookService {
 private normalizeBangladeshPhone(phone?: string | null): string {
   if (!phone) return '';
 
-  const value = String(phone).trim();
+  let value = String(phone).trim();
 
-  // Already Bangladesh local number.
+  // Remove spaces, hyphens, brackets etc.
+  value = value.replace(/[\s\-()]/g, '');
+
+  // Already Bangladesh local number
+  // 01716218347
   if (/^01\d{9}$/.test(value)) {
     return value;
   }
 
-  // 00 + 01XXXXXXXXX (extra leading zero) -> 01XXXXXXXXX
-  // e.g. "001772563567" -> "01772563567"
-  if (/^0(01\d{9})$/.test(value)) {
-    return value.substring(1);
+  // 00 + 01XXXXXXXXX
+  // 001716218347 -> 01716218347
+  if (/^00(1\d{9})$/.test(value)) {
+    return `0${value.substring(2)}`;
   }
 
-  // +88001XXXXXXXXX -> 01XXXXXXXXX
+  // +88001XXXXXXXXX
+  // +88001716218347 -> 01716218347
   if (/^\+88001\d{9}$/.test(value)) {
-    return value.substring(3);
+    return value.substring(4);
   }
 
-  // 88001XXXXXXXXX -> 01XXXXXXXXX
+  // 88001XXXXXXXXX
+  // 88001716218347 -> 01716218347
   if (/^88001\d{9}$/.test(value)) {
     return value.substring(3);
   }
 
-  // +8801XXXXXXXXX -> 01XXXXXXXXX
+  // +8801XXXXXXXXX
+  // +8801716218347 -> 01716218347
   if (/^\+8801\d{9}$/.test(value)) {
     return `0${value.substring(4)}`;
   }
 
-  // 8801XXXXXXXXX -> 01XXXXXXXXX
+  // 8801XXXXXXXXX
+  // 8801716218347 -> 01716218347
   if (/^8801\d{9}$/.test(value)) {
     return `0${value.substring(3)}`;
   }
 
-  // 1XXXXXXXXX -> 01XXXXXXXXX
+  // 1XXXXXXXXX
+  // 1716218347 -> 01716218347
   if (/^1\d{9}$/.test(value)) {
     return `0${value}`;
   }
 
-  // Other country / unknown format → preserve original
+  // Other country / unknown format
   return value;
 }
   private timingSafeEqual(a: string, b: string): boolean {
