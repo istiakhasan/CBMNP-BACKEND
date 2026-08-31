@@ -11,44 +11,33 @@ export class UserpermissionService {
     @InjectRepository(UserPermission)
     private readonly userPermissionRepository: Repository<UserPermission>,
   ) {}
-  async createOrUpdate(userPermissions: UserPermission[]): Promise<UserPermission[]> {
-   
 
-      try {
+  async createOrUpdate(userPermissions: UserPermission[]): Promise<UserPermission[]> {
     if (userPermissions.length === 0) {
       throw new Error('No user permissions provided');
     }
-    const userId = userPermissions[0].userId;
 
-    await this.userPermissionRepository.delete({ userId });
-      const results = await Promise.all(
-        userPermissions.map(async (userPermissionDto) => {
-          const existingRecord = await this.userPermissionRepository.findOne({
-            where: {
-              userId: userPermissionDto.userId,
-              permissionId: userPermissionDto.permissionId,
-            }
-          });
-          if (existingRecord) {
-            const updatedRecord = {
-              ...existingRecord, 
-              ...userPermissionDto 
-            };
-            return this.userPermissionRepository.save(updatedRecord);
-          } else {
-            return this.userPermissionRepository.save(userPermissionDto);
-          }
-        })
-      );
-  
-      return results;
+    try {
+      // Pure upsert — শুধু frontend থেকে যেই (userId, permissionId) pair
+      // পাঠানো হয়েছে, সেগুলোই insert/update হবে। conflict হলে
+      // (already exists) সেই row-টা untouched থাকে — কারো existing
+      // permission delete হয় না, শুধু নতুন যোগ হয়।
+      await this.userPermissionRepository.upsert(userPermissions, {
+        conflictPaths: ['userId', 'permissionId'],
+        skipUpdateIfNoValuesChanged: true,
+      });
+
+      // upsert() নিজে থেকে saved entities ফেরত দেয় না, তাই affected
+      // userId গুলোর জন্য fresh data query করে রেসপন্সে পাঠাচ্ছি।
+      const userIds = Array.from(new Set(userPermissions.map((p) => p.userId)));
+      return this.userPermissionRepository.find({
+        where: userIds.map((userId) => ({ userId })),
+      });
     } catch (error) {
       console.error('Error creating or updating user permissions:', error);
-      throw new Error('Failed to create or update user permissions');
+      throw error;
     }
   }
-  
-  
 
   findAll() {
     return `This action returns all userpermission`;
