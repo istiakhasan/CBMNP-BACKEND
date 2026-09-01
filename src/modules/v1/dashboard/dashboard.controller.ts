@@ -34,10 +34,18 @@ export class DashboardController {
     return { series: [{ name: 'Total', data }] };
   }
   @Get('/total-summary')
-  async getDashboardSummary(@Req() req?: Request) {
+  async getDashboardSummary(
+    @Query('period') period?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Req() req?: Request,
+  ) {
     const organizationId = req.headers['x-organization-id'];
     const data = await this.dashboardService.getDashboardSummary(
       organizationId as string,
+      period,
+      startDate,
+      endDate,
     );
     return {
       success: true,
@@ -82,6 +90,30 @@ export class DashboardController {
       success: true,
       statusCode: HttpStatus.OK,
       message: 'Top Selling Retrieved successfully',
+      data: data,
+    };
+  }
+
+  @Get('/area-distribution')
+  async getAreaDistribution(
+    @Query('level') level: 'division' | 'district' | 'thana' = 'division',
+    @Query('period') period?: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Req() req?: Request,
+  ) {
+    const organizationId = req.headers['x-organization-id'];
+    const data = await this.dashboardService.getAreaWiseDistribution(
+      organizationId as string,
+      level,
+      period,
+      startDate,
+      endDate,
+    );
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Area wise order distribution retrieved successfully',
       data: data,
     };
   }

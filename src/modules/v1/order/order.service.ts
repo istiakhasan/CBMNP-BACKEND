@@ -3454,8 +3454,7 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       .innerJoin('prod.product', 'p')
       .where('orders.organizationId = :organizationId', { organizationId });
 
-    let utcStartDate: string;
-    let utcEndDate: string;
+    // Date Field Resolution
     const allowedDateFields = [
       'createdAt',
       'intransitTime',
@@ -3466,138 +3465,134 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     const dateField = allowedDateFields.includes(filterOptions?.dateField)
       ? filterOptions.dateField
       : 'createdAt';
-    const BD_OFFSET_MS = 6 * 60 * 60 * 1000;
 
-    if (filterOptions?.startDate && filterOptions?.endDate) {
-      const rawStart = new Date(filterOptions.startDate);
-      const bdStart = new Date(rawStart.getTime() + BD_OFFSET_MS);
-      utcStartDate = new Date(
-        Date.UTC(
-          bdStart.getUTCFullYear(),
-          bdStart.getUTCMonth(),
-          bdStart.getUTCDate(),
-          0,
-          0,
-          0,
-          0,
-        ) - BD_OFFSET_MS,
-      ).toISOString();
+    // Parse Exact Date Boundaries
+    let rawStartStr = filterOptions?.startDate
+      ? String(filterOptions.startDate).split('T')[0]
+      : '';
+    let rawEndStr = filterOptions?.endDate
+      ? String(filterOptions.endDate).split('T')[0]
+      : '';
 
-      const rawEnd = new Date(filterOptions.endDate);
-      const bdEnd = new Date(rawEnd.getTime() + BD_OFFSET_MS);
-      utcEndDate = new Date(
-        Date.UTC(
-          bdEnd.getUTCFullYear(),
-          bdEnd.getUTCMonth(),
-          bdEnd.getUTCDate(),
-          23,
-          59,
-          59,
-          999,
-        ) - BD_OFFSET_MS,
-      ).toISOString();
-    } else {
-      const today = new Date();
-      const bdToday = new Date(today.getTime() + BD_OFFSET_MS);
-      utcStartDate = new Date(
-        Date.UTC(
-          bdToday.getUTCFullYear(),
-          bdToday.getUTCMonth(),
-          bdToday.getUTCDate(),
-          0,
-          0,
-          0,
-          0,
-        ) - BD_OFFSET_MS,
-      ).toISOString();
-      utcEndDate = new Date(
-        Date.UTC(
-          bdToday.getUTCFullYear(),
-          bdToday.getUTCMonth(),
-          bdToday.getUTCDate(),
-          23,
-          59,
-          59,
-          999,
-        ) - BD_OFFSET_MS,
-      ).toISOString();
+    if (!rawStartStr) {
+      rawStartStr = new Date().toISOString().split('T')[0];
+    }
+    if (!rawEndStr) {
+      rawEndStr = rawStartStr;
     }
 
-    baseQuery.andWhere(`orders.${dateField} BETWEEN :startDate AND :endDate`, {
-      startDate: utcStartDate,
-      endDate: utcEndDate,
-    });
+    const startDate = new Date(`${rawStartStr}T00:00:00.000Z`);
+    const endDate = new Date(`${rawEndStr}T23:59:59.999Z`);
 
+    baseQuery.andWhere(`orders.${dateField} >= :startDate AND orders.${dateField} <= :endDate`, {
+      startDate,
+      endDate,
+    });
+    if (dateField !== 'createdAt') {
+      baseQuery.andWhere(`orders.${dateField} IS NOT NULL`);
+    }
+
+    // Status Filter (Clean 'all' strings and empty values)
     if (filterOptions?.statusId) {
-      const statusIds = Array.isArray(filterOptions.statusId)
+      const rawStatus = Array.isArray(filterOptions.statusId)
         ? filterOptions.statusId
         : [filterOptions.statusId];
-      baseQuery.andWhere('orders.statusId IN (:...statusIds)', { statusIds });
+      const cleanStatusIds = rawStatus
+        .filter((s) => s !== 'all' && s !== '' && s != null)
+        .map(Number)
+        .filter((n) => !isNaN(n));
+      if (cleanStatusIds.length > 0) {
+        baseQuery.andWhere('orders.statusId IN (:...statusIds)', { statusIds: cleanStatusIds });
+      }
     }
 
+    // Warehouse / Location Filter
     if (filterOptions?.locationId) {
       const locationIds = Array.isArray(filterOptions.locationId)
         ? filterOptions.locationId
         : [filterOptions.locationId];
-      baseQuery.andWhere('orders.locationId IN (:...locationIds)', {
-        locationIds,
-      });
+      const cleanLocationIds = locationIds.filter((l) => l !== 'all' && l !== '' && l != null);
+      if (cleanLocationIds.length > 0) {
+        baseQuery.andWhere('orders.locationId IN (:...locationIds)', { locationIds: cleanLocationIds });
+      }
     }
 
+    // Agent Filter
     if (filterOptions?.agentIds) {
       const agentIds = Array.isArray(filterOptions.agentIds)
         ? filterOptions.agentIds
         : [filterOptions.agentIds];
-      baseQuery.andWhere('orders.agentId IN (:...agentIds)', { agentIds });
+      const cleanAgentIds = agentIds.filter((a) => a !== 'all' && a !== '' && a != null);
+      if (cleanAgentIds.length > 0) {
+        baseQuery.andWhere('orders.agentId IN (:...agentIds)', { agentIds: cleanAgentIds });
+      }
     }
 
+    // Courier Filter
     if (filterOptions?.currier) {
       const curierIds = Array.isArray(filterOptions.currier)
         ? filterOptions.currier
         : [filterOptions.currier];
-      baseQuery.andWhere('orders.currier IN (:...curierIds)', { curierIds });
+      const cleanCurierIds = curierIds.filter((c) => c !== 'all' && c !== '' && c != null);
+      if (cleanCurierIds.length > 0) {
+        baseQuery.andWhere('orders.currier IN (:...curierIds)', { curierIds: cleanCurierIds });
+      }
     }
 
+    // Product Filter
     if (filterOptions?.productId) {
       const productIds = Array.isArray(filterOptions.productId)
         ? filterOptions.productId
         : [filterOptions.productId];
-      baseQuery.andWhere('prod.productId IN (:...productIds)', { productIds });
+      const cleanProductIds = productIds.filter((p) => p !== 'all' && p !== '' && p != null);
+      if (cleanProductIds.length > 0) {
+        baseQuery.andWhere('prod.productId IN (:...productIds)', { productIds: cleanProductIds });
+      }
     }
 
+    // Payment Method Filter
     let paymentMethodIds = filterOptions?.paymentMethodIds;
     if (paymentMethodIds) {
       paymentMethodIds = Array.isArray(paymentMethodIds)
         ? paymentMethodIds
         : [paymentMethodIds];
-      baseQuery.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
-        paymentMethodIds,
-      });
+      const cleanPaymentMethods = paymentMethodIds.filter((m) => m !== 'all' && m !== '' && m != null);
+      if (cleanPaymentMethods.length > 0) {
+        baseQuery.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
+          paymentMethodIds: cleanPaymentMethods,
+        });
+      }
     }
 
+    // Order Source Filter
     let orderSources = filterOptions?.orderSources;
     if (orderSources) {
       orderSources = Array.isArray(orderSources)
         ? orderSources
         : [orderSources];
-      baseQuery.andWhere('orders.orderSource IN (:...orderSources)', {
-        orderSources,
-      });
+      const cleanOrderSources = orderSources.filter((s) => s !== 'all' && s !== '' && s != null);
+      if (cleanOrderSources.length > 0) {
+        baseQuery.andWhere('orders.orderSource IN (:...orderSources)', {
+          orderSources: cleanOrderSources,
+        });
+      }
     }
 
+    // Main Aggregated Product Sales Query
     const queryBuilder = baseQuery.clone();
 
     queryBuilder
       .select('prod.productId', 'productId')
       .addSelect('p.name', 'productName')
-      .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
-      .addSelect('SUM(prod.productQuantity)', 'totalOrderQuantity')
-      .addSelect('prod.productPrice', 'productPrice')
-      .addSelect('orders.orderSource', 'orderSource')
+      .addSelect('p.sku', 'sku')
+      .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'totalSaleAmount')
+      .addSelect('COALESCE(SUM(prod.productQuantity), 0)', 'totalOrderQuantity')
+      .addSelect('COALESCE(AVG(prod.productPrice), 0)', 'productPrice')
+      .addSelect("COALESCE(orders.orderSource, 'Direct')", 'orderSource')
       .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
       .groupBy('prod.productId')
       .addGroupBy('p.name')
-      .addGroupBy('prod.productPrice')
+      .addGroupBy('p.sku')
       .addGroupBy('orders.orderSource');
 
     if (sortBy) {
@@ -3614,6 +3609,8 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       ) {
         queryBuilder.orderBy(sortBy, sortOrder);
       }
+    } else {
+      queryBuilder.orderBy('COALESCE(SUM(prod.subtotal), 0)', 'DESC');
     }
 
     const result = await queryBuilder.getRawMany();
@@ -3621,23 +3618,25 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
     const data = result.map((r) => ({
       productId: r.productId,
       productName: r.productName,
-      totalSaleAmount: Number(r.totalSaleAmount),
-      totalOrderQuantity: Number(r.totalOrderQuantity),
-      price: Number(r.productPrice),
+      sku: r.sku,
+      totalSaleAmount: Number(r.totalSaleAmount || 0),
+      totalOrderQuantity: Number(r.totalOrderQuantity || 0),
+      price: Number(r.productPrice || 0),
       orderSource: r.orderSource,
-      orderCount: Number(r.orderCount),
+      orderCount: Number(r.orderCount || 0),
     }));
 
     const countQuery = baseQuery
       .clone()
       .select('COUNT(DISTINCT prod.productId)', 'cnt');
     const totalResult = await countQuery.getRawOne();
-    const total = Number(totalResult.cnt);
+    const total = Number(totalResult?.cnt || data.length);
 
+    // Summary Aggregates
     const productSummaryResult = await baseQuery
       .clone()
-      .select('SUM(prod.productQuantity)', 'totalProductQuantity')
-      .addSelect('SUM(prod.subtotal)', 'totalSaleAmount')
+      .select('COALESCE(SUM(prod.productQuantity), 0)', 'totalProductQuantity')
+      .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'totalSaleAmount')
       .addSelect('COUNT(DISTINCT orders.id)', 'totalOrders')
       .getRawOne();
 
@@ -3654,11 +3653,11 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       .getRawMany();
 
     const paidAmount = orderRows.reduce(
-      (total, order) => total + (Number(order.totalPaidAmount) || 0),
+      (sum, order) => sum + (Number(order.totalPaidAmount) || 0),
       0,
     );
     const totalOrderAmount = orderRows.reduce(
-      (total, order) => total + (Number(order.totalOrderAmount) || 0),
+      (sum, order) => sum + (Number(order.totalOrderAmount) || 0),
       0,
     );
     const courierOrderCount = orderRows.filter((order) => order.currier).length;
@@ -3667,11 +3666,10 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       .clone()
       .leftJoin('orders.partner', 'dp')
       .select('orders.currier', 'courierId')
-      .addSelect('COALESCE(dp.partnerName, :unassigned)', 'courierName')
+      .addSelect("COALESCE(dp.partnerName, 'Unassigned')", 'courierName')
       .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
-      .addSelect('SUM(prod.productQuantity)', 'productQuantity')
-      .addSelect('SUM(prod.subtotal)', 'saleAmount')
-      .setParameter('unassigned', 'Unassigned')
+      .addSelect('COALESCE(SUM(prod.productQuantity), 0)', 'productQuantity')
+      .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'saleAmount')
       .groupBy('orders.currier')
       .addGroupBy('dp.partnerName')
       .getRawMany();
@@ -3681,8 +3679,8 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       total,
       page,
       limit,
-      startDate: utcStartDate,
-      endDate: utcEndDate,
+      startDate: startDate.toISOString(),
+      endDate: endDate.toISOString(),
       summary: {
         totalProducts: total,
         totalProductQuantity:

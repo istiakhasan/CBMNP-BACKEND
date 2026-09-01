@@ -35,6 +35,15 @@ import { DelivaryChargeModule } from './modules/v1/delivary_charge/delivary_char
 import { OrderModuleV2 } from './modules/v2/order/order.module';
 import { ChatModule } from './modules/v2/chat/chat.module';
 import { WebhookModule } from './modules/v1/webhook/webhook.module';
+import { AccountingModule } from './modules/v1/accounting/accounting.module';
+import { FinanceModule } from './modules/v1/finance/finance.module';
+import { InventoryOperationsModule } from './modules/v1/inventory-operations/inventory-operations.module';
+import { PurchaseReturnsModule } from './modules/v1/purchase-returns/purchase-returns.module';
+import { SalesOperationsModule } from './modules/v1/sales-operations/sales-operations.module';
+import { HrPayrollModule } from './modules/v1/hr-payroll/hr-payroll.module';
+import { LogisticsOperationsModule } from './modules/v1/logistics-operations/logistics-operations.module';
+import { NotificationsModule } from './modules/v1/notifications/notifications.module';
+import { GovernanceModule } from './modules/v1/governance/governance.module';
 
 @Module({
   imports: [
@@ -58,12 +67,10 @@ import { WebhookModule } from './modules/v1/webhook/webhook.module';
     AuthModule,
     CommentModule,
     OrganizationModule,
-    OrganizationModule,
     RequsitionModule,
     ShopifyModule,
     SupplierModule,
     ProcurementModule,
-    PermissionModule,
     DeliveryPartnerModule,
     DashboardModule,
     DivisionsModule,
@@ -71,7 +78,16 @@ import { WebhookModule } from './modules/v1/webhook/webhook.module';
     DelivaryChargeModule,
     OrderModuleV2,
     ChatModule,
-    WebhookModule
+    WebhookModule,
+    AccountingModule,
+    FinanceModule,
+    InventoryOperationsModule,
+    PurchaseReturnsModule,
+    SalesOperationsModule,
+    HrPayrollModule,
+    LogisticsOperationsModule,
+    NotificationsModule,
+    GovernanceModule,
   ],
   controllers: [AppController],
   providers: [

@@ -10,6 +10,10 @@ import { OrderStatus } from '../status/entities/status.entity';
 import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
 import { Products } from '../order/entities/products.entity';
 import { Product } from '../product/entity/product.entity';
+import { Expense } from '../finance/entities/expense.entity';
+import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { SupplierBill } from '../finance/entities/supplier-bill.entity';
+
 type CachedTopSelling = {
   data: {
     label: string;
@@ -37,6 +41,12 @@ export class DashboardService {
     private readonly orderproductsRepository: Repository<Products>,
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
+    @InjectRepository(Expense)
+    private readonly expenseRepository: Repository<Expense>,
+    @InjectRepository(InventoryItem)
+    private readonly inventoryItemRepository: Repository<InventoryItem>,
+    @InjectRepository(SupplierBill)
+    private readonly supplierBillRepository: Repository<SupplierBill>,
   ) {}
   create(createDashboardDto: CreateDashboardDto) {
     return 'This action adds a new dashboard';
@@ -102,50 +112,150 @@ export class DashboardService {
     });
     return chartData;
   }
-  async getDashboardSummary(organizationId: string) {
+  async getDashboardSummary(organizationId: string, period?: string, startDate?: string, endDate?: string) {
+    return this.getAdvancedDashboardSummary(organizationId, period, startDate, endDate);
+  }
+
+  async getAdvancedDashboardSummary(
+    organizationId: string,
+    period: string = 'all',
+    startDate?: string,
+    endDate?: string,
+  ) {
     if (!organizationId) {
       throw new Error('organizationId is required');
     }
 
-    // --- Define all promises ---
-    const totalClientPromise = this.customerRepository
+    // Determine Date Filter Range
+    const now = new Date();
+    let dateFrom: Date | undefined;
+    let dateTo: Date | undefined;
+
+    if (startDate && endDate) {
+      dateFrom = new Date(startDate + 'T00:00:00.000Z');
+      dateTo = new Date(endDate + 'T23:59:59.999Z');
+    } else {
+      const p = (period || 'all').toLowerCase();
+      if (p === 'day' || p === 'today') {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        dateTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      } else if (p === 'week') {
+        dateFrom = new Date(now);
+        dateFrom.setDate(now.getDate() - 7);
+        dateFrom.setHours(0, 0, 0, 0);
+        dateTo = now;
+      } else if (p === 'month') {
+        dateFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        dateTo = now;
+      } else if (p === 'year') {
+        dateFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+        dateTo = now;
+      }
+    }
+
+    const applyDateFilter = (qb: any, alias: string = 'orders') => {
+      if (dateFrom && dateTo) {
+        qb.andWhere(`${alias}.createdAt >= :dateFrom AND ${alias}.createdAt <= :dateTo`, {
+          dateFrom,
+          dateTo,
+        });
+      }
+    };
+
+    // 1. Core Orders Query (All in Range)
+    const allOrdersQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(allOrdersQb, 'orders');
+
+    // 2. Pending Orders (status 1)
+    const pendingQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.statusId = :statusId', { statusId: 1 })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(pendingQb, 'orders');
+
+    // 3. Delivered Orders (status 8)
+    const deliveredQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.statusId = :statusId', { statusId: 8 })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(deliveredQb, 'orders');
+
+    // 4. In-Transit / Processing Orders (statuses: 2=Approved, 3=Processing, 6=InTransit, 7=OutForDelivery)
+    const inTransitQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.statusId IN (:...statuses)', { statuses: [2, 3, 6, 7] })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(inTransitQb, 'orders');
+
+    // 5. Cancelled Orders (status 4)
+    const cancelledQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.statusId = :statusId', { statusId: 4 })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(cancelledQb, 'orders');
+
+    // 6. Returned / Damaged Orders (status 5)
+    const returnedQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.statusId = :statusId', { statusId: 5 })
+      .select('COUNT(orders.id)', 'count')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
+    applyDateFilter(returnedQb, 'orders');
+
+    // 7. Operating Expenses
+    const expenseQb = this.expenseRepository
+      .createQueryBuilder('expense')
+      .where('expense.organizationId = :organizationId', { organizationId })
+      .select('COALESCE(SUM(expense.amount), 0)', 'totalExpense')
+      .addSelect('COUNT(expense.id)', 'expenseCount');
+    if (dateFrom && dateTo) {
+      expenseQb.andWhere('expense.expenseDate >= :startDate AND expense.expenseDate <= :endDate', {
+        startDate: dateFrom.toISOString().split('T')[0],
+        endDate: dateTo.toISOString().split('T')[0],
+      });
+    }
+
+    // 8. Accounts Payable (Outstanding Supplier Bills)
+    const apQb = this.supplierBillRepository
+      .createQueryBuilder('bill')
+      .where('bill.organizationId = :organizationId', { organizationId })
+      .select('COALESCE(SUM(bill.dueAmount), 0)', 'totalDue');
+
+    // 9. Warehouse Stock Valuation
+    const valuationQb = this.inventoryItemRepository
+      .createQueryBuilder('item')
+      .leftJoin('item.product', 'product')
+      .where('product.organizationId = :organizationId', { organizationId })
+      .select('COALESCE(SUM(item.quantity), 0)', 'totalUnits')
+      .addSelect('COALESCE(SUM(item.quantity * COALESCE(product.regularPrice, 0)), 0)', 'totalValue');
+
+    // 10. Total Clients & New Clients
+    const totalClientsQb = this.customerRepository
       .createQueryBuilder('customers')
-      .select('COUNT(customers.id)', 'count')
       .where('customers.organizationId = :organizationId', { organizationId })
-      .getRawOne();
+      .select('COUNT(customers.id)', 'count');
 
-    const totalAgentPromise = this.userRepository
-      .createQueryBuilder('users')
-      .select('COUNT(users.id)', 'count')
-      .where('users.organizationId = :organizationId', { organizationId })
-      .andWhere('users.role = :role', { role: 'user' })
-      .getRawOne();
+    const newClientsQb = this.customerRepository
+      .createQueryBuilder('customers')
+      .where('customers.organizationId = :organizationId', { organizationId })
+      .select('COUNT(customers.id)', 'count');
+    applyDateFilter(newClientsQb, 'customers');
 
-    const totalPendingOrdersPromise = this.orderRepository
-      .createQueryBuilder('orders')
-      .select('COUNT(orders.id)', 'count')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: '1' })
-      .addSelect('SUM(orders.totalPrice)', 'totalPrice')
-      .getRawOne();
-
-    const totalDeliveredOrdersPromise = this.orderRepository
-      .createQueryBuilder('orders')
-      .select('COUNT(orders.id)', 'count')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: '8' })
-      .addSelect('SUM(orders.totalPrice)', 'totalPrice') // Assuming the column name is 'totalPrice'
-      .getRawOne();
-
-    const totalCancelledOrdersPromise = this.orderRepository
-      .createQueryBuilder('orders')
-      .select('COUNT(orders.id)', 'count')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: '4' })
-      .addSelect('SUM(orders.totalPrice)', 'totalPrice')
-      .getRawOne();
-
-    const topCustomersPromise = this.customerRepository
+    // 11. Top Customers
+    const topCustomersQb = this.customerRepository
       .createQueryBuilder('customer')
       .where('customer.organizationId = :organizationId', { organizationId })
       .leftJoin('customer.orders', 'order')
@@ -153,48 +263,204 @@ export class DashboardService {
         'customer.id AS id',
         'customer.customerName AS name',
         'customer.customerPhoneNumber AS phone',
-        'customer.customer_Id AS customerId',
         'COUNT(order.id) AS orderCount',
-        'SUM(order.totalPrice) AS price',
+        'COALESCE(SUM(order.totalPrice), 0) AS price',
       ])
       .groupBy('customer.id')
-      .orderBy('orderCount', 'DESC')
-      .limit(5)
-      .getRawMany();
+      .orderBy('COALESCE(SUM(order.totalPrice), 0)', 'DESC')
+      .limit(5);
 
-    // --- Await all promises in parallel ---
+    // 12. Top Selling Products
+    const topProductsQb = this.orderproductsRepository
+      .createQueryBuilder('op')
+      .innerJoin('op.order', 'o')
+      .innerJoin('op.product', 'p')
+      .where('o.organizationId = :organizationId', { organizationId });
+    applyDateFilter(topProductsQb, 'o');
+    topProductsQb
+      .select('op.productId', 'productId')
+      .addSelect('p.name', 'productName')
+      .addSelect('p.sku', 'sku')
+      .addSelect('COALESCE(SUM(op.productQuantity), 0)', 'quantitySold')
+      .addSelect('COALESCE(SUM(op.subtotal), 0)', 'totalSales')
+      .groupBy('op.productId')
+      .addGroupBy('p.name')
+      .addGroupBy('p.sku')
+      .orderBy('COALESCE(SUM(op.subtotal), 0)', 'DESC')
+      .limit(5);
+
+    // 13. Time-Series Chart Data
+    let timeSeriesQb = this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId });
+    applyDateFilter(timeSeriesQb, 'orders');
+
+    if (period === 'day' || period === 'today') {
+      timeSeriesQb
+        .select("TO_CHAR(orders.createdAt, 'HH24:00')", 'timeKey')
+        .addSelect('COUNT(orders.id)', 'ordersCount')
+        .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+        .groupBy("TO_CHAR(orders.createdAt, 'HH24:00')")
+        .orderBy("TO_CHAR(orders.createdAt, 'HH24:00')", 'ASC');
+    } else if (period === 'week') {
+      timeSeriesQb
+        .select("TO_CHAR(orders.createdAt, 'Dy')", 'timeKey')
+        .addSelect("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'sortDate')
+        .addSelect('COUNT(orders.id)', 'ordersCount')
+        .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+        .groupBy("TO_CHAR(orders.createdAt, 'Dy'), TO_CHAR(orders.createdAt, 'YYYY-MM-DD')")
+        .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'ASC');
+    } else if (period === 'month') {
+      timeSeriesQb
+        .select("TO_CHAR(orders.createdAt, 'DD Mon')", 'timeKey')
+        .addSelect("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'sortDate')
+        .addSelect('COUNT(orders.id)', 'ordersCount')
+        .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+        .groupBy("TO_CHAR(orders.createdAt, 'DD Mon'), TO_CHAR(orders.createdAt, 'YYYY-MM-DD')")
+        .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'ASC');
+    } else {
+      timeSeriesQb
+        .select("TO_CHAR(orders.createdAt, 'Mon')", 'timeKey')
+        .addSelect("TO_CHAR(orders.createdAt, 'MM')", 'sortDate')
+        .addSelect('COUNT(orders.id)', 'ordersCount')
+        .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
+        .groupBy("TO_CHAR(orders.createdAt, 'Mon'), TO_CHAR(orders.createdAt, 'MM')")
+        .orderBy("TO_CHAR(orders.createdAt, 'MM')", 'ASC');
+    }
+
+    // Execute All in Parallel
     const [
-      totalClient,
-      totalAgent,
-      totalPendingOrders,
-      totalDeliveredOrders,
-      totalCancelledOrders,
+      allOrders,
+      pendingOrders,
+      deliveredOrders,
+      inTransitOrders,
+      cancelledOrders,
+      returnedOrders,
+      expenses,
+      apData,
+      valuationData,
+      totalClientsData,
+      newClientsData,
       topCustomers,
+      topProducts,
+      timeSeriesData,
     ] = await Promise.all([
-      totalClientPromise,
-      totalAgentPromise,
-      totalPendingOrdersPromise,
-      totalDeliveredOrdersPromise,
-      totalCancelledOrdersPromise,
-      topCustomersPromise,
+      allOrdersQb.getRawOne(),
+      pendingQb.getRawOne(),
+      deliveredQb.getRawOne(),
+      inTransitQb.getRawOne(),
+      cancelledQb.getRawOne(),
+      returnedQb.getRawOne(),
+      expenseQb.getRawOne(),
+      apQb.getRawOne(),
+      valuationQb.getRawOne(),
+      totalClientsQb.getRawOne(),
+      newClientsQb.getRawOne(),
+      topCustomersQb.getRawMany(),
+      topProductsQb.getRawMany(),
+      timeSeriesQb.getRawMany(),
     ]);
 
+    const totalOrdersCount = Number(allOrders?.count || 0);
+    const grossSalesAmount = Number(allOrders?.totalPrice || 0);
+    const deliveredCount = Number(deliveredOrders?.count || 0);
+    const deliveredAmount = Number(deliveredOrders?.totalPrice || 0);
+    const deliverySuccessRate = totalOrdersCount > 0 ? (deliveredCount / totalOrdersCount) * 100 : 0;
+
+    const cancelledCount = Number(cancelledOrders?.count || 0);
+    const cancelledAmount = Number(cancelledOrders?.totalPrice || 0);
+    const returnedCount = Number(returnedOrders?.count || 0);
+    const returnedAmount = Number(returnedOrders?.totalPrice || 0);
+    const returnLossRate = totalOrdersCount > 0 ? ((cancelledCount + returnedCount) / totalOrdersCount) * 100 : 0;
+
+    const operatingExpenses = Number(expenses?.totalExpense || 0);
+    const grossProfit = deliveredAmount - operatingExpenses;
+    const profitMargin = deliveredAmount > 0 ? (grossProfit / deliveredAmount) * 100 : 0;
+    const aov = totalOrdersCount > 0 ? grossSalesAmount / totalOrdersCount : 0;
+
     return {
-      totalClient: Number(totalClient.count),
-      totalAgent: Number(totalAgent.count),
+      period,
+      startDate: dateFrom?.toISOString(),
+      endDate: dateTo?.toISOString(),
+      salesOverview: {
+        grossSales: grossSalesAmount,
+        totalOrders: totalOrdersCount,
+        aov,
+      },
+      fulfillmentOverview: {
+        delivered: {
+          count: deliveredCount,
+          amount: deliveredAmount,
+          rate: Number(deliverySuccessRate.toFixed(1)),
+        },
+        pending: {
+          count: Number(pendingOrders?.count || 0),
+          amount: Number(pendingOrders?.totalPrice || 0),
+        },
+        inTransit: {
+          count: Number(inTransitOrders?.count || 0),
+          amount: Number(inTransitOrders?.totalPrice || 0),
+        },
+        cancelled: {
+          count: cancelledCount,
+          amount: cancelledAmount,
+          rate: Number(((cancelledCount / (totalOrdersCount || 1)) * 100).toFixed(1)),
+        },
+        returned: {
+          count: returnedCount,
+          amount: returnedAmount,
+          rate: Number(((returnedCount / (totalOrdersCount || 1)) * 100).toFixed(1)),
+        },
+        returnLossRate: Number(returnLossRate.toFixed(1)),
+      },
+      financialOverview: {
+        deliveredRevenue: deliveredAmount,
+        operatingExpenses,
+        grossProfit,
+        profitMargin: Number(profitMargin.toFixed(1)),
+        outstandingAP: Number(apData?.totalDue || 0),
+      },
+      inventoryOverview: {
+        totalUnits: Number(valuationData?.totalUnits || 0),
+        totalValuation: Number(valuationData?.totalValue || 0),
+      },
+      customerOverview: {
+        totalClients: Number(totalClientsData?.count || 0),
+        newClientsInPeriod: Number(newClientsData?.count || 0),
+      },
+      chartData: timeSeriesData.map((t: any) => ({
+        key: t.timeKey,
+        orders: Number(t.ordersCount || 0),
+        revenue: Number(t.revenue || 0),
+      })),
+      topCustomers: topCustomers.map((c: any) => ({
+        id: c.id,
+        name: c.name || 'Customer',
+        phone: c.phone || '',
+        orderCount: Number(c.orderCount || 0),
+        totalSpent: Number(c.price || 0),
+      })),
+      topProducts: topProducts.map((p: any) => ({
+        productId: p.productId,
+        productName: p.productName || 'Product',
+        sku: p.sku || '',
+        quantitySold: Number(p.quantitySold || 0),
+        totalSales: Number(p.totalSales || 0),
+      })),
+      // Backward compatibility fields
+      totalClient: Number(totalClientsData?.count || 0),
       totalPendingOrders: {
-        total: Number(totalPendingOrders.count),
-        price: Number(totalPendingOrders.totalPrice),
+        total: Number(pendingOrders?.count || 0),
+        price: Number(pendingOrders?.totalPrice || 0),
       },
       totalDeliveredOrders: {
-        total: Number(totalDeliveredOrders.count),
-        price: Number(totalDeliveredOrders.totalPrice),
+        total: deliveredCount,
+        price: deliveredAmount,
       },
       totalCancelledOrders: {
-        total: Number(totalCancelledOrders.count),
-        price: Number(totalCancelledOrders.totalPrice),
+        total: cancelledCount,
+        price: cancelledAmount,
       },
-      topCustomers,
     };
   }
 
@@ -455,6 +721,167 @@ export class DashboardService {
         customerName: o.customerName,
         status: o.statusLabel,
       })),
+    };
+  }
+
+  async getAreaWiseDistribution(
+    organizationId: string,
+    level: 'division' | 'district' | 'thana' = 'division',
+    period: string = 'month',
+    startDate?: string,
+    endDate?: string,
+  ) {
+    if (!organizationId) {
+      throw new Error('organizationId is required');
+    }
+
+    const now = new Date();
+    let currentFrom: Date;
+    let currentTo: Date = now;
+    let previousFrom: Date;
+    let previousTo: Date;
+
+    if (startDate && endDate) {
+      currentFrom = new Date(startDate + 'T00:00:00.000Z');
+      currentTo = new Date(endDate + 'T23:59:59.999Z');
+      const durationMs = currentTo.getTime() - currentFrom.getTime();
+      previousTo = new Date(currentFrom.getTime() - 1);
+      previousFrom = new Date(previousTo.getTime() - durationMs);
+    } else {
+      const p = (period || 'month').toLowerCase();
+      if (p === 'day' || p === 'today') {
+        currentFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+        currentTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        previousFrom = new Date(currentFrom);
+        previousFrom.setDate(previousFrom.getDate() - 1);
+        previousTo = new Date(currentTo);
+        previousTo.setDate(previousTo.getDate() - 1);
+      } else if (p === 'week') {
+        currentFrom = new Date(now);
+        currentFrom.setDate(now.getDate() - 7);
+        currentFrom.setHours(0, 0, 0, 0);
+        previousTo = new Date(currentFrom.getTime() - 1);
+        previousFrom = new Date(currentFrom);
+        previousFrom.setDate(previousFrom.getDate() - 7);
+      } else if (p === 'year') {
+        currentFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+        previousFrom = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
+        previousTo = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
+      } else {
+        currentFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+        previousFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+        previousTo = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+      }
+    }
+
+    let areaColumn = "COALESCE(NULLIF(orders.receiverDivision, ''), NULLIF(customer.division, ''), 'Unspecified')";
+    if (level === 'district') {
+      areaColumn = "COALESCE(NULLIF(orders.receiverDistrict, ''), NULLIF(customer.district, ''), 'Unspecified')";
+    } else if (level === 'thana') {
+      areaColumn = "COALESCE(NULLIF(orders.receiverThana, ''), NULLIF(customer.thana, ''), 'Unspecified')";
+    }
+
+    // Current period area metrics
+    const currentResults = await this.orderRepository
+      .createQueryBuilder('orders')
+      .leftJoin('orders.customer', 'customer')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.createdAt >= :currentFrom AND orders.createdAt <= :currentTo', {
+        currentFrom,
+        currentTo,
+      })
+      .select(`${areaColumn}`, 'area')
+      .addSelect('COUNT(orders.id)', 'orderCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalSales')
+      .addSelect("COUNT(CASE WHEN orders.statusId = 8 THEN 1 END)", 'deliveredCount')
+      .addSelect("COUNT(CASE WHEN orders.statusId IN (4, 5) THEN 1 END)", 'cancelledCount')
+      .groupBy(areaColumn)
+      .orderBy('COUNT(orders.id)', 'DESC')
+      .limit(30)
+      .getRawMany();
+
+    // Previous period area metrics for trend / growth calculation
+    const previousResults = await this.orderRepository
+      .createQueryBuilder('orders')
+      .leftJoin('orders.customer', 'customer')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.createdAt >= :previousFrom AND orders.createdAt <= :previousTo', {
+        previousFrom,
+        previousTo,
+      })
+      .select(`${areaColumn}`, 'area')
+      .addSelect('COUNT(orders.id)', 'prevOrderCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'prevSales')
+      .groupBy(areaColumn)
+      .getRawMany();
+
+    const prevMap = new Map<string, { count: number; sales: number }>();
+    previousResults.forEach((r) => {
+      prevMap.set(r.area, {
+        count: Number(r.prevOrderCount || 0),
+        sales: Number(r.prevSales || 0),
+      });
+    });
+
+    const totalOrdersInPeriod = currentResults.reduce(
+      (sum, r) => sum + Number(r.orderCount || 0),
+      0,
+    );
+    const totalSalesInPeriod = currentResults.reduce(
+      (sum, r) => sum + Number(r.totalSales || 0),
+      0,
+    );
+
+    const areas = currentResults.map((r) => {
+      const currentOrders = Number(r.orderCount || 0);
+      const currentSales = Number(r.totalSales || 0);
+      const deliveredCount = Number(r.deliveredCount || 0);
+      const cancelledCount = Number(r.cancelledCount || 0);
+      const prev = prevMap.get(r.area) || { count: 0, sales: 0 };
+
+      let orderGrowthRate = 0;
+      if (prev.count > 0) {
+        orderGrowthRate = ((currentOrders - prev.count) / prev.count) * 100;
+      } else if (currentOrders > 0) {
+        orderGrowthRate = 100;
+      }
+
+      const deliveryRate = currentOrders > 0 ? (deliveredCount / currentOrders) * 100 : 0;
+      const shareOfTotal = totalOrdersInPeriod > 0 ? (currentOrders / totalOrdersInPeriod) * 100 : 0;
+
+      return {
+        area: r.area,
+        orders: currentOrders,
+        previousOrders: prev.count,
+        sales: currentSales,
+        previousSales: prev.sales,
+        deliveredOrders: deliveredCount,
+        cancelledOrders: cancelledCount,
+        deliveryRate: Number(deliveryRate.toFixed(1)),
+        orderGrowthRate: Number(orderGrowthRate.toFixed(1)),
+        growthTrend: orderGrowthRate > 0 ? 'up' : orderGrowthRate < 0 ? 'down' : 'stable',
+        sharePercentage: Number(shareOfTotal.toFixed(1)),
+      };
+    });
+
+    const growingAreas = [...areas]
+      .filter((a) => a.orderGrowthRate > 0)
+      .sort((a, b) => b.orderGrowthRate - a.orderGrowthRate)
+      .slice(0, 5);
+
+    const decliningAreas = [...areas]
+      .filter((a) => a.orderGrowthRate < 0)
+      .sort((a, b) => a.orderGrowthRate - b.orderGrowthRate)
+      .slice(0, 5);
+
+    return {
+      level,
+      period,
+      totalOrders: totalOrdersInPeriod,
+      totalSales: totalSalesInPeriod,
+      areas,
+      topGrowingAreas: growingAreas,
+      topDecliningAreas: decliningAreas,
     };
   }
 }
