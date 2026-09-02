@@ -1963,393 +1963,626 @@ async update(orderId: number, data: Order) {
   // the non-transactional repository).
   // ===============================
   private async processOrdersChunk(
-    orderIds: number[],
-    mainData: any,
-    organizationId: string,
-  ) {
-    const { currentStatus, agentId: actingAgentId, ...data } = mainData;
+  orderIds: number[],
+  mainData: any,
+  organizationId: string,
+) {
+  const { currentStatus, agentId: actingAgentId, ...data } = mainData;
 
-    const orders = await this.orderRepository.find({
-      where: { id: In(orderIds) },
-      relations: ['status'],
+  const orders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
+
+  if (orders.length !== orderIds.length) {
+    throw new ApiError(
+      HttpStatus.BAD_REQUEST,
+      'Some orders do not exist',
+    );
+  }
+
+  const queryRunner = this.dataSource.createQueryRunner();
+
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+
+  const manager = queryRunner.manager;
+
+  try {
+    const allProducts = await manager.find(Products, {
+      where: { orderId: In(orderIds) },
     });
 
-    if (orders.length !== orderIds.length) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-    }
+    for (const product of allProducts) {
+      const { productId, productQuantity } = product;
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-    const manager = queryRunner.manager;
+      const order = orders.find((o) => o.id === product.orderId);
 
-    try {
-      const allProducts = await manager.find(Products, {
-        where: { orderId: In(orderIds) },
-      });
+      if (!order) continue;
 
-      for (const product of allProducts) {
-        const { productId, productQuantity } = product;
-        const order = orders.find((o) => o.id === product.orderId);
-        if (!order) continue;
+      const qty = Number(productQuantity) || 0;
 
-        const inventory = await this.lockInventory(manager, productId);
-        const inventoryItem = order.locationId
-          ? await this.lockInventoryItem(manager, productId, order.locationId)
-          : null;
+      if (qty <= 0) {
+        continue;
+      }
 
-        // ========== STATUS 7: IN-TRANSIT ===========
-        if (data.statusId === OrderStatusId.InTransit) {
-          if (inventory) {
-            await manager.decrement(
-              Inventory,
-              { productId },
-              'processing',
-              productQuantity,
-            );
-            await manager.decrement(
-              Inventory,
-              { productId },
-              'stock',
-              productQuantity,
-            );
-          }
-          if (inventoryItem) {
-            await manager.decrement(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'processing',
-              productQuantity,
-            );
-            await manager.decrement(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'quantity',
-              productQuantity,
-            );
-          }
+      const inventory = await this.lockInventory(
+        manager,
+        productId,
+      );
+
+      const inventoryItem = order.locationId
+        ? await this.lockInventoryItem(
+            manager,
+            productId,
+            order.locationId,
+          )
+        : null;
+
+      // ============================================================
+      // STATUS 7: IN-TRANSIT
+      //
+      // Packing/Processing -> In-transit
+      //
+      // Inventory:
+      // processing -= qty
+      // stock      -= qty
+      // ============================================================
+
+      if (data.statusId === OrderStatusId.InTransit) {
+        if (inventory) {
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'processing',
+            qty,
+          );
+
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'stock',
+            qty,
+          );
         }
 
-        // ========== STATUS 4: CANCEL ===========
-        if (
-          data.statusId === OrderStatusId.Cancel &&
-          (currentStatus === OrderStatusId.Store || currentStatus === OrderStatusId.Packing)
-        ) {
-          if (inventory) {
-            await manager.decrement(
-              Inventory,
-              { productId },
-              'processing',
-              productQuantity,
-            );
-          }
-          if (inventoryItem) {
-            await manager.decrement(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'processing',
-              productQuantity,
-            );
-          }
+        if (inventoryItem) {
+          await manager.decrement(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'processing',
+            qty,
+          );
+
+          await manager.decrement(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'quantity',
+            qty,
+          );
+        }
+      }
+
+      // ============================================================
+      // STATUS 4: CANCEL
+      //
+      // Store/Packing -> Cancel
+      //
+      // Inventory:
+      // processing -= qty
+      // ============================================================
+
+      if (
+        data.statusId === OrderStatusId.Cancel &&
+        (
+          currentStatus === OrderStatusId.Store ||
+          currentStatus === OrderStatusId.Packing
+        )
+      ) {
+        if (inventory) {
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'processing',
+            qty,
+          );
         }
 
-        // ========== STATUS 4: RETURN / ORDER QUE ===========
-        if (data.statusId === OrderStatusId.Cancel && currentStatus === OrderStatusId.Approved) {
-          if (inventory) {
-            await manager.decrement(
-              Inventory,
-              { productId },
-              'orderQue',
-              productQuantity,
-            );
-          }
-          if (inventoryItem) {
-            await manager.decrement(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'orderQue',
-              productQuantity,
-            );
-          }
+        if (inventoryItem) {
+          await manager.decrement(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'processing',
+            qty,
+          );
+        }
+      }
+
+      // ============================================================
+      // STATUS 4: CANCEL
+      //
+      // Approved -> Cancel
+      //
+      // Inventory:
+      // orderQue -= qty
+      // ============================================================
+
+      if (
+        data.statusId === OrderStatusId.Cancel &&
+        currentStatus === OrderStatusId.Approved
+      ) {
+        if (inventory) {
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'orderQue',
+            qty,
+          );
         }
 
-        // ========== STATUS 4: CANCEL (from HOLD) ===========
-        // FIX(C): cancelling an order that was previously on Hold had NO
-        // branch at all here — only Approved and Store/Packing were
-        // handled — so hoildQue was never released on cancel-from-hold and
-        // stayed permanently inflated. Mirrors the branches above.
-        if (data.statusId === OrderStatusId.Cancel && currentStatus === OrderStatusId.Hold) {
-          if (inventory) {
-            await manager.decrement(
-              Inventory,
-              { productId },
-              'hoildQue',
-              productQuantity,
-            );
-          }
-          if (inventoryItem) {
-            await manager.decrement(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'hoildQue',
-              productQuantity,
-            );
-          }
+        if (inventoryItem) {
+          await manager.decrement(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'orderQue',
+            qty,
+          );
+        }
+      }
+
+      // ============================================================
+      // STATUS 4: CANCEL
+      //
+      // Hold -> Cancel
+      //
+      // Inventory:
+      // hoildQue -= qty
+      // ============================================================
+
+      if (
+        data.statusId === OrderStatusId.Cancel &&
+        currentStatus === OrderStatusId.Hold
+      ) {
+        if (inventory) {
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'hoildQue',
+            qty,
+          );
         }
 
-        // ========== STATUS 3: HOLD (from PROCESS) ===========
-        if (data.statusId === OrderStatusId.Hold && currentStatus === OrderStatusId.Approved) {
-          const qty = Number(productQuantity) || 0;
+        if (inventoryItem) {
+          await manager.decrement(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'hoildQue',
+            qty,
+          );
+        }
+      }
 
-          if (inventory) {
+      // ============================================================
+      // STATUS 3: HOLD
+      //
+      // Approved -> Hold
+      //
+      // Inventory:
+      // orderQue -= qty
+      // hoildQue += qty
+      //
+      // Packing -> Hold
+      //
+      // Inventory:
+      // processing -= qty
+      // hoildQue += qty
+      // ============================================================
+
+      if (
+        data.statusId === OrderStatusId.Hold &&
+        (
+          currentStatus === OrderStatusId.Approved ||
+          currentStatus === OrderStatusId.Packing
+        )
+      ) {
+        if (inventory) {
+          if (currentStatus === OrderStatusId.Approved) {
+            // Approved -> Hold
             await manager.query(
-              `UPDATE "inventory"
-               SET "orderQue" = COALESCE("orderQue", 0) - $1,
-                   "hoildQue" = COALESCE("hoildQue", 0) + $1,
-                   "updatedAt" = now()
-               WHERE "productId" = $2`,
+              `
+              UPDATE "inventory"
+              SET
+                "orderQue" = COALESCE("orderQue", 0) - $1,
+                "hoildQue" = COALESCE("hoildQue", 0) + $1,
+                "updatedAt" = NOW()
+              WHERE "productId" = $2
+              `,
               [qty, productId],
             );
           }
 
-          if (inventoryItem) {
+          if (currentStatus === OrderStatusId.Packing) {
+            // Packing -> Hold
             await manager.query(
-              `UPDATE "inventoryItems"
-               SET "orderQue" = COALESCE("orderQue", 0) - $1,
-                   "hoildQue" = COALESCE("hoildQue", 0) + $1,
-                   "updatedAt" = now()
-               WHERE "productId" = $2 AND "locationId" = $3`,
-              [qty, productId, order.locationId],
+              `
+              UPDATE "inventory"
+              SET
+                "processing" = COALESCE("processing", 0) - $1,
+                "hoildQue" = COALESCE("hoildQue", 0) + $1,
+                "updatedAt" = NOW()
+              WHERE "productId" = $2
+              `,
+              [qty, productId],
             );
           }
         }
 
-        // ========== STATUS 2: PROCESS / ORDER QUE INCREMENT ===========
-        if (
-          data.statusId === OrderStatusId.Approved &&
-          (currentStatus === OrderStatusId.Pending || currentStatus === OrderStatusId.Cancel)
-        ) {
-          if (inventory) {
-            await manager.increment(
-              Inventory,
-              { productId },
-              'orderQue',
-              productQuantity,
+        if (inventoryItem) {
+          if (currentStatus === OrderStatusId.Approved) {
+            // Approved -> Hold
+            await manager.query(
+              `
+              UPDATE "inventoryItems"
+              SET
+                "orderQue" = COALESCE("orderQue", 0) - $1,
+                "hoildQue" = COALESCE("hoildQue", 0) + $1,
+                "updatedAt" = NOW()
+              WHERE "productId" = $2
+                AND "locationId" = $3
+              `,
+              [
+                qty,
+                productId,
+                order.locationId,
+              ],
             );
           }
-          if (inventoryItem) {
-            await manager.increment(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'orderQue',
-              productQuantity,
-            );
-          } else if (inventory && order.locationId) {
-            await this.ensureInventoryItem(
-              manager,
-              productId,
-              order.locationId,
-              inventory.id,
-            );
-            await manager.increment(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'orderQue',
-              productQuantity,
-            );
-          }
-        }
 
-        // ========== STATUS 3 from 1 → HOLD QUE ===========
-        if (data.statusId === OrderStatusId.Hold && currentStatus === OrderStatusId.Pending) {
-          if (inventory) {
-            await manager.increment(
-              Inventory,
-              { productId },
-              'hoildQue',
-              productQuantity,
-            );
-          }
-          if (inventoryItem) {
-            await manager.increment(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'hoildQue',
-              productQuantity,
-            );
-          } else if (inventory && order.locationId) {
-            await this.ensureInventoryItem(
-              manager,
-              productId,
-              order.locationId,
-              inventory.id,
-            );
-            await manager.increment(
-              InventoryItem,
-              { productId, locationId: order.locationId },
-              'hoildQue',
-              productQuantity,
+          if (currentStatus === OrderStatusId.Packing) {
+            // Packing -> Hold
+            await manager.query(
+              `
+              UPDATE "inventoryItems"
+              SET
+                "processing" = COALESCE("processing", 0) - $1,
+                "hoildQue" = COALESCE("hoildQue", 0) + $1,
+                "updatedAt" = NOW()
+              WHERE "productId" = $2
+                AND "locationId" = $3
+              `,
+              [
+                qty,
+                productId,
+                order.locationId,
+              ],
             );
           }
         }
       }
 
-      // ========== STATUS 9 / 11 / 13: NOT YET DEFINED ===========
-      // Unreachable, Pending-Return and Damage currently have NO inventory
-      // transition defined anywhere in this service. Rather than silently
-      // doing nothing (the old bug pattern), we log loudly so this is
-      // impossible to miss in production. Confirm the intended
-      // orderQue/hoildQue/processing/stock behaviour for these statuses and
-      // add the matching increment/decrement block here before relying on
-      // them in the app.
+      // ============================================================
+      // STATUS 2: APPROVED
+      //
+      // Pending/Cancel -> Approved
+      //
+      // Inventory:
+      // orderQue += qty
+      // ============================================================
+
       if (
-        data.statusId === OrderStatusId.Unreachable ||
-        data.statusId === OrderStatusId.PendingReturn ||
-        data.statusId === OrderStatusId.Damage
+        data.statusId === OrderStatusId.Approved &&
+        (
+          currentStatus === OrderStatusId.Pending ||
+          currentStatus === OrderStatusId.Cancel
+        )
       ) {
-        this.logger.warn(
-          `Order(s) [${orderIds.join(', ')}] moved to statusId ${data.statusId} ` +
-            `(${OrderStatusId[data.statusId]}) — NO inventory transition is ` +
-            `implemented for this status yet. orderQue/hoildQue/processing/stock ` +
-            `were left untouched. Confirm the intended business rule and implement it.`,
-        );
+        if (inventory) {
+          await manager.increment(
+            Inventory,
+            { productId },
+            'orderQue',
+            qty,
+          );
+        }
+
+        if (inventoryItem) {
+          await manager.increment(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'orderQue',
+            qty,
+          );
+        } else if (inventory && order.locationId) {
+          await this.ensureInventoryItem(
+            manager,
+            productId,
+            order.locationId,
+            inventory.id,
+          );
+
+          await manager.increment(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'orderQue',
+            qty,
+          );
+        }
       }
 
-      // ========== STATUS 5: STORE (once per chunk, not per product) ===========
-      // TODO: RequisitionService.createRequisition currently opens its own
-      // separate transaction, so it is NOT atomic with the inventory writes
-      // above. If a requisition create fails, the inventory changes in this
-      // queryRunner will already be rolled back (since we throw below and
-      // catch triggers rollback), but if inventory succeeds and THIS call
-      // throws afterwards, we still roll back correctly because we're still
-      // inside this try block. For full atomicity (single DB transaction),
-      // change RequisitionService.createRequisition to optionally accept an
-      // EntityManager and pass `manager` through here.
-      if (data.statusId === OrderStatusId.Store) {
-        await this.requisitionService.createRequisition(
-          { orderIds, userId: data?.userId ?? data?.agentId },
-          organizationId,
-        );
-        await manager.update(
-          Order,
-          { id: In(orderIds) },
-          { storeTime: new Date() },
-        );
-      }
+      // ============================================================
+      // STATUS 3: HOLD
+      //
+      // Pending -> Hold
+      //
+      // Inventory:
+      // hoildQue += qty
+      // ============================================================
 
-      // ========== STATUS 6: PACKING (once per chunk) ===========
-      if (data.statusId === OrderStatusId.Packing) {
-        await manager.update(
-          Order,
-          { id: In(orderIds) },
-          { packingTime: new Date() },
-        );
-      }
+      if (
+        data.statusId === OrderStatusId.Hold &&
+        currentStatus === OrderStatusId.Pending
+      ) {
+        if (inventory) {
+          await manager.increment(
+            Inventory,
+            { productId },
+            'hoildQue',
+            qty,
+          );
+        }
 
-      // Update orders with new status & timestamps
-      if (data.statusId === OrderStatusId.InTransit) {
-        await manager.update(
-          Order,
-          { id: In(orderIds) },
-          { intransitTime: new Date() },
-        );
-      }
+        if (inventoryItem) {
+          await manager.increment(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'hoildQue',
+            qty,
+          );
+        } else if (inventory && order.locationId) {
+          await this.ensureInventoryItem(
+            manager,
+            productId,
+            order.locationId,
+            inventory.id,
+          );
 
-      // Finally, update orders general status & previousStatus
-      // NOTE: `Order.previousStatus` is typed as `string` on the entity,
-      // while `currentStatus` is tracked as a number everywhere else in
-      // this file. Convert here at the write boundary only — every place
-      // that later *reads* previousStatus already normalizes it with
-      // `Number(...)` before comparing, so this doesn't change behavior.
+          await manager.increment(
+            InventoryItem,
+            {
+              productId,
+              locationId: order.locationId,
+            },
+            'hoildQue',
+            qty,
+          );
+        }
+      }
+    }
+
+    // ============================================================
+    // STATUS 9 / 11 / 13
+    //
+    // Unreachable / Pending-Return / Damage
+    //
+    // No inventory transition currently defined.
+    // ============================================================
+
+    if (
+      data.statusId === OrderStatusId.Unreachable ||
+      data.statusId === OrderStatusId.PendingReturn ||
+      data.statusId === OrderStatusId.Damage
+    ) {
+      this.logger.warn(
+        `Order(s) [${orderIds.join(', ')}] moved to statusId ${
+          data.statusId
+        } (${OrderStatusId[data.statusId]}) — NO inventory transition ` +
+        `is implemented for this status yet. orderQue/hoildQue/processing/stock ` +
+        `were left untouched. Confirm the intended business rule and implement it.`,
+      );
+    }
+
+    // ============================================================
+    // STATUS 5: STORE
+    // ============================================================
+
+    if (data.statusId === OrderStatusId.Store) {
+      await this.requisitionService.createRequisition(
+        {
+          orderIds,
+          userId: data?.userId ?? data?.agentId,
+        },
+        organizationId,
+      );
+
       await manager.update(
         Order,
         { id: In(orderIds) },
         {
-          ...data,
-          previousStatus:
-            currentStatus !== undefined && currentStatus !== null
-              ? String(currentStatus)
-              : (null as unknown as string),
+          storeTime: new Date(),
         },
       );
-
-      await queryRunner.commitTransaction();
-    } catch (error: any) {
-      await queryRunner.rollbackTransaction();
-      throw new ApiError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        error.message || 'Failed to update inventory',
-      );
-    } finally {
-      await queryRunner.release();
     }
 
-    // ✅ Courier API call outside transaction — inventory/status changes are
-    // already committed, so a courier failure here never rolls those back.
-    // (Any courier-side failure is handled by sendOrdersToSteadfast's own
-    // reconciliation + revertFailedCourierOrders, which is itself
-    // transactional — see below.)
+    // ============================================================
+    // STATUS 6: PACKING
+    // ============================================================
+
+    if (data.statusId === OrderStatusId.Packing) {
+      await manager.update(
+        Order,
+        { id: In(orderIds) },
+        {
+          packingTime: new Date(),
+        },
+      );
+    }
+
+    // ============================================================
+    // STATUS 7: IN-TRANSIT TIMESTAMP
+    // ============================================================
+
     if (data.statusId === OrderStatusId.InTransit) {
-      const ordersByCourierPartnerId = new Map<string, typeof orders>();
-      for (const op of orders) {
-        const key = op.currier || 'unassigned';
-        if (!ordersByCourierPartnerId.has(key)) {
-          ordersByCourierPartnerId.set(key, []);
-        }
-        ordersByCourierPartnerId.get(key)!.push(op);
+      await manager.update(
+        Order,
+        { id: In(orderIds) },
+        {
+          intransitTime: new Date(),
+        },
+      );
+    }
+
+    // ============================================================
+    // UPDATE ORDER STATUS
+    // ============================================================
+
+    await manager.update(
+      Order,
+      { id: In(orderIds) },
+      {
+        ...data,
+        previousStatus:
+          currentStatus !== undefined &&
+          currentStatus !== null
+            ? String(currentStatus)
+            : (null as unknown as string),
+      },
+    );
+
+    // ============================================================
+    // COMMIT TRANSACTION
+    // ============================================================
+
+    await queryRunner.commitTransaction();
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to update inventory',
+    );
+  } finally {
+    await queryRunner.release();
+  }
+
+  // ================================================================
+  // COURIER API
+  // ================================================================
+
+  if (data.statusId === OrderStatusId.InTransit) {
+    const ordersByCourierPartnerId = new Map<
+      string,
+      typeof orders
+    >();
+
+    for (const op of orders) {
+      const key = op.currier || 'unassigned';
+
+      if (!ordersByCourierPartnerId.has(key)) {
+        ordersByCourierPartnerId.set(key, []);
       }
 
-      for (const [partnerId, partnerOrders] of ordersByCourierPartnerId) {
-        if (partnerId === 'unassigned') {
-          this.logger.warn(
-            `Skipped ${partnerOrders.length} order(s) with no courier partner assigned: [${partnerOrders
-              .map((o) => o.invoiceNumber)
-              .join(', ')}]`,
-          );
-          continue;
-        }
+      ordersByCourierPartnerId.get(key)!.push(op);
+    }
 
-        const currierCompany = await this.deliveryPartnerRepository.findOne({
-          where: { organizationId, id: partnerId },
+    for (
+      const [partnerId, partnerOrders] of
+      ordersByCourierPartnerId
+    ) {
+      if (partnerId === 'unassigned') {
+        this.logger.warn(
+          `Skipped ${partnerOrders.length} order(s) with no courier partner assigned: ` +
+          `[${partnerOrders
+            .map((o) => o.invoiceNumber)
+            .join(', ')}]`,
+        );
+
+        continue;
+      }
+
+      const currierCompany =
+        await this.deliveryPartnerRepository.findOne({
+          where: {
+            organizationId,
+            id: partnerId,
+          },
         });
 
-        if (!currierCompany) {
-          this.logger.warn(
-            `Courier partner ${partnerId} not found for org ${organizationId}, skipping ${partnerOrders.length} order(s): [${partnerOrders
-              .map((o) => o.invoiceNumber)
-              .join(', ')}]`,
-          );
-          continue;
-        }
+      if (!currierCompany) {
+        this.logger.warn(
+          `Courier partner ${partnerId} not found for org ${organizationId}, ` +
+          `skipping ${partnerOrders.length} order(s): [` +
+          `${partnerOrders
+            .map((o) => o.invoiceNumber)
+            .join(', ')}]`,
+        );
 
-        if (currierCompany.partnerName === 'SteadFast') {
-          await this.sendOrdersToSteadfast(
-            partnerOrders,
-            currierCompany,
-            currentStatus,
-          );
-        }
-        // else: other courier partners handled elsewhere / not yet integrated
+        continue;
+      }
+
+      if (currierCompany.partnerName === 'SteadFast') {
+        await this.sendOrdersToSteadfast(
+          partnerOrders,
+          currierCompany,
+          currentStatus,
+        );
       }
     }
+  }
 
-    // Save order logs
-    const updatedOrders = await this.orderRepository.find({
-      where: { id: In(orderIds) },
-      relations: ['status'],
-    });
+  // ================================================================
+  // SAVE ORDER LOGS
+  // ================================================================
 
-    const orderLogs = orders.map((order, index) => ({
+  const updatedOrders = await this.orderRepository.find({
+    where: {
+      id: In(orderIds),
+    },
+    relations: ['status'],
+  });
+
+  const orderLogs = orders.map((order) => {
+    const updatedOrder = updatedOrders.find(
+      (item) => item.id === order.id,
+    );
+
+    return {
       orderId: order.id,
       agentId: actingAgentId,
-      action: `Order Status changed to ${updatedOrders[index].status.label} from ${order.status.label}`,
+      action: `Order Status changed to ${
+        updatedOrder?.status?.label
+      } from ${order.status.label}`,
       previousValue: null,
-    }));
+    };
+  });
 
-    await this.orderLogsRepository.save(orderLogs);
+  await this.orderLogsRepository.save(orderLogs);
 
-    return updatedOrders;
-  }
+  return updatedOrders;
+}
 
   // ---------- Reconcile a batch of orders whose Steadfast outcome is uncertain ----------
   // FIX: single 2s retry ছিল — Steadfast async ভাবে order create করে, তাই ছোট
