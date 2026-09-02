@@ -27,6 +27,21 @@ export class Transaction {
   @Column()
   type: 'IN' | 'OUT';
 
+  @Column({ nullable: true })
+  referenceType: string; // e.g. 'STOCK_ADJUSTMENT', 'STOCK_TRANSFER_OUT', 'STOCK_TRANSFER_IN', 'ORDER_DISPATCH', 'ORDER_RETURN', 'PURCHASE_RECEIPT', 'PURCHASE_RETURN'
+
+  @Column({ nullable: true })
+  referenceNumber: string; // e.g. Order #, Transfer #, Adjustment #, GRN #
+
+  @Column({ type: 'text', nullable: true })
+  remarks: string; // Detailed human-readable explanation
+
+  @Column({ nullable: true })
+  performedById: string;
+
+  @Column({ nullable: true })
+  performedByName: string;
+
   @CreateDateColumn()
   transactionDate: Date;
 
@@ -34,6 +49,6 @@ export class Transaction {
   product: Product;
 
   @ManyToOne(() => Inventory, (inventory) => inventory.transactions)
-  @JoinColumn({name:"inventoryId",referencedColumnName:"productId"})
+  @JoinColumn({ name: 'inventoryId', referencedColumnName: 'productId' })
   inventory: Inventory;
 }

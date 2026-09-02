@@ -169,7 +169,18 @@ async loadInventory(organizationId, query) {
     .take(limit)
     .getManyAndCount();
 
-  return { data, total };
+  const syncedData = data.map((inv) => {
+    if (inv.inventoryItems && inv.inventoryItems.length > 0) {
+      const computedStock = inv.inventoryItems.reduce(
+        (sum, item) => sum + Number(item.quantity || 0),
+        0,
+      );
+      inv.stock = computedStock;
+    }
+    return inv;
+  });
+
+  return { data: syncedData, total };
 }
   async loadInventoryByProductId(productId: string) {
     const result = await this.inventoryRepository.findOne({

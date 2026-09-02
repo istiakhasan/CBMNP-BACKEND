@@ -87,7 +87,6 @@ export class PurchaseReturnsService {
     return this.dataSource.transaction(async (manager) => {
       const pr = await manager.findOne(PurchaseReturn, {
         where: { id: returnId, organizationId },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -95,6 +94,11 @@ export class PurchaseReturnsService {
       if (pr.status !== PurchaseReturnStatus.DRAFT) {
         throw new BadRequestException(`Return already processed with status '${pr.status}'`);
       }
+
+      const items = await manager.find(PurchaseReturnItem, {
+        where: { purchaseReturnId: pr.id },
+      });
+      pr.items = items;
 
       // Deduct stock from warehouse
       for (const item of pr.items) {

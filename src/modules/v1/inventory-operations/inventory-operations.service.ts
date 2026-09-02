@@ -12,6 +12,7 @@ import { StockAdjustment, AdjustmentStatus } from './entities/stock-adjustment.e
 import { StockAdjustmentItem } from './entities/stock-adjustment-item.entity';
 import { ProductBatch } from './entities/product-batch.entity';
 import { ProductReorderRule } from './entities/reorder-rule.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { Product } from '../product/entity/product.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
@@ -102,7 +103,6 @@ export class InventoryOperationsService {
     return this.dataSource.transaction(async (manager) => {
       const transfer = await manager.findOne(StockTransfer, {
         where: { id: transferId, organizationId },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -110,6 +110,11 @@ export class InventoryOperationsService {
       if (transfer.status !== StockTransferStatus.DRAFT && transfer.status !== StockTransferStatus.APPROVED) {
         throw new BadRequestException(`Cannot dispatch transfer with status '${transfer.status}'`);
       }
+
+      const items = await manager.find(StockTransferItem, {
+        where: { stockTransferId: transfer.id },
+      });
+      transfer.items = items;
 
       // Deduct stock from source warehouse
       for (const item of transfer.items) {
@@ -144,7 +149,6 @@ export class InventoryOperationsService {
     return this.dataSource.transaction(async (manager) => {
       const transfer = await manager.findOne(StockTransfer, {
         where: { id: transferId, organizationId },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -152,6 +156,11 @@ export class InventoryOperationsService {
       if (transfer.status !== StockTransferStatus.DISPATCHED && transfer.status !== StockTransferStatus.IN_TRANSIT) {
         throw new BadRequestException(`Cannot receive transfer with status '${transfer.status}'`);
       }
+
+      const items = await manager.find(StockTransferItem, {
+        where: { stockTransferId: transfer.id },
+      });
+      transfer.items = items;
 
       for (const item of transfer.items) {
         const receivedEntry = receivedItems?.find((r: any) => r.itemId === item.id || r.productId === item.productId);
@@ -249,7 +258,6 @@ export class InventoryOperationsService {
     return this.dataSource.transaction(async (manager) => {
       const adj = await manager.findOne(StockAdjustment, {
         where: { id: adjustmentId, organizationId },
-        relations: ['items'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -257,6 +265,11 @@ export class InventoryOperationsService {
       if (adj.status !== AdjustmentStatus.PENDING_APPROVAL) {
         throw new BadRequestException(`Adjustment already processed with status '${adj.status}'`);
       }
+
+      const items = await manager.find(StockAdjustmentItem, {
+        where: { stockAdjustmentId: adj.id },
+      });
+      adj.items = items;
 
       for (const item of adj.items) {
         let inv = await manager.findOne(InventoryItem, {
@@ -280,6 +293,38 @@ export class InventoryOperationsService {
         }
 
         await manager.save(inv);
+
+        // Synchronize master Inventory stock across all warehouses for this product
+        const allWarehouseItems = await manager.find(InventoryItem, {
+          where: { productId: item.productId },
+        });
+        const totalStockAcrossWarehouses = allWarehouseItems.reduce(
+          (sum, wItem) => sum + Number(wItem.quantity || 0),
+          0,
+        );
+
+        let masterInventory = await manager.findOne(Inventory, {
+          where: { productId: item.productId },
+        });
+
+        if (!masterInventory) {
+          masterInventory = manager.create(Inventory, {
+            productId: item.productId,
+            organizationId,
+            stock: totalStockAcrossWarehouses,
+            wastageQuantity: 0,
+            expiredQuantity: 0,
+          });
+        } else {
+          masterInventory.stock = totalStockAcrossWarehouses;
+        }
+
+        const savedMasterInv = await manager.save(masterInventory);
+
+        if (!inv.inventoryId || inv.inventoryId === 'inv-default') {
+          inv.inventoryId = savedMasterInv.id;
+          await manager.save(inv);
+        }
       }
 
       adj.status = AdjustmentStatus.APPROVED;

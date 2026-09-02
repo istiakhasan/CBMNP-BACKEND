@@ -102,7 +102,6 @@ export class SalesOperationsService {
     return this.dataSource.transaction(async (manager) => {
       const q = await manager.findOne(Quotation, {
         where: { id: quotationId, organizationId },
-        relations: ['items', 'customer'],
         lock: { mode: 'pessimistic_write' },
       });
 
@@ -110,6 +109,11 @@ export class SalesOperationsService {
       if (q.status === QuotationStatus.CONVERTED) {
         throw new BadRequestException('Quotation has already been converted to an Order');
       }
+
+      const items = await manager.find(QuotationItem, {
+        where: { quotationId: q.id },
+      });
+      q.items = items;
 
       const orderNumber = `ORD-${Date.now().toString().slice(-8)}`;
 

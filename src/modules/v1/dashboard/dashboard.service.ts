@@ -263,7 +263,7 @@ export class DashboardService {
         'customer.id AS id',
         'customer.customerName AS name',
         'customer.customerPhoneNumber AS phone',
-        'COUNT(order.id) AS orderCount',
+        'COUNT(order.id) AS "orderCount"',
         'COALESCE(SUM(order.totalPrice), 0) AS price',
       ])
       .groupBy('customer.id')
