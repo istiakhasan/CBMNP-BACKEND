@@ -94,28 +94,31 @@ export class DashboardController {
     };
   }
 
-@Get('area-distribution')
-async getAreaDistribution(
-  @Query('organizationId') organizationId: string,
-  @Query('level') level: 'division' | 'district' | 'thana',
-  @Query('period') period: string,
-  @Query('startDate') startDate?: string,
-  @Query('endDate') endDate?: string,
-  @Query('statusId') statusId?: string,   // comma-separated: "4,10,13"
-) {
-  const statusIds = statusId
-    ? statusId.split(',').map(Number).filter((n) => !isNaN(n))
-    : undefined;
-
-  return this.dashboardService.getAreaWiseDistribution(
-    organizationId,
-    level,
-    period,
-    startDate,
-    endDate,
-    statusIds,
-  );
-}
+  @Get('area-distribution')
+  async getAreaDistribution(
+    @Req() req: Request,
+    @Query('level') level: 'division' | 'district' | 'thana',
+    @Query('period') period: string,
+    @Query('startDate') startDate?: string,
+    @Query('endDate') endDate?: string,
+    @Query('statusId') statusId?: string, // comma-separated: "4,10,13"
+  ) {
+    const statusIds = statusId
+      ? statusId
+          .split(',')
+          .map(Number)
+          .filter((n) => !isNaN(n))
+      : undefined;
+    const organizationId = req.headers['x-organization-id'];
+    return this.dashboardService.getAreaWiseDistribution(
+      organizationId as string,
+      level,
+      period,
+      startDate,
+      endDate,
+      statusIds,
+    );
+  }
 
   @UseGuards(AuthGuard)
   @Roles('user')
