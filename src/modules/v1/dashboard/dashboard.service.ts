@@ -724,164 +724,208 @@ export class DashboardService {
     };
   }
 
-  async getAreaWiseDistribution(
-    organizationId: string,
-    level: 'division' | 'district' | 'thana' = 'division',
-    period: string = 'month',
-    startDate?: string,
-    endDate?: string,
-  ) {
-    if (!organizationId) {
-      throw new Error('organizationId is required');
-    }
+// Status lookup — DB-এর order_statuses টেবিল অনুযায়ী
+private  ORDER_STATUSES = [
+  { id: 1, name: 'Pending' },
+  { id: 2, name: 'Approved' },
+  { id: 3, name: 'Hold' },
+  { id: 4, name: 'Cancel' },
+  { id: 5, name: 'Store' },
+  { id: 6, name: 'Packing' },
+  { id: 7, name: 'In-transit' },
+  { id: 8, name: 'Delivered' },
+  { id: 9, name: 'Unreachable' },
+  { id: 10, name: 'Returned' },
+  { id: 11, name: 'Pending-Return' },
+  { id: 12, name: 'Partial-Return' },
+  { id: 13, name: 'Damage' },
+];
 
-    const now = new Date();
-    let currentFrom: Date;
-    let currentTo: Date = now;
-    let previousFrom: Date;
-    let previousTo: Date;
+async getAreaWiseDistribution(
+  organizationId: string,
+  level: 'division' | 'district' | 'thana' = 'division',
+  period: string = 'month',
+  startDate?: string,
+  endDate?: string,
+  statusIds?: number[],   // 👈 নতুন param
+) {
+  if (!organizationId) {
+    throw new Error('organizationId is required');
+  }
 
-    if (startDate && endDate) {
-      currentFrom = new Date(startDate + 'T00:00:00.000Z');
-      currentTo = new Date(endDate + 'T23:59:59.999Z');
-      const durationMs = currentTo.getTime() - currentFrom.getTime();
+  const now = new Date();
+  let currentFrom: Date;
+  let currentTo: Date = now;
+  let previousFrom: Date;
+  let previousTo: Date;
+
+  if (startDate && endDate) {
+    currentFrom = new Date(startDate + 'T00:00:00.000Z');
+    currentTo = new Date(endDate + 'T23:59:59.999Z');
+    const durationMs = currentTo.getTime() - currentFrom.getTime();
+    previousTo = new Date(currentFrom.getTime() - 1);
+    previousFrom = new Date(previousTo.getTime() - durationMs);
+  } else {
+    const p = (period || 'month').toLowerCase();
+    if (p === 'day' || p === 'today') {
+      currentFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+      currentTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+      previousFrom = new Date(currentFrom);
+      previousFrom.setDate(previousFrom.getDate() - 1);
+      previousTo = new Date(currentTo);
+      previousTo.setDate(previousTo.getDate() - 1);
+    } else if (p === 'week') {
+      currentFrom = new Date(now);
+      currentFrom.setDate(now.getDate() - 7);
+      currentFrom.setHours(0, 0, 0, 0);
       previousTo = new Date(currentFrom.getTime() - 1);
-      previousFrom = new Date(previousTo.getTime() - durationMs);
+      previousFrom = new Date(currentFrom);
+      previousFrom.setDate(previousFrom.getDate() - 7);
+    } else if (p === 'year') {
+      currentFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      previousFrom = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
+      previousTo = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
     } else {
-      const p = (period || 'month').toLowerCase();
-      if (p === 'day' || p === 'today') {
-        currentFrom = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-        currentTo = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
-        previousFrom = new Date(currentFrom);
-        previousFrom.setDate(previousFrom.getDate() - 1);
-        previousTo = new Date(currentTo);
-        previousTo.setDate(previousTo.getDate() - 1);
-      } else if (p === 'week') {
-        currentFrom = new Date(now);
-        currentFrom.setDate(now.getDate() - 7);
-        currentFrom.setHours(0, 0, 0, 0);
-        previousTo = new Date(currentFrom.getTime() - 1);
-        previousFrom = new Date(currentFrom);
-        previousFrom.setDate(previousFrom.getDate() - 7);
-      } else if (p === 'year') {
-        currentFrom = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
-        previousFrom = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
-        previousTo = new Date(now.getFullYear() - 1, 11, 31, 23, 59, 59, 999);
-      } else {
-        currentFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-        previousFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
-        previousTo = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
-      }
+      currentFrom = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      previousFrom = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+      previousTo = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+    }
+  }
+
+  let areaColumn = "COALESCE(NULLIF(orders.receiverDivision, ''), NULLIF(customer.division, ''), 'Unspecified')";
+  if (level === 'district') {
+    areaColumn = "COALESCE(NULLIF(orders.receiverDistrict, ''), NULLIF(customer.district, ''), 'Unspecified')";
+  } else if (level === 'thana') {
+    areaColumn = "COALESCE(NULLIF(orders.receiverThana, ''), NULLIF(customer.thana, ''), 'Unspecified')";
+  }
+
+  const applyStatusFilter = (qb: any) => {
+    if (statusIds && statusIds.length > 0) {
+      qb.andWhere('orders.statusId IN (:...statusIds)', { statusIds });
+    }
+  };
+
+  // Current period area metrics
+  const currentQb = this.orderRepository
+    .createQueryBuilder('orders')
+    .leftJoin('orders.customer', 'customer')
+    .where('orders.organizationId = :organizationId', { organizationId })
+    .andWhere('orders.createdAt >= :currentFrom AND orders.createdAt <= :currentTo', {
+      currentFrom,
+      currentTo,
+    })
+    .select(`${areaColumn}`, 'area')
+    .addSelect('COUNT(orders.id)', 'orderCount')
+    .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalSales')
+    .addSelect("COUNT(CASE WHEN orders.statusId = 8 THEN 1 END)", 'deliveredCount')
+    .addSelect("COUNT(CASE WHEN orders.statusId IN (4, 10, 11, 12, 13) THEN 1 END)", 'cancelledCount');
+
+  // প্রতিটা status-এর জন্য আলাদা count column যোগ করা হচ্ছে
+  this.ORDER_STATUSES.forEach((s) => {
+    currentQb.addSelect(`COUNT(CASE WHEN orders.statusId = ${s.id} THEN 1 END)`, `status_${s.id}`);
+  });
+
+  applyStatusFilter(currentQb);
+
+  const currentResults = await currentQb
+    .groupBy(areaColumn)
+    .orderBy('COUNT(orders.id)', 'DESC')
+    .limit(30)
+    .getRawMany();
+
+  // Previous period area metrics for trend / growth calculation
+  const previousQb = this.orderRepository
+    .createQueryBuilder('orders')
+    .leftJoin('orders.customer', 'customer')
+    .where('orders.organizationId = :organizationId', { organizationId })
+    .andWhere('orders.createdAt >= :previousFrom AND orders.createdAt <= :previousTo', {
+      previousFrom,
+      previousTo,
+    })
+    .select(`${areaColumn}`, 'area')
+    .addSelect('COUNT(orders.id)', 'prevOrderCount')
+    .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'prevSales');
+
+  applyStatusFilter(previousQb);
+
+  const previousResults = await previousQb.groupBy(areaColumn).getRawMany();
+
+  const prevMap = new Map<string, { count: number; sales: number }>();
+  previousResults.forEach((r) => {
+    prevMap.set(r.area, {
+      count: Number(r.prevOrderCount || 0),
+      sales: Number(r.prevSales || 0),
+    });
+  });
+
+  const totalOrdersInPeriod = currentResults.reduce(
+    (sum, r) => sum + Number(r.orderCount || 0),
+    0,
+  );
+  const totalSalesInPeriod = currentResults.reduce(
+    (sum, r) => sum + Number(r.totalSales || 0),
+    0,
+  );
+
+  const areas = currentResults.map((r) => {
+    const currentOrders = Number(r.orderCount || 0);
+    const currentSales = Number(r.totalSales || 0);
+    const deliveredCount = Number(r.deliveredCount || 0);
+    const cancelledCount = Number(r.cancelledCount || 0);
+    const prev = prevMap.get(r.area) || { count: 0, sales: 0 };
+
+    let orderGrowthRate = 0;
+    if (prev.count > 0) {
+      orderGrowthRate = ((currentOrders - prev.count) / prev.count) * 100;
+    } else if (currentOrders > 0) {
+      orderGrowthRate = 100;
     }
 
-    let areaColumn = "COALESCE(NULLIF(orders.receiverDivision, ''), NULLIF(customer.division, ''), 'Unspecified')";
-    if (level === 'district') {
-      areaColumn = "COALESCE(NULLIF(orders.receiverDistrict, ''), NULLIF(customer.district, ''), 'Unspecified')";
-    } else if (level === 'thana') {
-      areaColumn = "COALESCE(NULLIF(orders.receiverThana, ''), NULLIF(customer.thana, ''), 'Unspecified')";
-    }
+    const deliveryRate = currentOrders > 0 ? (deliveredCount / currentOrders) * 100 : 0;
+    const shareOfTotal = totalOrdersInPeriod > 0 ? (currentOrders / totalOrdersInPeriod) * 100 : 0;
 
-    // Current period area metrics
-    const currentResults = await this.orderRepository
-      .createQueryBuilder('orders')
-      .leftJoin('orders.customer', 'customer')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.createdAt >= :currentFrom AND orders.createdAt <= :currentTo', {
-        currentFrom,
-        currentTo,
-      })
-      .select(`${areaColumn}`, 'area')
-      .addSelect('COUNT(orders.id)', 'orderCount')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalSales')
-      .addSelect("COUNT(CASE WHEN orders.statusId = 8 THEN 1 END)", 'deliveredCount')
-      .addSelect("COUNT(CASE WHEN orders.statusId IN (4, 5) THEN 1 END)", 'cancelledCount')
-      .groupBy(areaColumn)
-      .orderBy('COUNT(orders.id)', 'DESC')
-      .limit(30)
-      .getRawMany();
-
-    // Previous period area metrics for trend / growth calculation
-    const previousResults = await this.orderRepository
-      .createQueryBuilder('orders')
-      .leftJoin('orders.customer', 'customer')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.createdAt >= :previousFrom AND orders.createdAt <= :previousTo', {
-        previousFrom,
-        previousTo,
-      })
-      .select(`${areaColumn}`, 'area')
-      .addSelect('COUNT(orders.id)', 'prevOrderCount')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'prevSales')
-      .groupBy(areaColumn)
-      .getRawMany();
-
-    const prevMap = new Map<string, { count: number; sales: number }>();
-    previousResults.forEach((r) => {
-      prevMap.set(r.area, {
-        count: Number(r.prevOrderCount || 0),
-        sales: Number(r.prevSales || 0),
-      });
+    // সবগুলো status-এর breakdown
+    const statusBreakdown: Record<string, number> = {};
+    this.ORDER_STATUSES.forEach((s) => {
+      statusBreakdown[s.name] = Number(r[`status_${s.id}`] || 0);
     });
-
-    const totalOrdersInPeriod = currentResults.reduce(
-      (sum, r) => sum + Number(r.orderCount || 0),
-      0,
-    );
-    const totalSalesInPeriod = currentResults.reduce(
-      (sum, r) => sum + Number(r.totalSales || 0),
-      0,
-    );
-
-    const areas = currentResults.map((r) => {
-      const currentOrders = Number(r.orderCount || 0);
-      const currentSales = Number(r.totalSales || 0);
-      const deliveredCount = Number(r.deliveredCount || 0);
-      const cancelledCount = Number(r.cancelledCount || 0);
-      const prev = prevMap.get(r.area) || { count: 0, sales: 0 };
-
-      let orderGrowthRate = 0;
-      if (prev.count > 0) {
-        orderGrowthRate = ((currentOrders - prev.count) / prev.count) * 100;
-      } else if (currentOrders > 0) {
-        orderGrowthRate = 100;
-      }
-
-      const deliveryRate = currentOrders > 0 ? (deliveredCount / currentOrders) * 100 : 0;
-      const shareOfTotal = totalOrdersInPeriod > 0 ? (currentOrders / totalOrdersInPeriod) * 100 : 0;
-
-      return {
-        area: r.area,
-        orders: currentOrders,
-        previousOrders: prev.count,
-        sales: currentSales,
-        previousSales: prev.sales,
-        deliveredOrders: deliveredCount,
-        cancelledOrders: cancelledCount,
-        deliveryRate: Number(deliveryRate.toFixed(1)),
-        orderGrowthRate: Number(orderGrowthRate.toFixed(1)),
-        growthTrend: orderGrowthRate > 0 ? 'up' : orderGrowthRate < 0 ? 'down' : 'stable',
-        sharePercentage: Number(shareOfTotal.toFixed(1)),
-      };
-    });
-
-    const growingAreas = [...areas]
-      .filter((a) => a.orderGrowthRate > 0)
-      .sort((a, b) => b.orderGrowthRate - a.orderGrowthRate)
-      .slice(0, 5);
-
-    const decliningAreas = [...areas]
-      .filter((a) => a.orderGrowthRate < 0)
-      .sort((a, b) => a.orderGrowthRate - b.orderGrowthRate)
-      .slice(0, 5);
 
     return {
-      level,
-      period,
-      totalOrders: totalOrdersInPeriod,
-      totalSales: totalSalesInPeriod,
-      areas,
-      topGrowingAreas: growingAreas,
-      topDecliningAreas: decliningAreas,
+      area: r.area,
+      orders: currentOrders,
+      previousOrders: prev.count,
+      sales: currentSales,
+      previousSales: prev.sales,
+      deliveredOrders: deliveredCount,
+      cancelledOrders: cancelledCount,
+      deliveryRate: Number(deliveryRate.toFixed(1)),
+      orderGrowthRate: Number(orderGrowthRate.toFixed(1)),
+      growthTrend: orderGrowthRate > 0 ? 'up' : orderGrowthRate < 0 ? 'down' : 'stable',
+      sharePercentage: Number(shareOfTotal.toFixed(1)),
+      statusBreakdown,   // 👈 { Pending: 2, Approved: 5, ... }
     };
-  }
+  });
+
+  const growingAreas = [...areas]
+    .filter((a) => a.orderGrowthRate > 0)
+    .sort((a, b) => b.orderGrowthRate - a.orderGrowthRate)
+    .slice(0, 5);
+
+  const decliningAreas = [...areas]
+    .filter((a) => a.orderGrowthRate < 0)
+    .sort((a, b) => a.orderGrowthRate - b.orderGrowthRate)
+    .slice(0, 5);
+
+  return {
+    level,
+    period,
+    appliedStatusIds: statusIds || [],
+    statusList: this.ORDER_STATUSES,   // 👈 frontend filter option বানাতে সুবিধা
+    totalOrders: totalOrdersInPeriod,
+    totalSales: totalSalesInPeriod,
+    areas,
+    topGrowingAreas: growingAreas,
+    topDecliningAreas: decliningAreas,
+  };
+}
 }

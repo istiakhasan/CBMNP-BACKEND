@@ -94,29 +94,28 @@ export class DashboardController {
     };
   }
 
-  @Get('/area-distribution')
-  async getAreaDistribution(
-    @Query('level') level: 'division' | 'district' | 'thana' = 'division',
-    @Query('period') period?: string,
-    @Query('startDate') startDate?: string,
-    @Query('endDate') endDate?: string,
-    @Req() req?: Request,
-  ) {
-    const organizationId = req.headers['x-organization-id'];
-    const data = await this.dashboardService.getAreaWiseDistribution(
-      organizationId as string,
-      level,
-      period,
-      startDate,
-      endDate,
-    );
-    return {
-      success: true,
-      statusCode: HttpStatus.OK,
-      message: 'Area wise order distribution retrieved successfully',
-      data: data,
-    };
-  }
+@Get('area-distribution')
+async getAreaDistribution(
+  @Query('organizationId') organizationId: string,
+  @Query('level') level: 'division' | 'district' | 'thana',
+  @Query('period') period: string,
+  @Query('startDate') startDate?: string,
+  @Query('endDate') endDate?: string,
+  @Query('statusId') statusId?: string,   // comma-separated: "4,10,13"
+) {
+  const statusIds = statusId
+    ? statusId.split(',').map(Number).filter((n) => !isNaN(n))
+    : undefined;
+
+  return this.dashboardService.getAreaWiseDistribution(
+    organizationId,
+    level,
+    period,
+    startDate,
+    endDate,
+    statusIds,
+  );
+}
 
   @UseGuards(AuthGuard)
   @Roles('user')
