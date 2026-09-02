@@ -1628,226 +1628,235 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
   // update and the log entry all commit/rollback together. Every inventory
   // row touched is locked first.
   // =========================================================================
-  async update(orderId: number, data: Order) {
-    const {
-      customerId,
-      receiverPhoneNumber,
-      products,
-      discount = 0,
-      shippingCharge = 0,
-      agentId: actingAgentId,
-      ...rest
-    } = data;
+async update(orderId: number, data: Order) {
+  const {
+    customerId,
+    receiverPhoneNumber,
+    products,
+    discount = 0,
+    shippingCharge = 0,
+    agentId: actingAgentId,
+    ...rest
+  } = data;
 
-    if (!products || products.length === 0) {
-      throw new Error('Order must include at least one product');
-    }
-
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-    const manager = queryRunner.manager;
-
-    try {
-      const existingOrder = await manager.findOne(Order, {
-        where: { id: orderId },
-        relations: ['products', 'status'],
-      });
-      if (!existingOrder) {
-        throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
-      }
-
-      const existingProducts = await manager.find(Products, {
-        where: { orderId },
-      });
-
-      // union of old + new productIds so REMOVED products are also processed
-      const newProductMap = new Map(products.map((p) => [p.productId, p]));
-      const existingProductMap = new Map(
-        existingProducts.map((p) => [p.productId, p]),
-      );
-      const allProductIds = new Set([
-        ...newProductMap.keys(),
-        ...existingProductMap.keys(),
-      ]);
-
-      const validatedProducts: any[] = [];
-      let productValue = 0;
-
-      for (const productId of allProductIds) {
-        const newItem = newProductMap.get(productId);
-        const prevItem = existingProductMap.get(productId);
-
-        const prevQuantity = prevItem ? prevItem.productQuantity : 0;
-        const newQuantity = newItem ? newItem.productQuantity : 0;
-        // + মানে quantity বেড়েছে/নতুন added, - মানে কমেছে/removed
-        const quantityDiff = newQuantity - prevQuantity;
-
-        if (quantityDiff !== 0) {
-          const inventory = await this.lockInventory(manager, productId);
-          const inventoryItem = existingOrder.locationId
-            ? await this.lockInventoryItem(
-                manager,
-                productId,
-                existingOrder.locationId,
-              )
-            : null;
-
-          if (existingOrder.statusId === OrderStatusId.Approved) {
-            if (inventory) {
-              await manager.increment(
-                Inventory,
-                { productId },
-                'orderQue',
-                quantityDiff,
-              );
-            }
-            if (inventoryItem) {
-              await manager.increment(
-                InventoryItem,
-                { productId, locationId: existingOrder.locationId },
-                'orderQue',
-                quantityDiff,
-              );
-            }
-          }
-
-          if (
-            (existingOrder.statusId === OrderStatusId.Store &&
-              existingOrder.status.label === 'Store') ||
-            existingOrder.statusId === OrderStatusId.Packing
-          ) {
-            if (inventory) {
-              await manager.increment(
-                Inventory,
-                { productId },
-                'processing',
-                quantityDiff,
-              );
-            }
-            if (inventoryItem) {
-              await manager.increment(
-                InventoryItem,
-                { productId, locationId: existingOrder.locationId },
-                'processing',
-                quantityDiff,
-              );
-            }
-          }
-
-          // In-Transit — stock ইতিমধ্যে বের হয়ে গেছে ওয়্যারহাউস থেকে।
-          if (existingOrder.statusId === OrderStatusId.InTransit) {
-            if (inventory) {
-              await manager.decrement(
-                Inventory,
-                { productId },
-                'stock',
-                quantityDiff,
-              );
-            }
-            if (inventoryItem) {
-              await manager.decrement(
-                InventoryItem,
-                { productId, locationId: existingOrder.locationId },
-                'quantity',
-                quantityDiff,
-              );
-            }
-          }
-        }
-
-        // শুধু নতুন payload-এ থাকা product-গুলোর জন্যই validatedProducts/subtotal বানাও
-        if (newItem) {
-          const existingProduct = await manager.findOne(Product, {
-            where: { id: productId },
-          });
-          if (!existingProduct) {
-            throw new NotFoundException(
-              `Product with ID ${productId} not found`,
-            );
-          }
-
-          const subtotal = newItem.productQuantity * existingProduct.salePrice;
-          productValue += subtotal;
-
-          validatedProducts.push({
-            orderId,
-            productId,
-            productQuantity: newItem.productQuantity,
-            productPrice: existingProduct.salePrice,
-            subtotal,
-          });
-        }
-      }
-
-      // Delete old products & insert new ones
-      await manager.delete(Products, { orderId });
-      if (validatedProducts.length > 0) {
-        await manager.save(Products, validatedProducts);
-      }
-
-      // Log the update
-      await manager.save(OrdersLog, {
-        orderId: orderId,
-        agentId: actingAgentId,
-        action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
-        previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
-        newValue: JSON.stringify(data),
-      });
-
-      // Calculate totals
-      // FIX(E): fall back to the existing order's totalPaidAmount when the
-      // caller doesn't send one in this payload, instead of letting
-      // `undefined` propagate into the subtraction below and silently
-      // produce NaN for totalReceiveAbleAmount.
-      const grandTotal =
-        productValue + Number(shippingCharge) - Number(discount);
-      const effectiveTotalPaidAmount =
-        rest.totalPaidAmount !== undefined && rest.totalPaidAmount !== null
-          ? Number(rest.totalPaidAmount)
-          : Number(existingOrder.totalPaidAmount) || 0;
-      const totalReceivableAmount = grandTotal - effectiveTotalPaidAmount;
-
-      await manager.update(
-        Order,
-        { id: orderId },
-        {
-          ...rest,
-          customerId,
-          receiverPhoneNumber,
-          discount,
-          shippingCharge,
-          totalPrice: grandTotal,
-          productValue,
-          totalReceiveAbleAmount: totalReceivableAmount,
-        },
-      );
-
-      const updated = await manager.findOne(Order, {
-        where: { id: orderId },
-        relations: ['products'],
-      });
-
-      await queryRunner.commitTransaction();
-      return updated;
-    } catch (error: any) {
-      await queryRunner.rollbackTransaction();
-      if (
-        error instanceof ApiError ||
-        error instanceof NotFoundException ||
-        error instanceof BadRequestException
-      ) {
-        throw error;
-      }
-      throw new ApiError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        error.message || 'Failed to update order',
-      );
-    } finally {
-      await queryRunner.release();
-    }
+  if (!products || products.length === 0) {
+    throw new Error('Order must include at least one product');
   }
 
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+  const manager = queryRunner.manager;
+
+  try {
+    const existingOrder = await manager.findOne(Order, {
+      where: { id: orderId },
+      relations: ['products', 'status'],
+    });
+    if (!existingOrder) {
+      throw new ApiError(HttpStatus.BAD_REQUEST, 'Order does not exist');
+    }
+
+    // FIX(3): request body sends statusId as a STRING ("2"), while
+    // existingOrder.statusId / OrderStatusId enum values are NUMBERS.
+    // Number(...) normalizes both sides so strict === comparisons below
+    // (=== OrderStatusId.Approved etc.) actually match.
+    const newStatusId = rest.statusId !== undefined && rest.statusId !== null
+      ? Number(rest.statusId)
+      : existingOrder.statusId;
+
+    // also normalize what gets persisted, so the DB column doesn't end up
+    // with a string where the rest of the codebase expects a number
+    if (rest.statusId !== undefined) {
+      rest.statusId = newStatusId;
+    }
+
+    const existingProducts = await manager.find(Products, {
+      where: { orderId },
+    });
+
+    const newProductMap = new Map(products.map((p) => [p.productId, p]));
+    const existingProductMap = new Map(
+      existingProducts.map((p) => [p.productId, p]),
+    );
+    const allProductIds = new Set([
+      ...newProductMap.keys(),
+      ...existingProductMap.keys(),
+    ]);
+
+    const validatedProducts: any[] = [];
+    let productValue = 0;
+
+    for (const productId of allProductIds) {
+      const newItem = newProductMap.get(productId);
+      const prevItem = existingProductMap.get(productId);
+
+      const prevQuantity = prevItem ? prevItem.productQuantity : 0;
+      const newQuantity = newItem ? newItem.productQuantity : 0;
+      const quantityDiff = newQuantity - prevQuantity;
+
+      const statusChanging = existingOrder.statusId !== newStatusId;
+
+      if (quantityDiff !== 0 || statusChanging) {
+        const inventory = await this.lockInventory(manager, productId);
+        const inventoryItem = existingOrder.locationId
+          ? await this.lockInventoryItem(
+              manager,
+              productId,
+              existingOrder.locationId,
+            )
+          : null;
+
+        if (newStatusId === OrderStatusId.Approved) {
+          const wasApproved = existingOrder.statusId === OrderStatusId.Approved;
+          const queDelta = wasApproved ? quantityDiff : newQuantity;
+
+          if (queDelta !== 0) {
+            if (inventory) {
+              await manager.increment(
+                Inventory,
+                { productId },
+                'orderQue',
+                queDelta,
+              );
+            }
+            if (inventoryItem) {
+              await manager.increment(
+                InventoryItem,
+                { productId, locationId: existingOrder.locationId },
+                'orderQue',
+                queDelta,
+              );
+            }
+          }
+        }
+
+        if (
+          (existingOrder.statusId === OrderStatusId.Store &&
+            existingOrder.status.label === 'Store') ||
+          existingOrder.statusId === OrderStatusId.Packing
+        ) {
+          if (inventory) {
+            await manager.increment(
+              Inventory,
+              { productId },
+              'processing',
+              quantityDiff,
+            );
+          }
+          if (inventoryItem) {
+            await manager.increment(
+              InventoryItem,
+              { productId, locationId: existingOrder.locationId },
+              'processing',
+              quantityDiff,
+            );
+          }
+        }
+
+        if (existingOrder.statusId === OrderStatusId.InTransit) {
+          if (inventory) {
+            await manager.decrement(
+              Inventory,
+              { productId },
+              'stock',
+              quantityDiff,
+            );
+          }
+          if (inventoryItem) {
+            await manager.decrement(
+              InventoryItem,
+              { productId, locationId: existingOrder.locationId },
+              'quantity',
+              quantityDiff,
+            );
+          }
+        }
+      }
+
+      if (newItem) {
+        const existingProduct = await manager.findOne(Product, {
+          where: { id: productId },
+        });
+        if (!existingProduct) {
+          throw new NotFoundException(
+            `Product with ID ${productId} not found`,
+          );
+        }
+
+        const subtotal = newItem.productQuantity * existingProduct.salePrice;
+        productValue += subtotal;
+
+        validatedProducts.push({
+          orderId,
+          productId,
+          productQuantity: newItem.productQuantity,
+          productPrice: existingProduct.salePrice,
+          subtotal,
+        });
+      }
+    }
+
+    await manager.delete(Products, { orderId });
+    if (validatedProducts.length > 0) {
+      await manager.save(Products, validatedProducts);
+    }
+
+    await manager.save(OrdersLog, {
+      orderId: orderId,
+      agentId: actingAgentId,
+      action: `Order updated. Products and other information (e.g., shipping charge, customer details) have been modified.`,
+      previousValue: existingOrder ? JSON.stringify(existingOrder) : null,
+      newValue: JSON.stringify(data),
+    });
+
+    const grandTotal =
+      productValue + Number(shippingCharge) - Number(discount);
+    const effectiveTotalPaidAmount =
+      rest.totalPaidAmount !== undefined && rest.totalPaidAmount !== null
+        ? Number(rest.totalPaidAmount)
+        : Number(existingOrder.totalPaidAmount) || 0;
+    const totalReceivableAmount = grandTotal - effectiveTotalPaidAmount;
+
+    await manager.update(
+      Order,
+      { id: orderId },
+      {
+        ...rest,
+        customerId,
+        receiverPhoneNumber,
+        discount,
+        shippingCharge,
+        totalPrice: grandTotal,
+        productValue,
+        totalReceiveAbleAmount: totalReceivableAmount,
+      },
+    );
+
+    const updated = await manager.findOne(Order, {
+      where: { id: orderId },
+      relations: ['products'],
+    });
+
+    await queryRunner.commitTransaction();
+    return updated;
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+    if (
+      error instanceof ApiError ||
+      error instanceof NotFoundException ||
+      error instanceof BadRequestException
+    ) {
+      throw error;
+    }
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to update order',
+    );
+  } finally {
+    await queryRunner.release();
+  }
+}
   // =========================================================================
   // ADD PAYMENT — payment insert + order totals recompute + log now atomic,
   // and the order row is locked so two simultaneous payments on the same
