@@ -10,6 +10,7 @@ import {
   Req,
   Res,
   ParseIntPipe,
+  Delete,
 } from '@nestjs/common';
 import { OrderService } from './order.service';
 import { Order } from './entities/order.entity';
@@ -18,11 +19,29 @@ import { IResponse } from 'src/util/sendResponse';
 import { PaymentHistory } from './entities/paymentHistory.entity';
 import { Request, Response } from 'express';
 import { ExchangeOrderDto } from './dto/exchange-order.dto';
+import { DeleteOrdersByPhoneDto } from './dto/delete-orders-by-phone.dto';
 
 @Controller('v1/orders')
 export class OrderController {
   constructor(private readonly orderService: OrderService) {}
+ @Delete('delete-by-phone')
+  async deleteOrdersByPhone(
+    @Body() dto: DeleteOrdersByPhoneDto,
+    @Req() req: any,
+  ) {
+    const organizationId = req.headers['x-organization-id'];
 
+    if (!organizationId) {
+      throw new Error(
+        'Organization ID not found from authenticated user.',
+      );
+    }
+
+    return this.orderService.deleteOrdersByPhone(
+      dto,
+      organizationId,
+    );
+  }
   @Get()
   async getOrders(@Query() query, @Req() req: Request) {
     const organizationId = req.headers['x-organization-id'];

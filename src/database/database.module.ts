@@ -16,7 +16,11 @@ import { join } from 'path';
         password: configService.get('DB_PASSWORD'),
         database: configService.get('DB_NAME'),
         // entities: [join(process.cwd(), '/dist/**/*.entity.js')],
-        entities: [join(__dirname, '/../**/*.entity{.ts,.js}')],
+        entities: [
+          join(__dirname, '..', '**', '*.entity.ts'),
+          join(__dirname, '..', '**', '*.entity.js'),
+        ],
+        autoLoadEntities: true,
         // dont use synchronize: ture in real projects
         // ssl: { rejectUnauthorized: false },
         synchronize: true,

@@ -208,5 +208,19 @@ export const permissionData =[
         "createdAt": "2025-01-22 10:16:56.202596",
         "updatedAt": "2025-01-22 10:16:56.202596",
         "base": "order"
+    },
+    {
+        "id": 31,
+        "label": "DELETE_ORDERS_BY_PHONE",
+        "createdAt": "2026-09-03 00:00:00.000000",
+        "updatedAt": "2026-09-03 00:00:00.000000",
+        "base": "order"
+    },
+    {
+        "id": 32,
+        "label": "Activity Logs",
+        "createdAt": "2026-09-03 00:00:00.000000",
+        "updatedAt": "2026-09-03 00:00:00.000000",
+        "base": "activity"
     }
 ]

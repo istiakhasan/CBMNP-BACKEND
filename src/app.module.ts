@@ -44,6 +44,7 @@ import { HrPayrollModule } from './modules/v1/hr-payroll/hr-payroll.module';
 import { LogisticsOperationsModule } from './modules/v1/logistics-operations/logistics-operations.module';
 import { NotificationsModule } from './modules/v1/notifications/notifications.module';
 import { GovernanceModule } from './modules/v1/governance/governance.module';
+import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module';
 
 @Module({
   imports: [
@@ -88,6 +89,7 @@ import { GovernanceModule } from './modules/v1/governance/governance.module';
     LogisticsOperationsModule,
     NotificationsModule,
     GovernanceModule,
+    ActivityLogModule,
   ],
   controllers: [AppController],
   providers: [

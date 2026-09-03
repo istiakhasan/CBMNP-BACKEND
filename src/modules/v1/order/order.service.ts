@@ -33,6 +33,8 @@ import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { Response } from 'express';
 import * as _ from 'lodash';
 import { OrderExchange } from './entities/orderExchannge.entity';
+import { DeleteOrdersByPhoneDto } from './dto/delete-orders-by-phone.dto';
+import { Comments } from '../Comments/entities/orderComment.entity';
 
 /**
  * ============================================================================
@@ -4435,6 +4437,294 @@ async update(orderId: number, data: Order) {
         throw error;
       }
       throw new ApiError(HttpStatus.INTERNAL_SERVER_ERROR, error.message || 'Failed to process exchange');
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+
+   async deleteOrdersByPhone(
+    dto: DeleteOrdersByPhoneDto,
+    organizationId: string,
+  ) {
+    const { phone, confirm, orderIds: requestedOrderIds } = dto;
+
+    // --------------------------------------------------
+    // 1. Confirmation check
+    // --------------------------------------------------
+
+    if (!confirm) {
+      throw new BadRequestException(
+        'Please confirm before deleting orders.',
+      );
+    }
+
+    // --------------------------------------------------
+    // 2. Normalize phone number
+    // --------------------------------------------------
+
+    const normalizedPhone = phone
+      ?.replace(/[\s\-()]/g, '')
+      .trim();
+
+    if (!normalizedPhone) {
+      throw new BadRequestException(
+        'Phone number is required.',
+      );
+    }
+
+    const requestedIds = [...new Set((requestedOrderIds || []).map((id) => Number(id)).filter(Boolean))];
+
+    if (!requestedIds.length) {
+      throw new BadRequestException(
+        'Please select at least one order to delete.',
+      );
+    }
+
+    // Support:
+    // +8801306910346
+    // 01306910346
+
+    const phoneVariants = new Set<string>();
+
+    phoneVariants.add(normalizedPhone);
+
+    if (normalizedPhone.startsWith('+880')) {
+      phoneVariants.add(
+        `0${normalizedPhone.substring(4)}`,
+      );
+    }
+
+    if (
+      normalizedPhone.startsWith('880') &&
+      !normalizedPhone.startsWith('+880')
+    ) {
+      phoneVariants.add(
+        `0${normalizedPhone.substring(3)}`,
+      );
+    }
+
+    if (
+      normalizedPhone.startsWith('01') &&
+      normalizedPhone.length === 11
+    ) {
+      phoneVariants.add(
+        `+880${normalizedPhone.substring(1)}`,
+      );
+    }
+
+    const phoneList = Array.from(phoneVariants);
+
+    // --------------------------------------------------
+    // 3. Create QueryRunner
+    // --------------------------------------------------
+
+    const queryRunner =
+      this.dataSource.createQueryRunner();
+
+    await queryRunner.connect();
+
+    await queryRunner.startTransaction();
+
+    try {
+      // --------------------------------------------------
+      // 4. Find ONLY selected orders of this organization and phone number
+      // --------------------------------------------------
+
+      const orders = await queryRunner.manager
+        .createQueryBuilder(Order, 'order')
+        .select([
+          'order.id',
+          'order.orderNumber',
+          'order.receiverPhoneNumber',
+          'order.organizationId',
+          'order.createdAt',
+        ])
+        .where(
+          'order.organizationId = :organizationId',
+          { organizationId },
+        )
+        .andWhere(
+          'order.id IN (:...requestedIds)',
+          { requestedIds },
+        )
+        .andWhere(
+          'order.receiverPhoneNumber IN (:...phoneList)',
+          { phoneList },
+        )
+        .orderBy('order.id', 'ASC')
+        .getMany();
+
+      // --------------------------------------------------
+      // 5. Nothing found
+      // --------------------------------------------------
+
+      if (!orders.length) {
+        await queryRunner.rollbackTransaction();
+
+        return {
+          success: true,
+          deletedCount: 0,
+          message:
+            'No selected orders found for this phone number.',
+          orders: [],
+        };
+      }
+
+      if (orders.length !== requestedIds.length) {
+        throw new BadRequestException(
+          'Some selected orders do not match this phone number or organization.',
+        );
+      }
+
+      const orderIds = orders.map(
+        (order) => order.id,
+      );
+
+      // --------------------------------------------------
+      // 6. Delete order exchanges
+      //
+      // Important:
+      // exchange can reference target order either as
+      // originalOrderId OR newOrderId.
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(OrderExchange)
+        .where(
+          '"originalOrderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .orWhere(
+          '"newOrderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 7. Delete order products
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(Products)
+        .where(
+          '"orderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 8. Delete order logs
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(OrdersLog)
+        .where(
+          '"orderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 9. Delete payment history
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(PaymentHistory)
+        .where(
+          '"orderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 10. Delete returns
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(OrderProductReturn)
+        .where(
+          '"orderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 11. Delete comments
+      // --------------------------------------------------
+
+      await queryRunner.manager
+        .createQueryBuilder()
+        .delete()
+        .from(Comments)
+        .where(
+          '"orderId" IN (:...orderIds)',
+          { orderIds },
+        )
+        .execute();
+
+      // --------------------------------------------------
+      // 12. Finally delete orders
+      // --------------------------------------------------
+
+      const deleteResult =
+        await queryRunner.manager
+          .createQueryBuilder()
+          .delete()
+          .from(Order)
+          .where(
+            'id IN (:...orderIds)',
+            { orderIds },
+          )
+          .andWhere(
+            'organizationId = :organizationId',
+            { organizationId },
+          )
+          .execute();
+
+      // --------------------------------------------------
+      // 13. Commit transaction
+      // --------------------------------------------------
+
+      await queryRunner.commitTransaction();
+
+      return {
+        success: true,
+        deletedCount: deleteResult.affected ?? 0,
+
+        phone: normalizedPhone,
+
+        orders: orders.map((order) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          receiverPhoneNumber:
+            order.receiverPhoneNumber,
+          createdAt: order.createdAt,
+        })),
+
+        message: `${
+          deleteResult.affected ?? 0
+        } order(s) deleted successfully.`,
+      };
+    } catch (error) {
+      // --------------------------------------------------
+      // IMPORTANT:
+      // If anything fails, NOTHING gets deleted.
+      // --------------------------------------------------
+
+      await queryRunner.rollbackTransaction();
+
+      throw error;
     } finally {
       await queryRunner.release();
     }
