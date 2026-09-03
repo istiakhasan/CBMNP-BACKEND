@@ -5,9 +5,10 @@ import { ActivityLogController } from './activity-log.controller';
 import { ActivityLogService } from './activity-log.service';
 import { ActivityLog } from './entities/activity-log.entity';
 import { ActivityLogInterceptor } from './interceptors/activity-log.interceptor';
+import { Users } from '../user/entities/user.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([ActivityLog])],
+  imports: [TypeOrmModule.forFeature([ActivityLog, Users])],
   controllers: [ActivityLogController],
   providers: [
     ActivityLogService,

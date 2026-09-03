@@ -4,6 +4,11 @@ import {
   Injectable,
   NestInterceptor,
 } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import config from 'src/config';
+import { jwtHelpers } from 'src/helpers/jwtHelpers';
+import { Users } from '../../user/entities/user.entity';
+import { Repository } from 'typeorm';
 import { Observable, tap } from 'rxjs';
 import { ActivityLogService } from '../activity-log.service';
 
@@ -21,7 +26,11 @@ const SENSITIVE_KEYS = new Set([
 
 @Injectable()
 export class ActivityLogInterceptor implements NestInterceptor {
-  constructor(private readonly activityLogService: ActivityLogService) {}
+  constructor(
+    private readonly activityLogService: ActivityLogService,
+    @InjectRepository(Users)
+    private readonly usersRepository: Repository<Users>,
+  ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
@@ -39,43 +48,94 @@ export class ActivityLogInterceptor implements NestInterceptor {
         next: (response) => {
           const moduleName = this.getModuleName(path);
           const action = this.getActionName(method, path);
-          const actor =
-            request.user?.name ||
-            request.body?.userName ||
-            request.user?.userId ||
-            request.user?.id ||
-            request.body?.userId ||
-            'System';
-          const target = this.getTargetLabel(request, response);
-
-          void this.activityLogService.recordActivity({
-            organizationId: request.headers['x-organization-id'],
-            userId: request.user?.userId || request.user?.id || request.body?.userId,
-            userName: request.user?.name || request.body?.userName,
-            module: this.toTitle(moduleName),
-            action,
-            method,
-            path,
-            description: `${actor} ${action.toLowerCase()} ${this.toTitle(moduleName)}${target ? ` (${target})` : ''}`,
-            metadata: {
-              activity: {
-                actor,
-                action,
-                module: this.toTitle(moduleName),
-                target,
-              },
-              params: request.params || {},
-              query: request.query || {},
-              body: this.sanitize(request.body || {}),
-              durationMs: Date.now() - startedAt,
-            },
-            ipAddress: request.ip,
-            userAgent: request.headers['user-agent'],
-            statusCode: request.res?.statusCode,
-          });
+          void this.writeLog(request, response, moduleName, action, startedAt);
         },
       }),
     );
+  }
+
+  private async writeLog(
+    request: any,
+    response: any,
+    moduleName: string,
+    action: string,
+    startedAt: number,
+  ) {
+    const authUser = await this.resolveAuthUser(request);
+    const actor =
+      authUser?.name ||
+      request.user?.name ||
+      request.body?.userName ||
+      authUser?.userId ||
+      request.user?.userId ||
+      request.user?.id ||
+      request.body?.userId ||
+      'System';
+    const userId =
+      authUser?.userId ||
+      request.user?.userId ||
+      request.user?.id ||
+      request.body?.userId;
+    const target = this.getTargetLabel(request, response);
+
+    await this.activityLogService.recordActivity({
+      organizationId: request.headers['x-organization-id'],
+      userId,
+      userName: authUser?.name || request.user?.name || request.body?.userName,
+      module: this.toTitle(moduleName),
+      action,
+      method: request.method,
+      path: request.originalUrl || request.url,
+      description: `${actor} ${action.toLowerCase()} ${this.toTitle(moduleName)}${target ? ` (${target})` : ''}`,
+      metadata: {
+        activity: {
+          actor,
+          action,
+          module: this.toTitle(moduleName),
+          target,
+        },
+        params: request.params || {},
+        query: request.query || {},
+        body: this.sanitize(request.body || {}),
+        durationMs: Date.now() - startedAt,
+      },
+      ipAddress: request.ip,
+      userAgent: request.headers['user-agent'],
+      statusCode: request.res?.statusCode,
+    });
+  }
+
+  private async resolveAuthUser(request: any): Promise<Partial<Users> | null> {
+    if (request.user?.userId) {
+      return this.findUser(request.user.userId);
+    }
+
+    const token = this.getToken(request.headers?.authorization);
+    if (!token) return null;
+
+    try {
+      const verifiedUser = jwtHelpers.verifyToken(token, config.jwt.secret);
+      request.user = verifiedUser;
+      if (!verifiedUser?.userId) return null;
+
+      return this.findUser(verifiedUser.userId as string);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  private async findUser(userId: string): Promise<Partial<Users> | null> {
+    return this.usersRepository.findOne({
+      where: { userId },
+      select: ['userId', 'name'],
+    });
+  }
+
+  private getToken(authorization?: string): string {
+    if (!authorization) return '';
+    return authorization.startsWith('Bearer ')
+      ? authorization.replace('Bearer ', '').trim()
+      : authorization;
   }
 
   private shouldSkip(path: string): boolean {
