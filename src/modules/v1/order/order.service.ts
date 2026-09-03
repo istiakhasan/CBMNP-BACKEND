@@ -23,6 +23,7 @@ import { OrdersLog } from './entities/orderlog.entity';
 import { Organization } from '../organization/entities/organization.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Transaction } from '../transaction/entities/transaction.entity';
 import { DataSource } from 'typeorm';
 import { RequisitionService } from '../requsition/requsition.service';
 import axios from 'axios';
@@ -333,6 +334,39 @@ export class OrderService {
       }
     }
     return item;
+  }
+
+  private async logInventoryTransaction(
+    manager: EntityManager,
+    data: {
+      productId: string;
+      quantity: number;
+      organizationId: string;
+      type: 'IN' | 'OUT';
+      locationId?: string | null;
+      referenceType: string;
+      referenceNumber?: string | null;
+      remarks?: string;
+      performedById?: string | null;
+    },
+  ) {
+    if (!data.quantity || Number(data.quantity) <= 0) return;
+
+    await manager.save(
+      manager.create(Transaction, {
+        productId: data.productId,
+        quantity: Number(data.quantity),
+        totalAmount: 0,
+        type: data.type,
+        inventoryId: data.productId,
+        locationId: data.locationId || null,
+        organizationId: data.organizationId,
+        referenceType: data.referenceType,
+        referenceNumber: data.referenceNumber,
+        remarks: data.remarks,
+        performedById: data.performedById,
+      }),
+    );
   }
 
   // ---------- Shared helper: organization এর prefix বের করা ----------
@@ -1968,6 +2002,8 @@ async update(orderId: number, data: Order) {
   organizationId: string,
 ) {
   const { currentStatus, agentId: actingAgentId, ...data } = mainData;
+  const currentStatusId = Number(currentStatus);
+  const nextStatusId = Number(data.statusId);
 
   const orders = await this.orderRepository.find({
     where: { id: In(orderIds) },
@@ -2029,7 +2065,7 @@ async update(orderId: number, data: Order) {
       // stock      -= qty
       // ============================================================
 
-      if (data.statusId === OrderStatusId.InTransit) {
+      if (nextStatusId === OrderStatusId.InTransit) {
         if (inventory) {
           await manager.decrement(
             Inventory,
@@ -2067,6 +2103,18 @@ async update(orderId: number, data: Order) {
             qty,
           );
         }
+
+        await this.logInventoryTransaction(manager, {
+          productId,
+          quantity: qty,
+          organizationId,
+          type: 'OUT',
+          locationId: order.locationId,
+          referenceType: 'ORDER_DISPATCH',
+          referenceNumber: order.invoiceNumber || String(order.id),
+          remarks: `Stock left inventory when order moved to In Transit`,
+          performedById: actingAgentId,
+        });
       }
 
       // ============================================================
@@ -2079,10 +2127,10 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Cancel &&
+        nextStatusId === OrderStatusId.Cancel &&
         (
-          currentStatus === OrderStatusId.Store ||
-          currentStatus === OrderStatusId.Packing
+          currentStatusId === OrderStatusId.Store ||
+          currentStatusId === OrderStatusId.Packing
         )
       ) {
         if (inventory) {
@@ -2117,8 +2165,8 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Cancel &&
-        currentStatus === OrderStatusId.Approved
+        nextStatusId === OrderStatusId.Cancel &&
+        currentStatusId === OrderStatusId.Approved
       ) {
         if (inventory) {
           await manager.decrement(
@@ -2152,8 +2200,8 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Cancel &&
-        currentStatus === OrderStatusId.Hold
+        nextStatusId === OrderStatusId.Cancel &&
+        currentStatusId === OrderStatusId.Hold
       ) {
         if (inventory) {
           await manager.decrement(
@@ -2186,7 +2234,7 @@ async update(orderId: number, data: Order) {
       // orderQue -= qty
       // hoildQue += qty
       //
-      // Packing -> Hold
+      // Store/Packing -> Hold
       //
       // Inventory:
       // processing -= qty
@@ -2194,14 +2242,15 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Hold &&
+        nextStatusId === OrderStatusId.Hold &&
         (
-          currentStatus === OrderStatusId.Approved ||
-          currentStatus === OrderStatusId.Packing
+          currentStatusId === OrderStatusId.Approved ||
+          currentStatusId === OrderStatusId.Store ||
+          currentStatusId === OrderStatusId.Packing
         )
       ) {
         if (inventory) {
-          if (currentStatus === OrderStatusId.Approved) {
+          if (currentStatusId === OrderStatusId.Approved) {
             // Approved -> Hold
             await manager.query(
               `
@@ -2216,8 +2265,11 @@ async update(orderId: number, data: Order) {
             );
           }
 
-          if (currentStatus === OrderStatusId.Packing) {
-            // Packing -> Hold
+          if (
+            currentStatusId === OrderStatusId.Store ||
+            currentStatusId === OrderStatusId.Packing
+          ) {
+            // Store/Packing -> Hold
             await manager.query(
               `
               UPDATE "inventory"
@@ -2233,7 +2285,7 @@ async update(orderId: number, data: Order) {
         }
 
         if (inventoryItem) {
-          if (currentStatus === OrderStatusId.Approved) {
+          if (currentStatusId === OrderStatusId.Approved) {
             // Approved -> Hold
             await manager.query(
               `
@@ -2253,8 +2305,11 @@ async update(orderId: number, data: Order) {
             );
           }
 
-          if (currentStatus === OrderStatusId.Packing) {
-            // Packing -> Hold
+          if (
+            currentStatusId === OrderStatusId.Store ||
+            currentStatusId === OrderStatusId.Packing
+          ) {
+            // Store/Packing -> Hold
             await manager.query(
               `
               UPDATE "inventoryItems"
@@ -2285,10 +2340,10 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Approved &&
+        nextStatusId === OrderStatusId.Approved &&
         (
-          currentStatus === OrderStatusId.Pending ||
-          currentStatus === OrderStatusId.Cancel
+          currentStatusId === OrderStatusId.Pending ||
+          currentStatusId === OrderStatusId.Cancel
         )
       ) {
         if (inventory) {
@@ -2340,8 +2395,8 @@ async update(orderId: number, data: Order) {
       // ============================================================
 
       if (
-        data.statusId === OrderStatusId.Hold &&
-        currentStatus === OrderStatusId.Pending
+        nextStatusId === OrderStatusId.Hold &&
+        currentStatusId === OrderStatusId.Pending
       ) {
         if (inventory) {
           await manager.increment(
@@ -2392,9 +2447,9 @@ async update(orderId: number, data: Order) {
     // ============================================================
 
     if (
-      data.statusId === OrderStatusId.Unreachable ||
-      data.statusId === OrderStatusId.PendingReturn ||
-      data.statusId === OrderStatusId.Damage
+      nextStatusId === OrderStatusId.Unreachable ||
+      nextStatusId === OrderStatusId.PendingReturn ||
+      nextStatusId === OrderStatusId.Damage
     ) {
       this.logger.warn(
         `Order(s) [${orderIds.join(', ')}] moved to statusId ${
@@ -2409,7 +2464,7 @@ async update(orderId: number, data: Order) {
     // STATUS 5: STORE
     // ============================================================
 
-    if (data.statusId === OrderStatusId.Store) {
+    if (nextStatusId === OrderStatusId.Store) {
       await this.requisitionService.createRequisition(
         {
           orderIds,
@@ -2431,7 +2486,7 @@ async update(orderId: number, data: Order) {
     // STATUS 6: PACKING
     // ============================================================
 
-    if (data.statusId === OrderStatusId.Packing) {
+    if (nextStatusId === OrderStatusId.Packing) {
       await manager.update(
         Order,
         { id: In(orderIds) },
@@ -2445,7 +2500,7 @@ async update(orderId: number, data: Order) {
     // STATUS 7: IN-TRANSIT TIMESTAMP
     // ============================================================
 
-    if (data.statusId === OrderStatusId.InTransit) {
+    if (nextStatusId === OrderStatusId.InTransit) {
       await manager.update(
         Order,
         { id: In(orderIds) },
@@ -3447,6 +3502,18 @@ async update(orderId: number, data: Order) {
               );
             }
 
+            await this.logInventoryTransaction(manager, {
+              productId: product.productId,
+              quantity: product.productQuantity,
+              organizationId: order.organizationId,
+              type: 'IN',
+              locationId: warehouse,
+              referenceType: 'ORDER_RETURN',
+              referenceNumber: order.invoiceNumber || String(order.id),
+              remarks: reason || 'Full order returned to inventory',
+              performedById: agentId,
+            });
+
             await manager.save(OrderProductReturn, {
               orderId: order.id,
               productId: product.productId,
@@ -3488,6 +3555,18 @@ async update(orderId: number, data: Order) {
                 product.returnQuantity,
               );
             }
+
+            await this.logInventoryTransaction(manager, {
+              productId: product.productId,
+              quantity: product.returnQuantity,
+              organizationId: order.organizationId,
+              type: 'IN',
+              locationId: warehouse,
+              referenceType: 'ORDER_RETURN',
+              referenceNumber: order.invoiceNumber || String(order.id),
+              remarks: reason || 'Partial order return added to inventory',
+              performedById: agentId,
+            });
 
             await manager.save(OrderProductReturn, {
               orderId: order.id,

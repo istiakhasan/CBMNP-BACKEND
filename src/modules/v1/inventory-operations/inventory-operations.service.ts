@@ -14,6 +14,7 @@ import { ProductBatch } from './entities/product-batch.entity';
 import { ProductReorderRule } from './entities/reorder-rule.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Transaction } from '../transaction/entities/transaction.entity';
 import { Product } from '../product/entity/product.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 
@@ -132,6 +133,21 @@ export class InventoryOperationsService {
 
         sourceInv.quantity = Number(sourceInv.quantity || 0) - qtyToDispatch;
         await manager.save(sourceInv);
+        await manager.save(
+          manager.create(Transaction, {
+            productId: item.productId,
+            quantity: qtyToDispatch,
+            totalAmount: 0,
+            type: 'OUT',
+            inventoryId: item.productId,
+            locationId: transfer.fromWarehouseId,
+            organizationId,
+            referenceType: 'STOCK_TRANSFER_OUT',
+            referenceNumber: transfer.transferNumber,
+            remarks: `Stock dispatched from source warehouse for transfer ${transfer.transferNumber}`,
+            performedById: userId,
+          }),
+        );
 
         item.dispatchedQuantity = qtyToDispatch;
         await manager.save(item);
@@ -188,6 +204,21 @@ export class InventoryOperationsService {
         }
 
         await manager.save(destInv);
+        await manager.save(
+          manager.create(Transaction, {
+            productId: item.productId,
+            quantity: qtyReceived,
+            totalAmount: 0,
+            type: 'IN',
+            inventoryId: item.productId,
+            locationId: transfer.toWarehouseId,
+            organizationId,
+            referenceType: 'STOCK_TRANSFER_IN',
+            referenceNumber: transfer.transferNumber,
+            remarks: `Stock received into destination warehouse for transfer ${transfer.transferNumber}`,
+            performedById: userId,
+          }),
+        );
 
         item.receivedQuantity = qtyReceived;
         await manager.save(item);
@@ -293,6 +324,24 @@ export class InventoryOperationsService {
         }
 
         await manager.save(inv);
+        const adjustmentDelta = Number(item.countedQuantity || 0) - Number(item.systemQuantity || 0);
+        if (adjustmentDelta !== 0) {
+          await manager.save(
+            manager.create(Transaction, {
+              productId: item.productId,
+              quantity: Math.abs(adjustmentDelta),
+              totalAmount: Math.abs(Number(item.totalVarianceValue || 0)),
+              type: adjustmentDelta > 0 ? 'IN' : 'OUT',
+              inventoryId: item.productId,
+              locationId: adj.warehouseId,
+              organizationId,
+              referenceType: 'STOCK_ADJUSTMENT',
+              referenceNumber: adj.adjustmentNumber,
+              remarks: `Stock adjusted from ${item.systemQuantity} to ${item.countedQuantity}. Reason: ${adj.reason}`,
+              performedById: userId,
+            }),
+          );
+        }
 
         // Synchronize master Inventory stock across all warehouses for this product
         const allWarehouseItems = await manager.find(InventoryItem, {

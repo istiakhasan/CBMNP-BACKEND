@@ -7,6 +7,7 @@ import { GoodsReceiptItem } from './entities/goods-receipt-item.entity';
 import { RFQ } from './entities/rfq.entity';
 import { SupplierQuotation } from './entities/supplier-quotation.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Transaction } from '../transaction/entities/transaction.entity';
 import { Supplier } from '../supplier/entities/supplier.entity';
 import { PurchaseReturnsService } from './purchase-returns.service';
 import { PurchaseReturnsController } from './purchase-returns.controller';
@@ -21,6 +22,7 @@ import { PurchaseReturnsController } from './purchase-returns.controller';
       RFQ,
       SupplierQuotation,
       InventoryItem,
+      Transaction,
       Supplier,
     ]),
   ],

@@ -83,6 +83,8 @@ export class InventoryService {
                   inventoryId: inventory.productId,
                   locationId: item.locationId,
                   organizationId,
+                  referenceType: type ? 'MANUAL_STOCK_IN' : 'MANUAL_STOCK_OUT',
+                  remarks: `${type ? 'Stock added to' : 'Stock removed from'} warehouse inventory`,
                 },
               );
               await queryRunner.manager.save(inventoryItemTransaction);
@@ -101,6 +103,8 @@ export class InventoryService {
                   inventoryId: inventory.productId,
                   locationId: item.locationId,
                   organizationId,
+                  referenceType: type ? 'MANUAL_STOCK_IN' : 'MANUAL_STOCK_OUT',
+                  remarks: `${type ? 'Stock added to' : 'Stock removed from'} warehouse inventory`,
                 },
               );
               await queryRunner.manager.save(inventoryItemTransaction);
@@ -130,6 +134,8 @@ export class InventoryService {
         totalAmount: product.regularPrice * quantity,
         type: type ? 'IN' : 'OUT',
         inventoryId: inventory.productId,
+        referenceType: type ? 'MANUAL_STOCK_IN' : 'MANUAL_STOCK_OUT',
+        remarks: `${type ? 'Stock added to' : 'Stock removed from'} master inventory`,
       });
       await queryRunner.manager.save(transaction);
       await queryRunner.commitTransaction();

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, Delete, HttpStatus, Req, Query } from '@nestjs/common';
 import { TransactionService } from './transaction.service';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
 import { UpdateTransactionDto } from './dto/update-transaction.dto';
@@ -17,11 +17,10 @@ export class TransactionController {
   }
 
   @Get()
-  async findAll(@Req() req:Request) {
-   return catchAsync(async():Promise<IResponse<Transaction[]>>=>{
+  async findAll(@Req() req:Request, @Query() query: any) {
+   return catchAsync(async():Promise<IResponse<{ data: Transaction[]; total: number }>>=>{
      const organizationId=req.headers['x-organization-id']
-     console.log(organizationId,"abcd");
-     const result=await this.transactionService.findAll(organizationId as string);
+     const result=await this.transactionService.findAll(organizationId as string, query);
      return {
       success:true,
       message:'Transaction history retrieved successfully',
@@ -32,9 +31,10 @@ export class TransactionController {
     })
   }
   @Get('/findById/:id')
-  async findByProductId(@Param('id') id:string) {
-   return catchAsync(async():Promise<IResponse<Transaction[]>>=>{
-     const result=await this.transactionService.findByProductId(id);
+  async findByProductId(@Param('id') id:string, @Req() req: Request, @Query() query: any) {
+   return catchAsync(async():Promise<IResponse<{ data: Transaction[]; total: number }>>=>{
+     const organizationId=req.headers['x-organization-id']
+     const result=await this.transactionService.findByProductId(id, organizationId as string, query);
      return {
       success:true,
       message:'Transaction history retrieved successfully',

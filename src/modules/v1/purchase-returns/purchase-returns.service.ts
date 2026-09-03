@@ -12,6 +12,7 @@ import { GoodsReceiptItem } from './entities/goods-receipt-item.entity';
 import { RFQ, RFQStatus } from './entities/rfq.entity';
 import { SupplierQuotation } from './entities/supplier-quotation.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Transaction } from '../transaction/entities/transaction.entity';
 import { Supplier } from '../supplier/entities/supplier.entity';
 
 @Injectable()
@@ -115,6 +116,21 @@ export class PurchaseReturnsService {
 
         inv.quantity = Number(inv.quantity || 0) - item.quantity;
         await manager.save(inv);
+        await manager.save(
+          manager.create(Transaction, {
+            productId: item.productId,
+            quantity: item.quantity,
+            totalAmount: Number(item.totalPrice || 0),
+            type: 'OUT',
+            inventoryId: item.productId,
+            locationId: pr.warehouseId,
+            organizationId,
+            referenceType: 'PURCHASE_RETURN',
+            referenceNumber: pr.returnNumber,
+            remarks: `Stock returned to supplier. Reason: ${pr.reason || 'Purchase return'}`,
+            performedById: userId,
+          }),
+        );
       }
 
       const year = new Date().getFullYear();
@@ -195,6 +211,21 @@ export class PurchaseReturnsService {
               inv.quantity = Number(inv.quantity || 0) + acceptedQty;
             }
             await manager.save(inv);
+            await manager.save(
+              manager.create(Transaction, {
+                productId: i.productId,
+                quantity: acceptedQty,
+                totalAmount: 0,
+                type: 'IN',
+                inventoryId: i.productId,
+                locationId: data.warehouseId,
+                organizationId,
+                referenceType: 'GOODS_RECEIPT',
+                referenceNumber: savedGRN.grnNumber,
+                remarks: `Goods received through GRN ${savedGRN.grnNumber}`,
+                performedById: userId,
+              }),
+            );
           }
         }
       }
