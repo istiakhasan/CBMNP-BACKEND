@@ -24,12 +24,14 @@ export class DashboardController {
   @Get('/monthly-report')
   async getDashboardData(
     @Query('year') year: number = new Date().getFullYear(),
+    @Query('dateField') dateField?: string,
     @Req() req?: Request,
   ) {
     const organizationId = req.headers['x-organization-id'];
     const data = await this.dashboardService.getMonthlyDashboardData(
       year,
       organizationId as string,
+      dateField,
     );
     return { series: [{ name: 'Total', data }] };
   }
@@ -38,6 +40,7 @@ export class DashboardController {
     @Query('period') period?: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('dateField') dateField?: string,
     @Req() req?: Request,
   ) {
     const organizationId = req.headers['x-organization-id'];
@@ -46,6 +49,7 @@ export class DashboardController {
       period,
       startDate,
       endDate,
+      dateField,
     );
     return {
       success: true,
@@ -101,6 +105,7 @@ export class DashboardController {
     @Query('period') period: string,
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
+    @Query('dateField') dateField?: string,
     @Query('statusId') statusId?: string, // comma-separated: "4,10,13"
   ) {
     const statusIds = statusId
@@ -116,6 +121,7 @@ export class DashboardController {
       period,
       startDate,
       endDate,
+      dateField,
       statusIds,
     );
   }

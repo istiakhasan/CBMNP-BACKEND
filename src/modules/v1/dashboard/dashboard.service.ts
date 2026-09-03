@@ -23,6 +23,14 @@ type CachedTopSelling = {
   timestamp: number;
 };
 
+type OrderDashboardDateField =
+  | 'createdAt'
+  | 'intransitTime'
+  | 'storeTime'
+  | 'packingTime'
+  | 'approvedTime'
+  | 'courierUpdatedAt';
+
 const topSellingCache: Record<string, CachedTopSelling> = {};
 @Injectable()
 export class DashboardService {
@@ -71,18 +79,21 @@ export class DashboardService {
   async getMonthlyDashboardData(
     year: number = new Date().getFullYear(),
     organizationId?: string,
+    dateField?: string,
   ) {
+    const orderDateField = this.resolveOrderDashboardDateField(dateField);
+    const orderDateColumn = `order.${orderDateField}`;
     const qb = this.orderRepository
       .createQueryBuilder('order')
       .select([
-        "TO_CHAR(order.createdAt, 'Mon') AS month",
-        "TO_CHAR(order.createdAt, 'MM') AS monthNumber",
+        `TO_CHAR(${orderDateColumn}, 'Mon') AS month`,
+        `TO_CHAR(${orderDateColumn}, 'MM') AS monthNumber`,
         'COUNT(order.id) as totalOrders',
         'SUM(order.totalPrice) as totalRevenue',
       ])
-      .where('EXTRACT(YEAR FROM order.createdAt) = :year', { year })
+      .where(`EXTRACT(YEAR FROM ${orderDateColumn}) = :year`, { year })
       .groupBy('month, monthNumber')
-      .orderBy("TO_CHAR(order.createdAt, 'MM')::int");
+      .orderBy(`TO_CHAR(${orderDateColumn}, 'MM')::int`);
 
     if (organizationId) {
       qb.andWhere('order.organizationId = :organizationId', { organizationId });
@@ -112,8 +123,14 @@ export class DashboardService {
     });
     return chartData;
   }
-  async getDashboardSummary(organizationId: string, period?: string, startDate?: string, endDate?: string) {
-    return this.getAdvancedDashboardSummary(organizationId, period, startDate, endDate);
+  async getDashboardSummary(
+    organizationId: string,
+    period?: string,
+    startDate?: string,
+    endDate?: string,
+    dateField?: string,
+  ) {
+    return this.getAdvancedDashboardSummary(organizationId, period, startDate, endDate, dateField);
   }
 
   async getAdvancedDashboardSummary(
@@ -121,6 +138,7 @@ export class DashboardService {
     period: string = 'all',
     startDate?: string,
     endDate?: string,
+    dateField?: string,
   ) {
     if (!organizationId) {
       throw new Error('organizationId is required');
@@ -153,7 +171,20 @@ export class DashboardService {
       }
     }
 
+    const orderDateField = this.resolveOrderDashboardDateField(dateField);
+    const orderDateColumn = (alias: string = 'orders') => `${alias}.${orderDateField}`;
+
     const applyDateFilter = (qb: any, alias: string = 'orders') => {
+      if (dateFrom && dateTo) {
+        const dateColumn = orderDateColumn(alias);
+        qb.andWhere(`${dateColumn} >= :dateFrom AND ${dateColumn} <= :dateTo`, {
+          dateFrom,
+          dateTo,
+        });
+      }
+    };
+
+    const applyCreatedAtDateFilter = (qb: any, alias: string) => {
       if (dateFrom && dateTo) {
         qb.andWhere(`${alias}.createdAt >= :dateFrom AND ${alias}.createdAt <= :dateTo`, {
           dateFrom,
@@ -252,7 +283,7 @@ export class DashboardService {
       .createQueryBuilder('customers')
       .where('customers.organizationId = :organizationId', { organizationId })
       .select('COUNT(customers.id)', 'count');
-    applyDateFilter(newClientsQb, 'customers');
+    applyCreatedAtDateFilter(newClientsQb, 'customers');
 
     // 11. Top Customers
     const topCustomersQb = this.customerRepository
@@ -297,35 +328,35 @@ export class DashboardService {
 
     if (period === 'day' || period === 'today') {
       timeSeriesQb
-        .select("TO_CHAR(orders.createdAt, 'HH24:00')", 'timeKey')
+        .select(`TO_CHAR(${orderDateColumn('orders')}, 'HH24:00')`, 'timeKey')
         .addSelect('COUNT(orders.id)', 'ordersCount')
         .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
-        .groupBy("TO_CHAR(orders.createdAt, 'HH24:00')")
-        .orderBy("TO_CHAR(orders.createdAt, 'HH24:00')", 'ASC');
+        .groupBy(`TO_CHAR(${orderDateColumn('orders')}, 'HH24:00')`)
+        .orderBy(`TO_CHAR(${orderDateColumn('orders')}, 'HH24:00')`, 'ASC');
     } else if (period === 'week') {
       timeSeriesQb
-        .select("TO_CHAR(orders.createdAt, 'Dy')", 'timeKey')
-        .addSelect("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'sortDate')
+        .select(`TO_CHAR(${orderDateColumn('orders')}, 'Dy')`, 'timeKey')
+        .addSelect(`TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`, 'sortDate')
         .addSelect('COUNT(orders.id)', 'ordersCount')
         .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
-        .groupBy("TO_CHAR(orders.createdAt, 'Dy'), TO_CHAR(orders.createdAt, 'YYYY-MM-DD')")
-        .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'ASC');
+        .groupBy(`TO_CHAR(${orderDateColumn('orders')}, 'Dy'), TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`)
+        .orderBy(`TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`, 'ASC');
     } else if (period === 'month') {
       timeSeriesQb
-        .select("TO_CHAR(orders.createdAt, 'DD Mon')", 'timeKey')
-        .addSelect("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'sortDate')
+        .select(`TO_CHAR(${orderDateColumn('orders')}, 'DD Mon')`, 'timeKey')
+        .addSelect(`TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`, 'sortDate')
         .addSelect('COUNT(orders.id)', 'ordersCount')
         .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
-        .groupBy("TO_CHAR(orders.createdAt, 'DD Mon'), TO_CHAR(orders.createdAt, 'YYYY-MM-DD')")
-        .orderBy("TO_CHAR(orders.createdAt, 'YYYY-MM-DD')", 'ASC');
+        .groupBy(`TO_CHAR(${orderDateColumn('orders')}, 'DD Mon'), TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`)
+        .orderBy(`TO_CHAR(${orderDateColumn('orders')}, 'YYYY-MM-DD')`, 'ASC');
     } else {
       timeSeriesQb
-        .select("TO_CHAR(orders.createdAt, 'Mon')", 'timeKey')
-        .addSelect("TO_CHAR(orders.createdAt, 'MM')", 'sortDate')
+        .select(`TO_CHAR(${orderDateColumn('orders')}, 'Mon')`, 'timeKey')
+        .addSelect(`TO_CHAR(${orderDateColumn('orders')}, 'MM')`, 'sortDate')
         .addSelect('COUNT(orders.id)', 'ordersCount')
         .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'revenue')
-        .groupBy("TO_CHAR(orders.createdAt, 'Mon'), TO_CHAR(orders.createdAt, 'MM')")
-        .orderBy("TO_CHAR(orders.createdAt, 'MM')", 'ASC');
+        .groupBy(`TO_CHAR(${orderDateColumn('orders')}, 'Mon'), TO_CHAR(${orderDateColumn('orders')}, 'MM')`)
+        .orderBy(`TO_CHAR(${orderDateColumn('orders')}, 'MM')`, 'ASC');
     }
 
     // Execute All in Parallel
@@ -380,6 +411,7 @@ export class DashboardService {
 
     return {
       period,
+      dateField: orderDateField,
       startDate: dateFrom?.toISOString(),
       endDate: dateTo?.toISOString(),
       salesOverview: {
@@ -747,6 +779,7 @@ async getAreaWiseDistribution(
   period: string = 'month',
   startDate?: string,
   endDate?: string,
+  dateField?: string,
   statusIds?: number[],   // 👈 নতুন param
 ) {
   if (!organizationId) {
@@ -805,12 +838,15 @@ async getAreaWiseDistribution(
     }
   };
 
+  const orderDateField = this.resolveOrderDashboardDateField(dateField);
+  const orderDateColumn = `orders.${orderDateField}`;
+
   // Current period area metrics
   const currentQb = this.orderRepository
     .createQueryBuilder('orders')
     .leftJoin('orders.customer', 'customer')
     .where('orders.organizationId = :organizationId', { organizationId })
-    .andWhere('orders.createdAt >= :currentFrom AND orders.createdAt <= :currentTo', {
+    .andWhere(`${orderDateColumn} >= :currentFrom AND ${orderDateColumn} <= :currentTo`, {
       currentFrom,
       currentTo,
     })
@@ -838,7 +874,7 @@ async getAreaWiseDistribution(
     .createQueryBuilder('orders')
     .leftJoin('orders.customer', 'customer')
     .where('orders.organizationId = :organizationId', { organizationId })
-    .andWhere('orders.createdAt >= :previousFrom AND orders.createdAt <= :previousTo', {
+    .andWhere(`${orderDateColumn} >= :previousFrom AND ${orderDateColumn} <= :previousTo`, {
       previousFrom,
       previousTo,
     })
@@ -919,6 +955,7 @@ async getAreaWiseDistribution(
   return {
     level,
     period,
+    dateField: orderDateField,
     appliedStatusIds: statusIds || [],
     statusList: this.ORDER_STATUSES,   // 👈 frontend filter option বানাতে সুবিধা
     totalOrders: totalOrdersInPeriod,
@@ -927,5 +964,20 @@ async getAreaWiseDistribution(
     topGrowingAreas: growingAreas,
     topDecliningAreas: decliningAreas,
   };
+}
+
+private resolveOrderDashboardDateField(dateField?: string): OrderDashboardDateField {
+  const allowedDateFields: OrderDashboardDateField[] = [
+    'createdAt',
+    'intransitTime',
+    'storeTime',
+    'packingTime',
+    'approvedTime',
+    'courierUpdatedAt',
+  ];
+
+  return allowedDateFields.includes(dateField as OrderDashboardDateField)
+    ? (dateField as OrderDashboardDateField)
+    : 'createdAt';
 }
 }
