@@ -44,6 +44,29 @@ export class InventoryOperationsService {
     private readonly warehouseRepo: Repository<Warehouse>,
   ) {}
 
+  private async ensureMasterInventory(manager: any, productId: string, organizationId: string): Promise<Inventory> {
+    let inventory = await manager.findOne(Inventory, {
+      where: { productId },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (!inventory) {
+      inventory = manager.create(Inventory, {
+        productId,
+        organizationId,
+        stock: 0,
+        orderQue: 0,
+        hoildQue: 0,
+        processing: 0,
+        wastageQuantity: 0,
+        expiredQuantity: 0,
+      });
+      inventory = await manager.save(inventory);
+    }
+
+    return inventory;
+  }
+
   // ================= BIN / RACK / SHELF LOCATIONS =================
   async createLocation(data: Partial<WarehouseLocation>, organizationId: string): Promise<WarehouseLocation> {
     const loc = this.locationRepo.create({ ...data, organizationId });
@@ -189,15 +212,17 @@ export class InventoryOperationsService {
         });
 
         if (!destInv) {
+          const masterInventory = await this.ensureMasterInventory(manager, item.productId, organizationId);
           destInv = manager.create(InventoryItem, {
             locationId: transfer.toWarehouseId,
             productId: item.productId,
-            inventoryId: 'inv-default',
+            inventoryId: masterInventory.id,
             quantity: qtyReceived,
             orderQue: 0,
             hoildQue: 0,
             processing: 0,
             wastageQuantity: 0,
+            expiredQuantity: 0,
           });
         } else {
           destInv.quantity = Number(destInv.quantity || 0) + qtyReceived;
@@ -309,15 +334,17 @@ export class InventoryOperationsService {
         });
 
         if (!inv) {
+          const masterInventory = await this.ensureMasterInventory(manager, item.productId, organizationId);
           inv = manager.create(InventoryItem, {
             locationId: adj.warehouseId,
             productId: item.productId,
-            inventoryId: 'inv-default',
+            inventoryId: masterInventory.id,
             quantity: item.countedQuantity,
             orderQue: 0,
             hoildQue: 0,
             processing: 0,
             wastageQuantity: 0,
+            expiredQuantity: 0,
           });
         } else {
           inv.quantity = item.countedQuantity; // Reconcile to physically counted stock
@@ -370,7 +397,7 @@ export class InventoryOperationsService {
 
         const savedMasterInv = await manager.save(masterInventory);
 
-        if (!inv.inventoryId || inv.inventoryId === 'inv-default') {
+        if (!inv.inventoryId) {
           inv.inventoryId = savedMasterInv.id;
           await manager.save(inv);
         }

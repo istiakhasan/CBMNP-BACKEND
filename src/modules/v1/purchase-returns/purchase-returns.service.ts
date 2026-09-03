@@ -11,6 +11,7 @@ import { GoodsReceiptNote, GRNStatus } from './entities/goods-receipt-note.entit
 import { GoodsReceiptItem } from './entities/goods-receipt-item.entity';
 import { RFQ, RFQStatus } from './entities/rfq.entity';
 import { SupplierQuotation } from './entities/supplier-quotation.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
 import { Supplier } from '../supplier/entities/supplier.entity';
@@ -36,6 +37,29 @@ export class PurchaseReturnsService {
     @InjectRepository(Supplier)
     private readonly supplierRepo: Repository<Supplier>,
   ) {}
+
+  private async ensureMasterInventory(manager: any, productId: string, organizationId: string): Promise<Inventory> {
+    let inventory = await manager.findOne(Inventory, {
+      where: { productId },
+      lock: { mode: 'pessimistic_write' },
+    });
+
+    if (!inventory) {
+      inventory = manager.create(Inventory, {
+        productId,
+        organizationId,
+        stock: 0,
+        orderQue: 0,
+        hoildQue: 0,
+        processing: 0,
+        wastageQuantity: 0,
+        expiredQuantity: 0,
+      });
+      inventory = await manager.save(inventory);
+    }
+
+    return inventory;
+  }
 
   // ================= PURCHASE RETURNS & DEBIT NOTES =================
   async createReturn(data: any, organizationId: string, userId?: string): Promise<PurchaseReturn> {
@@ -197,15 +221,17 @@ export class PurchaseReturnsService {
             });
 
             if (!inv) {
+              const masterInventory = await this.ensureMasterInventory(manager, i.productId, organizationId);
               inv = manager.create(InventoryItem, {
                 locationId: data.warehouseId,
                 productId: i.productId,
-                inventoryId: 'inv-default',
+                inventoryId: masterInventory.id,
                 quantity: acceptedQty,
                 orderQue: 0,
                 hoildQue: 0,
                 processing: 0,
                 wastageQuantity: 0,
+                expiredQuantity: 0,
               });
             } else {
               inv.quantity = Number(inv.quantity || 0) + acceptedQty;

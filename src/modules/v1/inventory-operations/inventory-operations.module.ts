@@ -8,6 +8,7 @@ import { StockAdjustmentItem } from './entities/stock-adjustment-item.entity';
 import { ProductBatch } from './entities/product-batch.entity';
 import { ProductReorderRule } from './entities/reorder-rule.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
 import { Product } from '../product/entity/product.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
@@ -24,6 +25,7 @@ import { InventoryOperationsController } from './inventory-operations.controller
       StockAdjustmentItem,
       ProductBatch,
       ProductReorderRule,
+      Inventory,
       InventoryItem,
       Transaction,
       Product,
