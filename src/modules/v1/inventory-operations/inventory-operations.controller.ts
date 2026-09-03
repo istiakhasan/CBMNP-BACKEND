@@ -124,6 +124,22 @@ export class InventoryOperationsController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
+  @Post('reorder-rules')
+  @ApiOperation({ summary: 'Create or update product reorder rule' })
+  async setReorderRule(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.inventoryOpsService.setReorderRule(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('reorder-rules')
+  @ApiOperation({ summary: 'Get product reorder rules' })
+  async getReorderRules(@Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.inventoryOpsService.getReorderRules(orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
   @Get('reports/valuation')
   @ApiOperation({ summary: 'Get warehouse inventory valuation report' })
   async getValuation(@Query('warehouseId') warehouseId: string, @Req() req: Request) {

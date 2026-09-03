@@ -320,7 +320,11 @@ export class HrPayrollService {
   }
 
   async getCommissionRules(organizationId: string): Promise<CommissionRule[]> {
-    return this.commissionRuleRepo.find({ where: { organizationId } });
+    return this.commissionRuleRepo.find({
+      where: { organizationId },
+      order: { createdAt: 'DESC' },
+      relations: ['specificEmployee'],
+    });
   }
 
   async calculateDeliveredOrderCommission(orderId: string, orderAmount: number, agentId: string, organizationId: string) {

@@ -366,16 +366,40 @@ export class InventoryOperationsService {
 
   // ================= LOW STOCK & REORDER ALERTS =================
   async setReorderRule(data: Partial<ProductReorderRule>, organizationId: string): Promise<ProductReorderRule> {
+    if (!data.productId || !data.warehouseId) {
+      throw new BadRequestException('Product and warehouse are required for reorder rules');
+    }
+
+    const minStockLevel = Number(data.minStockLevel ?? 0);
+    const maxStockLevel = Number(data.maxStockLevel ?? 0);
+    const reorderQuantity = Number(data.reorderQuantity ?? 0);
+
+    if (maxStockLevel < minStockLevel) {
+      throw new BadRequestException('Maximum stock level must be greater than or equal to minimum stock level');
+    }
+
+    if (reorderQuantity < 1) {
+      throw new BadRequestException('Reorder quantity must be at least 1');
+    }
+
     let rule = await this.reorderRuleRepo.findOne({
       where: { organizationId, productId: data.productId, warehouseId: data.warehouseId },
     });
 
     if (rule) {
-      Object.assign(rule, data);
+      Object.assign(rule, data, { minStockLevel, maxStockLevel, reorderQuantity });
     } else {
-      rule = this.reorderRuleRepo.create({ ...data, organizationId });
+      rule = this.reorderRuleRepo.create({ ...data, minStockLevel, maxStockLevel, reorderQuantity, organizationId });
     }
     return this.reorderRuleRepo.save(rule);
+  }
+
+  async getReorderRules(organizationId: string): Promise<ProductReorderRule[]> {
+    return this.reorderRuleRepo.find({
+      where: { organizationId },
+      order: { updatedAt: 'DESC' },
+      relations: ['product', 'warehouse'],
+    });
   }
 
   async getLowStockAlerts(organizationId: string) {
