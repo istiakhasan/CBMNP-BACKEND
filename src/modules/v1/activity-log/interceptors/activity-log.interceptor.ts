@@ -36,17 +36,34 @@ export class ActivityLogInterceptor implements NestInterceptor {
 
     return next.handle().pipe(
       tap({
-        next: () => {
+        next: (response) => {
+          const moduleName = this.getModuleName(path);
+          const action = this.getActionName(method, path);
+          const actor =
+            request.user?.name ||
+            request.body?.userName ||
+            request.user?.userId ||
+            request.user?.id ||
+            request.body?.userId ||
+            'System';
+          const target = this.getTargetLabel(request, response);
+
           void this.activityLogService.recordActivity({
             organizationId: request.headers['x-organization-id'],
             userId: request.user?.userId || request.user?.id || request.body?.userId,
             userName: request.user?.name || request.body?.userName,
-            module: this.getModuleName(path),
-            action: method,
+            module: this.toTitle(moduleName),
+            action,
             method,
             path,
-            description: `${method} ${path}`,
+            description: `${actor} ${action.toLowerCase()} ${this.toTitle(moduleName)}${target ? ` (${target})` : ''}`,
             metadata: {
+              activity: {
+                actor,
+                action,
+                module: this.toTitle(moduleName),
+                target,
+              },
               params: request.params || {},
               query: request.query || {},
               body: this.sanitize(request.body || {}),
@@ -70,6 +87,59 @@ export class ActivityLogInterceptor implements NestInterceptor {
     const parts = cleanPath.split('/').filter(Boolean);
     const v1Index = parts.findIndex((part) => part === 'v1');
     return parts[v1Index + 1] || parts[0] || 'system';
+  }
+
+  private getActionName(method: string, path: string): string {
+    const cleanPath = (path || '').toLowerCase();
+
+    if (cleanPath.includes('change-status')) return 'Changed status';
+    if (cleanPath.includes('delete-by-phone')) return 'Deleted selected order';
+    if (cleanPath.includes('approve')) return 'Approved';
+    if (cleanPath.includes('cancel')) return 'Cancelled';
+    if (cleanPath.includes('dispatch')) return 'Dispatched';
+    if (cleanPath.includes('receive')) return 'Received';
+    if (cleanPath.includes('return')) return 'Returned';
+    if (cleanPath.includes('void')) return 'Voided';
+    if (cleanPath.includes('login')) return 'Logged in';
+
+    const actionByMethod: Record<string, string> = {
+      POST: 'Created',
+      PUT: 'Updated',
+      PATCH: 'Updated',
+      DELETE: 'Deleted',
+    };
+
+    return actionByMethod[method] || 'Changed';
+  }
+
+  private getTargetLabel(request: any, response: any): string {
+    const params = request.params || {};
+    const body = request.body || {};
+    const data = response?.data || response;
+
+    const value =
+      params.id ||
+      params.orderId ||
+      params.userId ||
+      body.orderId ||
+      body.id ||
+      body.phone ||
+      data?.id ||
+      data?.orderId ||
+      data?.invoice ||
+      data?.name ||
+      data?.phone;
+
+    if (!value) return '';
+    return String(value);
+  }
+
+  private toTitle(value: string): string {
+    return (value || 'system')
+      .split(/[-_\s]+/)
+      .filter(Boolean)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
   }
 
   private sanitize(value: any): any {

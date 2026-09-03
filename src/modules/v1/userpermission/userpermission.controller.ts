@@ -21,6 +21,23 @@ export class UserpermissionController {
    }
   }
 
+  @Put(':userId')
+  async replaceUserPermissions(
+    @Param('userId') userId: string,
+    @Body() body: { permissionIds?: number[] },
+  ) {
+    const result = await this.userpermissionService.replaceUserPermissions(
+      userId,
+      body?.permissionIds || [],
+    );
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Permission updated successfully',
+      data: result,
+    };
+  }
+
   @Get()
   findAll() {
     return this.userpermissionService.findAll();

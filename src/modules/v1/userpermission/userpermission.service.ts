@@ -39,6 +39,34 @@ export class UserpermissionService {
     }
   }
 
+  async replaceUserPermissions(
+    userId: string,
+    permissionIds: number[],
+  ): Promise<UserPermission[]> {
+    const uniquePermissionIds = Array.from(
+      new Set((permissionIds || []).map((permissionId) => Number(permissionId))),
+    ).filter((permissionId) => Number.isFinite(permissionId));
+
+    await this.userPermissionRepository.manager.transaction(async (manager) => {
+      await manager.delete(UserPermission, { userId: userId as any });
+
+      if (uniquePermissionIds.length) {
+        const permissions = uniquePermissionIds.map((permissionId) =>
+          manager.create(UserPermission, {
+            userId: userId as any,
+            permissionId,
+          }),
+        );
+        await manager.save(UserPermission, permissions);
+      }
+    });
+
+    return this.userPermissionRepository.find({
+      where: { userId: userId as any },
+      relations: ['permission'],
+    });
+  }
+
   findAll() {
     return `This action returns all userpermission`;
   }
