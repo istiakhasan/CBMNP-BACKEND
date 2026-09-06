@@ -40,8 +40,9 @@ export class StatusService {
     if(query?.label==="Delivered"){
         result = await this.statusRepository.findBy({
           label: In([
-            "Returned",
-            "Partial-Return"
+            // "Returned",
+            // "Partial-Return"
+            "Pending-Return"
           ])
     });
     }

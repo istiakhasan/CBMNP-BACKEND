@@ -3443,181 +3443,203 @@ async update(orderId: number, data: Order) {
   // queryRunner.manager.findOne with no lock, then written back with
   // computed values — a lost-update race under concurrent returns).
   // =========================================================================
-  async returnOrders(payload: {
-    orderIds: string[];
-    agentId: string;
-    statusId: number;
-    warehouse: string;
-    returnableProducts: any;
-    reason?: string;
-  }) {
-    const { orderIds, agentId, statusId, warehouse, returnableProducts, reason } =
-      payload;
+ async returnOrders(payload: {
+  orderIds: string[];
+  agentId: string;
+  statusId: number;
+  warehouse: string;
+  returnableProducts: any;
+  reason?: string;
+}) {
+  const { orderIds, agentId, statusId, warehouse, returnableProducts, reason } =
+    payload;
 
-    const orders = await this.orderRepository.find({
+  const orders = await this.orderRepository.find({
+    where: { id: In(orderIds) },
+    relations: ['status'],
+  });
+
+  if (orders.length !== orderIds.length) {
+    throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
+  }
+
+  const queryRunner = this.dataSource.createQueryRunner();
+  await queryRunner.connect();
+  await queryRunner.startTransaction();
+  const manager = queryRunner.manager;
+
+  try {
+    for (const order of orders) {
+      const products = await manager.find(Products, {
+        where: { orderId: order.id },
+      });
+
+      // ---- VALIDATION: Delivered can only move to Pending Return directly ----
+      // Direct Returned / Partial Return from Delivered status is not allowed.
+      if (
+        order.statusId === OrderStatusId.Delivered &&
+        (statusId === OrderStatusId.Returned ||
+          statusId === OrderStatusId.PartialReturn)
+      ) {
+        throw new ApiError(
+          HttpStatus.BAD_REQUEST,
+          `Order ${order.invoiceNumber || order.id} is Delivered — it must first be moved to Pending Return before it can be Returned or Partially Returned`,
+        );
+      }
+
+      // ---- DELIVERED -> PENDING RETURN: status change only, no inventory touch ----
+      if (
+        order.statusId === OrderStatusId.Delivered &&
+        statusId === OrderStatusId.PendingReturn
+      ) {
+        await manager.update(Order, { id: order.id }, { statusId: statusId });
+        continue; // skip inventory logic entirely for this order
+      }
+
+      // ---- FULL RETURN ----
+      if (statusId === OrderStatusId.Returned) {
+        for (const product of products) {
+          const inventory = await this.lockInventory(
+            manager,
+            product.productId,
+          );
+          const inventoryItem = await this.lockInventoryItem(
+            manager,
+            product.productId,
+            warehouse,
+          );
+
+          if (inventory) {
+            await manager.increment(
+              Inventory,
+              { productId: product.productId },
+              'stock',
+              product.productQuantity,
+            );
+          }
+          if (inventoryItem) {
+            await manager.increment(
+              InventoryItem,
+              { productId: product.productId, locationId: warehouse },
+              'quantity',
+              product.productQuantity,
+            );
+          }
+
+          await this.logInventoryTransaction(manager, {
+            productId: product.productId,
+            quantity: product.productQuantity,
+            organizationId: order.organizationId,
+            type: 'IN',
+            locationId: warehouse,
+            referenceType: 'ORDER_RETURN',
+            referenceNumber: order.invoiceNumber || String(order.id),
+            remarks: reason || 'Full order returned to inventory',
+            performedById: agentId,
+          });
+
+          await manager.save(OrderProductReturn, {
+            orderId: order.id,
+            productId: product.productId,
+            returnQuantity: product.productQuantity,
+            damageQuantity: 0,
+            reason: reason || 'Full order returned',
+            remarks: `Order fully returned from ${order.status.label} status`,
+            returnDate: new Date(),
+          });
+        }
+      }
+
+      // ---- PARTIAL RETURN ----
+      if (statusId === OrderStatusId.PartialReturn) {
+        for (const product of returnableProducts) {
+          const inventory = await this.lockInventory(
+            manager,
+            product.productId,
+          );
+          const inventoryItem = await this.lockInventoryItem(
+            manager,
+            product.productId,
+            warehouse,
+          );
+
+          if (inventory) {
+            await manager.increment(
+              Inventory,
+              { productId: product.productId },
+              'stock',
+              product.returnQuantity,
+            );
+          }
+          if (inventoryItem) {
+            await manager.increment(
+              InventoryItem,
+              { productId: product.productId, locationId: warehouse },
+              'quantity',
+              product.returnQuantity,
+            );
+          }
+
+          await this.logInventoryTransaction(manager, {
+            productId: product.productId,
+            quantity: product.returnQuantity,
+            organizationId: order.organizationId,
+            type: 'IN',
+            locationId: warehouse,
+            referenceType: 'ORDER_RETURN',
+            referenceNumber: order.invoiceNumber || String(order.id),
+            remarks: reason || 'Partial order return added to inventory',
+            performedById: agentId,
+          });
+
+          await manager.save(OrderProductReturn, {
+            orderId: order.id,
+            productId: product?.productId,
+            returnQuantity: product?.returnQuantity,
+            damageQuantity: product?.damageQuantity,
+            reason:
+              reason ||
+              (product?.damageQuantity > 0
+                ? 'Customer returned; item(s) damaged'
+                : 'Customer returned'),
+            remarks: `Item returned via courier on ${new Date().toISOString().split('T')[0]}`,
+            returnDate: new Date(),
+          });
+        }
+      }
+
+      await manager.update(Order, { id: order.id }, { statusId: statusId });
+    }
+
+    const updatedOrders = await manager.find(Order, {
       where: { id: In(orderIds) },
       relations: ['status'],
     });
+    const orderLogs = updatedOrders.map((updatedOrder) => {
+      const originalOrder = orders.find((o) => o.id === updatedOrder.id);
+      return {
+        orderId: updatedOrder.id,
+        agentId,
+        action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
+        previousValue: null,
+      };
+    });
 
-    if (orders.length !== orderIds.length) {
-      throw new ApiError(HttpStatus.BAD_REQUEST, 'Some orders do not exist');
-    }
+    await manager.save(OrdersLog, orderLogs);
 
-    const queryRunner = this.dataSource.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-    const manager = queryRunner.manager;
+    await queryRunner.commitTransaction();
 
-    try {
-      for (const order of orders) {
-        const products = await manager.find(Products, {
-          where: { orderId: order.id },
-        });
-
-        // ---- FULL RETURN ----
-        if (statusId === OrderStatusId.Returned) {
-          for (const product of products) {
-            const inventory = await this.lockInventory(
-              manager,
-              product.productId,
-            );
-            const inventoryItem = await this.lockInventoryItem(
-              manager,
-              product.productId,
-              warehouse,
-            );
-
-            if (inventory) {
-              await manager.increment(
-                Inventory,
-                { productId: product.productId },
-                'stock',
-                product.productQuantity,
-              );
-            }
-            if (inventoryItem) {
-              await manager.increment(
-                InventoryItem,
-                { productId: product.productId, locationId: warehouse },
-                'quantity',
-                product.productQuantity,
-              );
-            }
-
-            await this.logInventoryTransaction(manager, {
-              productId: product.productId,
-              quantity: product.productQuantity,
-              organizationId: order.organizationId,
-              type: 'IN',
-              locationId: warehouse,
-              referenceType: 'ORDER_RETURN',
-              referenceNumber: order.invoiceNumber || String(order.id),
-              remarks: reason || 'Full order returned to inventory',
-              performedById: agentId,
-            });
-
-            await manager.save(OrderProductReturn, {
-              orderId: order.id,
-              productId: product.productId,
-              returnQuantity: product.productQuantity,
-              damageQuantity: 0,
-              reason: reason || 'Full order returned',
-              remarks: `Order fully returned from ${order.status.label} status`,
-              returnDate: new Date(),
-            });
-          }
-        }
-
-        // ---- PARTIAL RETURN ----
-        if (statusId === OrderStatusId.PartialReturn) {
-          for (const product of returnableProducts) {
-            const inventory = await this.lockInventory(
-              manager,
-              product.productId,
-            );
-            const inventoryItem = await this.lockInventoryItem(
-              manager,
-              product.productId,
-              warehouse,
-            );
-
-            if (inventory) {
-              await manager.increment(
-                Inventory,
-                { productId: product.productId },
-                'stock',
-                product.returnQuantity,
-              );
-            }
-            if (inventoryItem) {
-              await manager.increment(
-                InventoryItem,
-                { productId: product.productId, locationId: warehouse },
-                'quantity',
-                product.returnQuantity,
-              );
-            }
-
-            await this.logInventoryTransaction(manager, {
-              productId: product.productId,
-              quantity: product.returnQuantity,
-              organizationId: order.organizationId,
-              type: 'IN',
-              locationId: warehouse,
-              referenceType: 'ORDER_RETURN',
-              referenceNumber: order.invoiceNumber || String(order.id),
-              remarks: reason || 'Partial order return added to inventory',
-              performedById: agentId,
-            });
-
-            await manager.save(OrderProductReturn, {
-              orderId: order.id,
-              productId: product?.productId,
-              returnQuantity: product?.returnQuantity,
-              damageQuantity: product?.damageQuantity,
-              reason:
-                reason ||
-                (product?.damageQuantity > 0
-                  ? 'Customer returned; item(s) damaged'
-                  : 'Customer returned'),
-              remarks: `Item returned via courier on ${new Date().toISOString().split('T')[0]}`,
-              returnDate: new Date(),
-            });
-          }
-        }
-
-        await manager.update(Order, { id: order.id }, { statusId: statusId });
-      }
-
-      const updatedOrders = await manager.find(Order, {
-        where: { id: In(orderIds) },
-        relations: ['status'],
-      });
-      const orderLogs = updatedOrders.map((updatedOrder) => {
-        const originalOrder = orders.find((o) => o.id === updatedOrder.id);
-        return {
-          orderId: updatedOrder.id,
-          agentId,
-          action: `Order Status changed to ${updatedOrder.status.label} from ${originalOrder?.status.label}`,
-          previousValue: null,
-        };
-      });
-
-      await manager.save(OrdersLog, orderLogs);
-
-      await queryRunner.commitTransaction();
-
-      return updatedOrders;
-    } catch (error: any) {
-      await queryRunner.rollbackTransaction();
-      throw new ApiError(
-        HttpStatus.INTERNAL_SERVER_ERROR,
-        error.message || 'Failed to return orders',
-      );
-    } finally {
-      await queryRunner.release();
-    }
+    return updatedOrders;
+  } catch (error: any) {
+    await queryRunner.rollbackTransaction();
+    throw new ApiError(
+      HttpStatus.INTERNAL_SERVER_ERROR,
+      error.message || 'Failed to return orders',
+    );
+  } finally {
+    await queryRunner.release();
   }
+}
 
   // download excel
 
