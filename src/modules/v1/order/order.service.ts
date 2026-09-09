@@ -3790,7 +3790,7 @@ async update(orderId: number, data: Order) {
     await workbook.commit();
   }
 
-  async getProductSalesReport(options, filterOptions, organizationId) {
+async getProductSalesReport(options, filterOptions, organizationId) {
     const { sortBy, sortOrder, limit, skip, page } = paginationHelpers(options);
 
     const baseQuery = this.orderRepository
@@ -4019,6 +4019,17 @@ async update(orderId: number, data: Order) {
       .addGroupBy('dp.partnerName')
       .getRawMany();
 
+    // NEW: Date-wise Breakdown (based on selected dateField, e.g. createdAt)
+    const dateBreakdown = await baseQuery
+      .clone()
+      .select(`DATE(orders.${dateField})`, 'date')
+      .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
+      .addSelect('COALESCE(SUM(prod.productQuantity), 0)', 'productQuantity')
+      .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'saleAmount')
+      .groupBy(`DATE(orders.${dateField})`)
+      .orderBy(`DATE(orders.${dateField})`, 'ASC')
+      .getRawMany();
+
     return {
       data,
       total,
@@ -4042,10 +4053,15 @@ async update(orderId: number, data: Order) {
           productQuantity: Number(item.productQuantity) || 0,
           saleAmount: Number(item.saleAmount) || 0,
         })),
+        dateBreakdown: dateBreakdown.map((item) => ({
+          date: item.date, // 'YYYY-MM-DD'
+          orderCount: Number(item.orderCount) || 0,
+          productQuantity: Number(item.productQuantity) || 0,
+          saleAmount: Number(item.saleAmount) || 0,
+        })),
       },
     };
   }
-
   async getDeliveryPartnerShipmentReport(
     organizationId: string,
     filterOptions: any,
