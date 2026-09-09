@@ -324,6 +324,23 @@ export class OrderController {
       };
     });
   }
+  @Patch('/direct-deliver')
+  async directDeliverOrders(@Body() data: any, @Req() req: Request) {
+    return catchAsync(async (): Promise<IResponse<any>> => {
+      const organizationId = req.headers['x-organization-id'];
+      const result = await this.orderService.directDeliverOrders(
+        data,
+        organizationId as string,
+      );
+      return {
+        message: 'Orders directly delivered and requisition created successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+        success: true,
+      };
+    });
+  }
+
   @Patch('/change-status')
   async changeStatus(@Body() data: any, @Req() req: Request) {
     return catchAsync(async (): Promise<IResponse<Order[]>> => {

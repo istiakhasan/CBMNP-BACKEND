@@ -8,64 +8,59 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { Employee } from './employee.entity';
-import { LeaveType } from './leave-type.entity';
 import { Organization } from '../../organization/entities/organization.entity';
+import { Employee } from './employee.entity';
 
-export enum LeaveStatus {
-  PENDING = 'Pending',
-  APPROVED = 'Approved',
+export enum ClearanceStatus {
+  SUBMITTED = 'Submitted',
+  IN_PROGRESS = 'In Progress',
+  CLEARED = 'Cleared & Settled',
   REJECTED = 'Rejected',
-  CANCELLED = 'Cancelled',
 }
 
-@Entity({ name: 'leave_requests' })
-@Index(['organizationId', 'employeeId'])
-export class LeaveRequest {
+@Entity({ name: 'resignation_clearances' })
+export class ResignationClearance {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column({ type: 'uuid', nullable: false })
+  @Index()
   employeeId: string;
 
   @ManyToOne(() => Employee, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'employeeId' })
   employee: Employee;
 
-  @Column({ type: 'uuid', nullable: false })
-  leaveTypeId: string;
-
-  @ManyToOne(() => LeaveType, { onDelete: 'RESTRICT' })
-  @JoinColumn({ name: 'leaveTypeId' })
-  leaveType: LeaveType;
+  @Column({ type: 'date', nullable: false })
+  resignationDate: string;
 
   @Column({ type: 'date', nullable: false })
-  startDate: string;
-
-  @Column({ type: 'date', nullable: false })
-  endDate: string;
-
-  @Column({ type: 'int', nullable: false })
-  daysCount: number;
+  lastWorkingDay: string;
 
   @Column({ type: 'text', nullable: false })
-  reason: string;
+  reasonForLeaving: string;
 
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  emergencyPhone: string;
+  @Column({ type: 'boolean', default: false })
+  itClearanceApproved: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  adminAssetClearanceApproved: boolean;
+
+  @Column({ type: 'boolean', default: false })
+  accountsDuesClearanceApproved: boolean;
+
+  @Column({ type: 'numeric', precision: 18, scale: 2, default: 0 })
+  finalSettlementAmount: number; // Gratuity + remaining salary - deductions
 
   @Column({
     type: 'enum',
-    enum: LeaveStatus,
-    default: LeaveStatus.PENDING,
+    enum: ClearanceStatus,
+    default: ClearanceStatus.SUBMITTED,
   })
-  status: LeaveStatus;
-
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  approvedById: string;
+  status: ClearanceStatus;
 
   @Column({ type: 'text', nullable: true })
-  approvalRemarks: string;
+  exitInterviewFeedback: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

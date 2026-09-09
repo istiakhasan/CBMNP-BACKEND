@@ -8,64 +8,56 @@ import {
   JoinColumn,
   Index,
 } from 'typeorm';
-import { Employee } from './employee.entity';
-import { LeaveType } from './leave-type.entity';
 import { Organization } from '../../organization/entities/organization.entity';
+import { Employee } from './employee.entity';
 
-export enum LeaveStatus {
+export enum ExpenseClaimStatus {
   PENDING = 'Pending',
   APPROVED = 'Approved',
+  REIMBURSED = 'Reimbursed',
   REJECTED = 'Rejected',
-  CANCELLED = 'Cancelled',
 }
 
-@Entity({ name: 'leave_requests' })
-@Index(['organizationId', 'employeeId'])
-export class LeaveRequest {
+@Entity({ name: 'expense_claims' })
+export class ExpenseClaim {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
   @Column({ type: 'uuid', nullable: false })
+  @Index()
   employeeId: string;
 
   @ManyToOne(() => Employee, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'employeeId' })
   employee: Employee;
 
-  @Column({ type: 'uuid', nullable: false })
-  leaveTypeId: string;
-
-  @ManyToOne(() => LeaveType, { onDelete: 'RESTRICT' })
-  @JoinColumn({ name: 'leaveTypeId' })
-  leaveType: LeaveType;
+  @Column({ type: 'varchar', length: 100, nullable: false })
+  category: string; // e.g. "Travel & Conveyance", "Client Entertainment", "Office Supplies", "Medical"
 
   @Column({ type: 'date', nullable: false })
-  startDate: string;
+  expenseDate: string;
 
-  @Column({ type: 'date', nullable: false })
-  endDate: string;
-
-  @Column({ type: 'int', nullable: false })
-  daysCount: number;
+  @Column({ type: 'numeric', precision: 18, scale: 2, nullable: false })
+  amount: number;
 
   @Column({ type: 'text', nullable: false })
-  reason: string;
+  description: string;
 
-  @Column({ type: 'varchar', length: 50, nullable: true })
-  emergencyPhone: string;
+  @Column({ type: 'text', nullable: true })
+  receiptUrl: string; // Attachment/receipt path or link
 
   @Column({
     type: 'enum',
-    enum: LeaveStatus,
-    default: LeaveStatus.PENDING,
+    enum: ExpenseClaimStatus,
+    default: ExpenseClaimStatus.PENDING,
   })
-  status: LeaveStatus;
+  status: ExpenseClaimStatus;
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   approvedById: string;
 
   @Column({ type: 'text', nullable: true })
-  approvalRemarks: string;
+  remarks: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

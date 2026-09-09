@@ -69,7 +69,7 @@ export class AuthenTicationController {
     'media_manager',
     'cs_website_agent',
   )
-  async getProfile(@Res() res: Response, @Req() req: Request) {
+  async getProfile(@Res() res: Response, @Req() req: any) {
     const result = await this.authenTicationService.getProfile(req.user);
     res.status(HttpStatus.OK).json({
       success: true,

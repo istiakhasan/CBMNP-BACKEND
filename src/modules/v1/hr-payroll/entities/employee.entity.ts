@@ -18,6 +18,20 @@ export enum EmploymentStatus {
   PROBATION = 'Probation',
   RESIGNED = 'Resigned',
   TERMINATED = 'Terminated',
+  SUSPENDED = 'Suspended',
+}
+
+export enum EmploymentType {
+  FULL_TIME = 'Full-time',
+  PART_TIME = 'Part-time',
+  CONTRACTUAL = 'Contractual',
+  INTERN = 'Intern',
+}
+
+export enum PaymentMethod {
+  BANK = 'Bank Transfer',
+  MFS = 'bKash / Nagad',
+  CASH = 'Cash',
 }
 
 @Entity({ name: 'employees' })
@@ -29,6 +43,10 @@ export class Employee {
   @Column({ type: 'varchar', length: 50, nullable: false })
   employeeCode: string; // e.g. "EMP-001"
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  @Index()
+  biometricUserId: string; // ID / Fingerprint Card No on the Biometric Machine (e.g. "1001")
+
   @Column({ type: 'varchar', length: 150, nullable: false })
   fullName: string;
 
@@ -38,8 +56,40 @@ export class Employee {
   @Column({ type: 'varchar', length: 50, nullable: false })
   phone: string;
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  nidNumber: string; // National ID or Passport
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  gender: string; // Male, Female, Other
+
+  @Column({ type: 'date', nullable: true })
+  dateOfBirth: string;
+
+  @Column({ type: 'varchar', length: 10, nullable: true })
+  bloodGroup: string; // A+, B+, O+, AB+, etc.
+
+  @Column({ type: 'varchar', length: 30, nullable: true })
+  maritalStatus: string; // Single, Married, etc.
+
+  @Column({ type: 'text', nullable: true })
+  presentAddress: string;
+
+  @Column({ type: 'text', nullable: true })
+  permanentAddress: string;
+
+  // Emergency Contact
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  emergencyContactName: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  emergencyContactPhone: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  emergencyContactRelation: string;
+
+  // Linked system login user
   @Column({ type: 'varchar', length: 100, nullable: true })
-  userId: string; // Linked system login user
+  userId: string;
 
   @ManyToOne(() => Users, { nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'userId', referencedColumnName: 'userId' })
@@ -69,6 +119,16 @@ export class Employee {
   @Column({ type: 'date', nullable: true })
   joiningDate: string;
 
+  @Column({ type: 'date', nullable: true })
+  confirmationDate: string;
+
+  @Column({
+    type: 'enum',
+    enum: EmploymentType,
+    default: EmploymentType.FULL_TIME,
+  })
+  employmentType: EmploymentType;
+
   @Column({
     type: 'enum',
     enum: EmploymentStatus,
@@ -76,6 +136,7 @@ export class Employee {
   })
   status: EmploymentStatus;
 
+  // Compensation & Bank details
   @Column({
     type: 'numeric',
     precision: 18,
@@ -83,6 +144,28 @@ export class Employee {
     default: 0,
   })
   basicSalary: number;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  bankName: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  bankAccountNo: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  bankRoutingNo: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  mfsNumber: string; // bKash or Nagad wallet number
+
+  @Column({
+    type: 'enum',
+    enum: PaymentMethod,
+    default: PaymentMethod.BANK,
+  })
+  paymentMethod: PaymentMethod;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  tinNumber: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

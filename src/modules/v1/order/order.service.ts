@@ -35,6 +35,7 @@ import * as _ from 'lodash';
 import { OrderExchange } from './entities/orderExchannge.entity';
 import { DeleteOrdersByPhoneDto } from './dto/delete-orders-by-phone.dto';
 import { Comments } from '../Comments/entities/orderComment.entity';
+import { Requisition } from '../requsition/entities/requsition.entity';
 
 /**
  * ============================================================================
@@ -4816,6 +4817,251 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       await queryRunner.rollbackTransaction();
 
       throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  // =========================================================================
+  // DIRECT ORDER DELIVERY: Approved -> Direct Delivered
+  // Atomically creates a Requisition, reduces Master Inventory & Warehouse
+  // Inventory (both stock and queue), updates order to Delivered, logs audit.
+  // =========================================================================
+  async directDeliverOrders(
+    payload: {
+      orderIds: number[];
+      userId?: string;
+      notes?: string;
+      paymentStatus?: string;
+    },
+    organizationId: string,
+  ) {
+    const { orderIds, userId, notes, paymentStatus } = payload;
+
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      throw new BadRequestException('At least one order ID is required');
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    const manager = queryRunner.manager;
+
+    try {
+      // 1. Fetch orders with relations
+      const orders = await manager.find(Order, {
+        where: { id: In(orderIds), organizationId },
+        relations: ['products', 'products.product', 'status', 'warehouse', 'requisition'],
+      });
+
+      if (!orders.length) {
+        throw new NotFoundException('No matching orders found');
+      }
+
+      // Check if any order is already delivered
+      const alreadyDelivered = orders.filter(
+        (o) => o.statusId === OrderStatusId.Delivered,
+      );
+      if (alreadyDelivered.length > 0) {
+        throw new BadRequestException(
+          `Order ${alreadyDelivered.map((o) => o.orderNumber || o.id).join(', ')} is already Delivered`,
+        );
+      }
+
+      // 2. Generate and save Requisition
+      const requisitionNumber =
+        await this.requisitionService.generateRequisitionNumber();
+
+      const requisition = manager.create(Requisition, {
+        requisitionNumber,
+        userId: userId || undefined,
+        organizationId,
+        totalOrders: orders.length,
+        orderIds: orders.map((o) => o.id),
+      });
+
+      const savedRequisition = await manager.save(Requisition, requisition);
+
+      const now = new Date();
+
+      // 3. Process each order and deduct inventory & queue
+      for (const order of orders) {
+        const orderProducts = order.products || [];
+        const locationId = order.locationId;
+
+        for (const op of orderProducts) {
+          const productId = op.productId;
+          const qty = Number(op.productQuantity || 0);
+
+          if (qty <= 0) continue;
+
+          // Lock / ensure Master Inventory & Warehouse Inventory Item
+          const inventory = await this.ensureInventory(
+            manager,
+            productId,
+            organizationId,
+          );
+
+          const inventoryItem = locationId
+            ? await this.ensureInventoryItem(
+                manager,
+                productId,
+                locationId,
+                inventory.id,
+              )
+            : null;
+
+          // A) Reduce Queue from Master Inventory & Warehouse Inventory
+          if (order.statusId === OrderStatusId.Approved) {
+            // Approved state had orderQue incremented -> reduce orderQue
+            await manager.decrement(
+              Inventory,
+              { productId },
+              'orderQue',
+              qty,
+            );
+            if (inventoryItem) {
+              await manager.decrement(
+                InventoryItem,
+                { productId, locationId },
+                'orderQue',
+                qty,
+              );
+            }
+          } else if (
+            order.statusId === OrderStatusId.Store ||
+            order.statusId === OrderStatusId.Packing
+          ) {
+            // Store / Packing state had processing incremented -> reduce processing
+            await manager.decrement(
+              Inventory,
+              { productId },
+              'processing',
+              qty,
+            );
+            if (inventoryItem) {
+              await manager.decrement(
+                InventoryItem,
+                { productId, locationId },
+                'processing',
+                qty,
+              );
+            }
+          } else if (order.statusId === OrderStatusId.Hold) {
+            // Hold state had hoildQue incremented -> reduce hoildQue
+            await manager.decrement(
+              Inventory,
+              { productId },
+              'hoildQue',
+              qty,
+            );
+            if (inventoryItem) {
+              await manager.decrement(
+                InventoryItem,
+                { productId, locationId },
+                'hoildQue',
+                qty,
+              );
+            }
+          }
+
+          // B) Reduce Physical Stock from Master Inventory (stock -= qty)
+          await manager.decrement(
+            Inventory,
+            { productId },
+            'stock',
+            qty,
+          );
+
+          // C) Reduce Physical Stock from Warehouse Inventory (quantity -= qty)
+          if (inventoryItem) {
+            await manager.decrement(
+              InventoryItem,
+              { productId, locationId },
+              'quantity',
+              qty,
+            );
+          }
+
+          // D) Log inventory transaction
+          await this.logInventoryTransaction(manager, {
+            productId,
+            quantity: qty,
+            organizationId,
+            type: 'OUT',
+            locationId,
+            referenceType: 'DIRECT_DELIVERY',
+            referenceNumber:
+              order.invoiceNumber || order.orderNumber || String(order.id),
+            remarks: `Direct order delivery with Requisition (${savedRequisition.requisitionNumber}) - Stock & Queue deducted`,
+            performedById: userId,
+          });
+        }
+
+        // 4. Update Order details directly in DB using manager.update
+        const previousStatusLabel =
+          order.status?.label || String(order.statusId);
+        const previousStatusVal = String(order.statusId);
+
+        const orderUpdatePayload: any = {
+          statusId: OrderStatusId.Delivered, // 8
+          previousStatus: previousStatusVal,
+          requisition: savedRequisition,
+          requisitionId: savedRequisition.id,
+          storeTime: order.storeTime || now,
+          packingTime: order.packingTime || now,
+          intransitTime: order.intransitTime || now,
+          deliveryDate: order.deliveryDate || now.toISOString(),
+        };
+
+        if (paymentStatus) {
+          orderUpdatePayload.paymentStatus = paymentStatus;
+        }
+        if (notes) {
+          orderUpdatePayload.deliveryNote = order.deliveryNote
+            ? `${order.deliveryNote} | ${notes}`
+            : notes;
+        }
+
+        await manager.update(Order, { id: order.id }, orderUpdatePayload);
+        order.statusId = OrderStatusId.Delivered;
+
+        // 5. Add OrdersLog
+        await manager.save(OrdersLog, {
+          orderId: order.id,
+          agentId: userId,
+          action: `Direct Delivered from ${previousStatusLabel} with Requisition (${savedRequisition.requisitionNumber})`,
+          previousValue: previousStatusLabel,
+        });
+      }
+
+      await queryRunner.commitTransaction();
+
+      return {
+        success: true,
+        message: `${orders.length} order(s) directly delivered successfully with Requisition ${savedRequisition.requisitionNumber}`,
+        requisition: savedRequisition,
+        orders: orders.map((o) => ({
+          id: o.id,
+          orderNumber: o.orderNumber,
+          invoiceNumber: o.invoiceNumber,
+          statusId: o.statusId,
+          requisitionNumber: savedRequisition.requisitionNumber,
+        })),
+      };
+    } catch (error: any) {
+      await queryRunner.rollbackTransaction();
+      if (
+        error instanceof ApiError ||
+        error instanceof NotFoundException ||
+        error instanceof BadRequestException
+      ) {
+        throw error;
+      }
+      throw new ApiError(
+        HttpStatus.INTERNAL_SERVER_ERROR,
+        error.message || 'Failed to direct deliver orders',
+      );
     } finally {
       await queryRunner.release();
     }

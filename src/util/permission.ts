@@ -1,226 +1,82 @@
-export const permissionData =[
-    {
-        "id": 1,
-        "label": "READ_ORDERS",
-        "createdAt": "2024-11-28 13:55:35.799516",
-        "updatedAt": "2024-11-28 13:55:35.799516",
-        "base": "order"
-    },
-    {
-        "id": 2,
-        "label": "UPDATE_ORDERS",
-        "createdAt": "2024-11-28 13:56:11.662816",
-        "updatedAt": "2024-11-28 13:56:11.662816",
-        "base": "order"
-    },
-    {
-        "id": 3,
-        "label": "CREATE_ORDERS",
-        "createdAt": "2024-11-28 13:56:22.00472",
-        "updatedAt": "2024-11-28 13:56:22.00472",
-        "base": "order"
-    },
-    {
-        "id": 4,
-        "label": "CREATE_USER",
-        "createdAt": "2024-11-28 13:57:30.151201",
-        "updatedAt": "2024-11-28 13:57:30.151201",
-        "base": "user"
-    },
-    {
-        "id": 5,
-        "label": "VIEW_USER",
-        "createdAt": "2024-11-28 13:57:44.356664",
-        "updatedAt": "2024-11-28 13:57:44.356664",
-        "base": "user"
-    },
-    {
-        "id": 6,
-        "label": "EDIT_USER",
-        "createdAt": "2024-11-28 13:57:58.98175",
-        "updatedAt": "2024-11-28 13:57:58.98175",
-        "base": "user"
-    },
-    {
-        "id": 7,
-        "label": "DELETE_USER",
-        "createdAt": "2024-11-28 17:12:32.260887",
-        "updatedAt": "2024-11-28 17:12:32.260887",
-        "base": "user"
-    },
-    {
-        "id": 8,
-        "label": "Export bInventory",
-        "createdAt": "2024-11-28 17:18:28.852682",
-        "updatedAt": "2024-11-28 17:18:28.852682",
-        "base": "Inventory"
-    },
-    {
-        "id": 9,
-        "label": "Edit Inventory",
-        "createdAt": "2024-11-28 17:18:38.268627",
-        "updatedAt": "2024-11-28 17:18:38.268627",
-        "base": "Inventory"
-    },
-    {
-        "id": 10,
-        "label": "View Inventory",
-        "createdAt": "2024-11-28 17:18:45.356374",
-        "updatedAt": "2024-11-28 17:18:45.356374",
-        "base": "Inventory"
-    },
-    {
-        "id": 11,
-        "label": "Upload Inventory",
-        "createdAt": "2024-11-28 17:19:00.190066",
-        "updatedAt": "2024-11-28 17:19:00.190066",
-        "base": "Inventory"
-    },
-    {
-        "id": 12,
-        "label": "Edit Products",
-        "createdAt": "2024-11-28 17:19:19.430062",
-        "updatedAt": "2024-11-28 17:19:19.430062",
-        "base": "Products"
-    },
-    {
-        "id": 13,
-        "label": "Add Products",
-        "createdAt": "2024-11-28 17:19:27.375708",
-        "updatedAt": "2024-11-28 17:19:27.375708",
-        "base": "Products"
-    },
-    {
-        "id": 14,
-        "label": "View Products",
-        "createdAt": "2024-11-28 17:19:35.830798",
-        "updatedAt": "2024-11-28 17:19:35.830798",
-        "base": "Products"
-    },
-    {
-        "id": 15,
-        "label": "Upload Products",
-        "createdAt": "2024-11-28 17:19:43.898855",
-        "updatedAt": "2024-11-28 17:19:43.898855",
-        "base": "Products"
-    },
-    {
-        "id": 16,
-        "label": "Add Customers",
-        "createdAt": "2024-11-28 17:20:12.26539",
-        "updatedAt": "2024-11-28 17:20:12.26539",
-        "base": "Customers"
-    },
-    {
-        "id": 17,
-        "label": "Upload Customers",
-        "createdAt": "2024-11-28 17:20:25.242534",
-        "updatedAt": "2024-11-28 17:20:25.242534",
-        "base": "Customers"
-    },
-    {
-        "id": 18,
-        "label": "View Customers",
-        "createdAt": "2024-11-28 17:20:34.785802",
-        "updatedAt": "2024-11-28 17:20:34.785802",
-        "base": "Customers"
-    },
-    {
-        "id": 19,
-        "label": "Export Customers",
-        "createdAt": "2024-11-28 17:20:42.838632",
-        "updatedAt": "2024-11-28 17:20:42.838632",
-        "base": "Customers"
-    },
-    {
-        "id": 20,
-        "label": "Edit Customers",
-        "createdAt": "2024-11-28 17:20:51.534076",
-        "updatedAt": "2024-11-28 17:20:51.534076",
-        "base": "Customers"
-    },
-    {
-        "id": 21,
-        "label": "VIEW_PENDING_ORDERS",
-        "createdAt": "2025-01-22 10:15:03.142",
-        "updatedAt": "2025-01-22 10:15:03.142",
-        "base": "order"
-    },
-    {
-        "id": 22,
-        "label": "VIEW_APPROVED_ORDERS",
-        "createdAt": "2025-01-22 10:15:57.181908",
-        "updatedAt": "2025-01-22 10:15:57.181908",
-        "base": "order"
-    },
-    {
-        "id": 23,
-        "label": "VIEW_HOLD_ORDERS",
-        "createdAt": "2025-01-22 10:16:04.705113",
-        "updatedAt": "2025-01-22 10:16:04.705113",
-        "base": "order"
-    },
-    {
-        "id": 24,
-        "label": "VIEW_STORE_ORDERS",
-        "createdAt": "2025-01-22 10:16:11.026306",
-        "updatedAt": "2025-01-22 10:16:11.026306",
-        "base": "order"
-    },
-    {
-        "id": 25,
-        "label": "VIEW_PACKING_ORDERS",
-        "createdAt": "2025-01-22 10:16:17.186406",
-        "updatedAt": "2025-01-22 10:16:17.186406",
-        "base": "order"
-    },
-    {
-        "id": 26,
-        "label": "VIEW_IN_TRANSIT_ORDERS",
-        "createdAt": "2025-01-22 10:16:23.641702",
-        "updatedAt": "2025-01-22 10:16:23.641702",
-        "base": "order"
-    },
-    {
-        "id": 27,
-        "label": "VIEW_DELIVERED_ORDERS",
-        "createdAt": "2025-01-22 10:16:30.507745",
-        "updatedAt": "2025-01-22 10:16:30.507745",
-        "base": "order"
-    },
-    {
-        "id": 28,
-        "label": "VIEW_UNREACHABLE_ORDERS",
-        "createdAt": "2025-01-22 10:16:39.546257",
-        "updatedAt": "2025-01-22 10:16:39.546257",
-        "base": "order"
-    },
-    {
-        "id": 29,
-        "label": "VIEW_CANCEL_ORDERS",
-        "createdAt": "2025-01-22 10:16:45.67495",
-        "updatedAt": "2025-01-22 10:16:45.67495",
-        "base": "order"
-    },
-    {
-        "id": 30,
-        "label": "VIEW_ALL_ORDERS",
-        "createdAt": "2025-01-22 10:16:56.202596",
-        "updatedAt": "2025-01-22 10:16:56.202596",
-        "base": "order"
-    },
-    {
-        "id": 31,
-        "label": "DELETE_ORDERS_BY_PHONE",
-        "createdAt": "2026-09-03 00:00:00.000000",
-        "updatedAt": "2026-09-03 00:00:00.000000",
-        "base": "order"
-    },
-    {
-        "id": 32,
-        "label": "Activity Logs",
-        "createdAt": "2026-09-03 00:00:00.000000",
-        "updatedAt": "2026-09-03 00:00:00.000000",
-        "base": "activity"
-    }
-]
+export const permissionData = [
+  { id: 1, label: "Pos", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 2, label: "UPDATE_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 3, label: "CREATE_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 4, label: "CREATE_USER", base: "user", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 5, label: "VIEW_USER", base: "user", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 6, label: "EDIT_USER", base: "user", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 7, label: "DELETE_USER", base: "user", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 8, label: "Export bInventory", base: "Inventory", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 9, label: "Edit Inventory", base: "Inventory", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 10, label: "View Inventory", base: "Inventory", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 11, label: "Upload Inventory", base: "Inventory", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 12, label: "Edit Products", base: "Products", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 13, label: "Add Products", base: "Products", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 14, label: "View Products", base: "Products", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 15, label: "Upload Products", base: "Products", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 16, label: "Add Customers", base: "Customers", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 17, label: "Upload Customers", base: "Customers", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 18, label: "View Customers", base: "Customers", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 19, label: "Export Customers", base: "Customers", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 20, label: "Edit Customers", base: "Customers", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 21, label: "VIEW_PENDING_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 22, label: "VIEW_APPROVED_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 23, label: "VIEW_HOLD_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 24, label: "VIEW_STORE_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 25, label: "VIEW_PACKING_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 26, label: "VIEW_IN_TRANSIT_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 27, label: "VIEW_DELIVERED_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 28, label: "VIEW_UNREACHABLE_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 29, label: "VIEW_CANCEL_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 30, label: "VIEW_ALL_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 31, label: "Orders", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 32, label: "Dashboard", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 33, label: "Inventory", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 34, label: "Products", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 35, label: "Access", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 36, label: "Requisitions", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 37, label: "Warehouse", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 38, label: "Delivery Partner", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 39, label: "Procurement", base: "Menu", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 40, label: "VIEW_RETURN_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 41, label: "VIEW_PENDING_RETURN_ORDERS", base: "order", createdAt: "2025-08-27 11:49:51", updatedAt: "2025-08-27 11:49:51" },
+  { id: 42, label: "APPROVED_TO_STORE", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 43, label: "APPROVED_TO_HOLD", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 44, label: "STORE_TO_PACKING", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 45, label: "PACKING_TO_IN_TRANSIT", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 46, label: "IN_TRANSIT_TO_DELIVERED", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 47, label: "PENDING_TO_APPROVED", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 48, label: "PENDING_TO_CANCEL", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 49, label: "PENDING_TO_HOLD", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 50, label: "HOLD_TO_APPROVED", base: "status", createdAt: "2026-08-19 09:08:41", updatedAt: "2026-08-19 09:08:41" },
+  { id: 51, label: "VIEW_PARTIAL_RETURN_ORDERS", base: "order", createdAt: "2026-08-19 09:21:37", updatedAt: "2026-08-19 09:21:37" },
+  { id: 52, label: "HOLD_TO_CANCEL", base: "status", createdAt: "2026-08-19 10:30:32", updatedAt: "2026-08-19 10:30:32" },
+  { id: 53, label: "APPROVED_TO_CANCEL", base: "status", createdAt: "2026-08-19 10:30:32", updatedAt: "2026-08-19 10:30:32" },
+  { id: 54, label: "READ_ORDERS", base: "order", createdAt: "2026-08-19 10:30:32", updatedAt: "2026-08-19 10:30:32" },
+  { id: 55, label: "STORE_TO_CANCEL", base: "status", createdAt: "2026-08-20 09:31:19", updatedAt: "2026-08-20 09:31:19" },
+  { id: 56, label: "Reports", base: "Menu", createdAt: "2026-08-24 09:14:33", updatedAt: "2026-08-24 09:14:33" },
+  { id: 57, label: "IN_TRANSIT_TO_PENDING_RETURN", base: "status", createdAt: "2026-08-27 10:39:49", updatedAt: "2026-08-27 10:39:49" },
+  { id: 58, label: "PACKING_TO_HOLD", base: "status", createdAt: "2026-09-02 12:06:53", updatedAt: "2026-09-02 12:06:53" },
+  { id: 59, label: "STORE_TO_HOLD", base: "status", createdAt: "2026-09-03 06:03:09", updatedAt: "2026-09-03 06:03:09" },
+  { id: 60, label: "DELETE_ORDERS_BY_PHONE", base: "order", createdAt: "2026-09-03 07:24:28", updatedAt: "2026-09-03 07:24:28" },
+  { id: 61, label: "DELIVERED_TO_PENDING_RETURN", base: "status", createdAt: "2026-09-06 11:02:05", updatedAt: "2026-09-06 11:02:05" },
+
+  // ==========================================
+  // GARMENTS ERP MODULE PERMISSIONS
+  // ==========================================
+  { id: 62, label: "Garments", base: "Menu", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 63, label: "VIEW_GARMENTS_ORDERS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 64, label: "CREATE_GARMENTS_ORDERS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 65, label: "EDIT_GARMENTS_ORDERS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 66, label: "DELETE_GARMENTS_ORDERS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 67, label: "APPROVE_GARMENTS_SAMPLES", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 68, label: "CREATE_GARMENTS_BOM", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 69, label: "APPROVE_GARMENTS_BOM", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 70, label: "CREATE_GARMENTS_PO", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 71, label: "CHECK_GARMENTS_PO", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 72, label: "APPROVE_GARMENTS_PO", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 73, label: "RECEIVE_GARMENTS_MATERIALS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 74, label: "CREATE_SAMPLE_INWARD", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 75, label: "APPROVE_SAMPLE_INWARD", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+  { id: 76, label: "ISSUE_GARMENTS_FLOOR_MATERIALS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+];

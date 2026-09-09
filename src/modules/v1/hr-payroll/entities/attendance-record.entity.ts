@@ -9,6 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { Employee } from './employee.entity';
+import { BiometricDevice } from './biometric-device.entity';
 import { Organization } from '../../organization/entities/organization.entity';
 
 export enum AttendanceStatus {
@@ -17,6 +18,12 @@ export enum AttendanceStatus {
   HALF_DAY = 'HalfDay',
   ABSENT = 'Absent',
   ON_LEAVE = 'OnLeave',
+}
+
+export enum PunchSource {
+  BIOMETRIC = 'BiometricDevice',
+  WEB_MANUAL = 'WebManual',
+  MOBILE = 'Mobile',
 }
 
 @Entity({ name: 'attendance_records' })
@@ -51,6 +58,30 @@ export class AttendanceRecord {
 
   @Column({ type: 'int', default: 0 })
   lateMinutes: number;
+
+  @Column({ type: 'int', default: 0 })
+  earlyLeavingMinutes: number;
+
+  @Column({ type: 'numeric', precision: 5, scale: 2, default: 0 })
+  workHours: number; // Total hours worked (e.g. 8.5)
+
+  @Column({ type: 'int', default: 0 })
+  overtimeMinutes: number;
+
+  @Column({
+    type: 'enum',
+    enum: PunchSource,
+    default: PunchSource.WEB_MANUAL,
+  })
+  punchSource: PunchSource;
+
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  deviceId: string;
+
+  @ManyToOne(() => BiometricDevice, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'deviceId' })
+  device: BiometricDevice;
 
   @Column({ type: 'varchar', length: 255, nullable: true })
   remarks: string;

@@ -24,6 +24,20 @@ export class ProcurementController {
           });
   }
 
+  @Post('/direct-purchase')
+  createDirect(@Body() dto: any, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'];
+    return catchAsync(async (): Promise<IResponse<Procurement>> => {
+      const result = await this.procurementService.createDirectPurchase(dto, organizationId as string);
+      return {
+        success: true,
+        message: 'Direct Purchase completed and stock received into warehouse successfully',
+        statusCode: HttpStatus.OK,
+        data: result,
+      };
+    });
+  }
+
   @Get()
  async findAll(@Req() req:Request,@Query() query) {
     const organizationId=req.headers['x-organization-id']

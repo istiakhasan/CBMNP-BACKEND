@@ -45,6 +45,7 @@ import { LogisticsOperationsModule } from './modules/v1/logistics-operations/log
 import { NotificationsModule } from './modules/v1/notifications/notifications.module';
 import { GovernanceModule } from './modules/v1/governance/governance.module';
 import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module';
+import { GarmentsModule } from './modules/v1/garments/garments.module';
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module
     NotificationsModule,
     GovernanceModule,
     ActivityLogModule,
+    GarmentsModule,
   ],
   controllers: [AppController],
   providers: [

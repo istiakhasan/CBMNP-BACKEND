@@ -146,7 +146,10 @@ export class UserService {
     // Return the transformed data
     return {
       id: result.id,
+      userId: result.userId,
       name: result.name,
+      role: result.role,
+      email: result.email,
       phone: result.phone,
       createdAt: result.createdAt,
       updatedAt: result.updatedAt,

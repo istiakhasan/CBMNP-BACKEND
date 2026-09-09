@@ -28,11 +28,12 @@ export class PermissionService {
     return result;
   }
 
- async findAll() {
-    const result=await this.permissionRepository.find()
+  async findAll() {
+    const result = await this.permissionRepository.find({
+      order: { id: 'ASC' },
+    });
     const transformed = Object.values(
       result.reduce((acc, { base, label, id }) => {
-        console.log(acc, "check");
         if (!acc[base]) {
           acc[base] = {
             title: base,
@@ -42,16 +43,13 @@ export class PermissionService {
         }
         acc[base].children.push({
           title: label,
-          key: id, 
+          key: id,
         });
         return acc;
-      }, {})
+      }, {}),
     );
-    
-    console.log(transformed);
-    
-    
-    return transformed
+
+    return transformed;
   }
 
   findOne(id: number) {
@@ -67,14 +65,85 @@ export class PermissionService {
   }
 
   async seedData() {
-   
+    try {
+      console.log('🌱 Checking permissions in database...');
 
-    // for (const item of permissionData) {
-    //   const existing = await this.permissionRepository.findOne({ where: { id: item.id } });
-    //   if (!existing) {
-    //     await this.permissionRepository.save(item);
-    //   }
-    // }
-  
-}
+      // 1. Synchronize PostgreSQL sequence to prevent duplicate primary key errors
+      try {
+        await this.permissionRepository.query(`
+          DO $$
+          DECLARE
+            max_id integer;
+            seq_name text;
+          BEGIN
+            SELECT COALESCE(MAX(id), 0) INTO max_id FROM "permission";
+            SELECT pg_get_serial_sequence('"permission"', 'id') INTO seq_name;
+            IF seq_name IS NOT NULL THEN
+              IF max_id = 0 THEN
+                PERFORM setval(seq_name, 1, false);
+              ELSE
+                PERFORM setval(seq_name, max_id, true);
+              END IF;
+            END IF;
+          END $$;
+        `);
+      } catch (seqErr: any) {
+        console.warn('Sequence reset notice:', seqErr?.message || seqErr);
+      }
+
+      // 2. Fetch existing permissions
+      const existingPermissions = await this.permissionRepository.find();
+      const existingLabels = new Set(
+        existingPermissions.map((p) => (p.label ? p.label.trim().toLowerCase() : '')),
+      );
+
+      const missingPermissions = permissionData.filter(
+        (item) => !existingLabels.has(item.label.trim().toLowerCase()),
+      );
+
+      if (missingPermissions.length === 0) {
+        console.log(
+          `✔ All ${permissionData.length} permissions already exist in the database (${existingPermissions.length} records found). No changes needed.`,
+        );
+        return {
+          totalPredefined: permissionData.length,
+          alreadyExisting: existingPermissions.length,
+          inserted: 0,
+          message: 'All permissions are already up-to-date',
+        };
+      }
+
+      console.log(
+        `📦 Found ${existingPermissions.length} existing permissions. Adding ${missingPermissions.length} missing permissions...`,
+      );
+
+      const insertedLabels: string[] = [];
+
+      for (const item of missingPermissions) {
+        try {
+          const perm = this.permissionRepository.create({
+            label: item.label,
+            base: item.base,
+          });
+          const saved = await this.permissionRepository.save(perm);
+          insertedLabels.push(saved.label);
+        } catch (itemErr: any) {
+          console.warn(`Could not insert permission "${item.label}":`, itemErr?.message || itemErr);
+        }
+      }
+
+      console.log(`✅ Successfully seeded ${insertedLabels.length} missing permissions into the database!`);
+
+      return {
+        totalPredefined: permissionData.length,
+        alreadyExisting: existingPermissions.length,
+        inserted: insertedLabels.length,
+        insertedLabels,
+        message: `Successfully seeded ${insertedLabels.length} missing permissions`,
+      };
+    } catch (error) {
+      console.error('❌ Error during permission seeding:', error);
+      throw error;
+    }
+  }
 }

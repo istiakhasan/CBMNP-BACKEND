@@ -1,11 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { DataSource, In, Repository } from 'typeorm';
 import { CreateProcurementDto } from './dto/create-procurement.dto';
 import { Supplier } from '../supplier/entities/supplier.entity';
 import { ProcurementItem } from './entities/procurementItem.entity';
 import { Procurement } from './entities/procurement.entity';
 import { InvoiceCounter } from './entities/invoice-counter.entity';
+import { Product } from '../product/entity/product.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
+import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
+import { Transaction } from '../transaction/entities/transaction.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { InventoryService } from '../inventory/inventory.service';
@@ -13,6 +17,7 @@ import { InventoryService } from '../inventory/inventory.service';
 @Injectable()
 export class ProcurementService {
   constructor(
+    private readonly dataSource: DataSource,
     private readonly inventoryService: InventoryService,
     @InjectRepository(Procurement)
     private procurementRepo: Repository<Procurement>,
@@ -57,10 +62,16 @@ export class ProcurementService {
     await this.procurementRepo.save(procurement);
 
     const items = dto.items.map((item) => {
+      const qty = Number(item.orderedQuantity || 0);
+      const price = Number(item.unitPrice || 0);
       return this.procurementItemRepo.create({
         procurement,
         ...item,
-        totalPrice: item.orderedQuantity * item.unitPrice,
+        orderedQuantity: qty,
+        receivedQuantity: item.receivedQuantity ?? 0,
+        damageQuantity: item.damageQuantity ?? 0,
+        unitPrice: price,
+        totalPrice: qty * price,
       });
     });
 
@@ -194,42 +205,211 @@ export class ProcurementService {
       affected: result.affected,
     };
   }
-  async receiveOrder(payload, organizationId) {
+  async receiveOrder(payload: any, organizationId: string) {
     const { poIds, stock, procurementId } = payload;
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    await Promise.all(
-      stock.map(
-        async (item) =>
-          await this.inventoryService.addProductToInventory({
-            ...item,
-            organizationId,
-          }),
-      ),
-    );
+    try {
+      const procurement = await queryRunner.manager.findOne(Procurement, {
+        where: { id: procurementId, organizationId },
+        relations: ['items', 'items.product', 'supplier'],
+      });
 
-    let checker = true;
+      if (!procurement) {
+        throw new NotFoundException('Procurement order not found');
+      }
 
-    await Promise.all(
-      poIds.map(async ({ id, productId, receivedQuantity }) => {
-        const findPoOrder = await this.procurementItemRepo.findOne({
-          where: { productId, id },
-        });
-
-        if (!findPoOrder || findPoOrder.orderedQuantity !== receivedQuantity) {
-          checker = false;
+      // Map warehouse location from stock payload
+      const locationMap: Record<string, string> = {};
+      if (Array.isArray(stock)) {
+        for (const s of stock) {
+          const locId = s.inventoryItems?.[0]?.locationId || s.locationId;
+          if (s.productId && locId) {
+            locationMap[s.productId] = locId;
+          }
         }
-        await this.procurementItemRepo.update(
-          { id, productId },
-          { receivedQuantity },
-        );
-      }),
-    );
+      }
 
-    if (!!checker && procurementId) {
-      await this.procurementRepo.update(
-        { id: procurementId },
-        { status: 'Completed' },
+      if (Array.isArray(poIds)) {
+        for (const poItemUpdate of poIds) {
+          const poItem = procurement.items?.find(
+            (item) =>
+              item.id === poItemUpdate.id ||
+              item.productId === poItemUpdate.productId,
+          );
+
+          if (!poItem) continue;
+
+          const existingReceived = Number(poItem.receivedQuantity || 0);
+          const targetReceived = Number(poItemUpdate.receivedQuantity || 0);
+          const orderedQty = Number(poItem.orderedQuantity || 0);
+
+          if (targetReceived > orderedQty) {
+            throw new BadRequestException(
+              `Cannot receive ${targetReceived} items. Ordered quantity is ${orderedQty}.`,
+            );
+          }
+
+          const deltaQty = targetReceived - existingReceived;
+          if (deltaQty <= 0) {
+            // Already processed / duplicate request - skip adding extra stock
+            continue;
+          }
+
+          // 1. Update ProcurementItem receivedQuantity
+          poItem.receivedQuantity = targetReceived;
+          await queryRunner.manager.save(ProcurementItem, poItem);
+
+          // 2. Update Master Inventory
+          let inventory = await queryRunner.manager.findOne(Inventory, {
+            where: { productId: poItem.productId, organizationId },
+          });
+
+          if (!inventory) {
+            inventory = queryRunner.manager.create(Inventory, {
+              productId: poItem.productId,
+              organizationId,
+              stock: 0,
+              expiredQuantity: 0,
+              wastageQuantity: 0,
+            });
+            await queryRunner.manager.save(Inventory, inventory);
+          }
+
+          inventory.stock = Number(inventory.stock || 0) + deltaQty;
+          await queryRunner.manager.save(Inventory, inventory);
+
+          // 3. Update Warehouse InventoryItem
+          const locationId = locationMap[poItem.productId];
+          if (locationId) {
+            let invItem = await queryRunner.manager.findOne(InventoryItem, {
+              where: { productId: poItem.productId, locationId },
+            });
+
+            if (invItem) {
+              invItem.quantity = Number(invItem.quantity || 0) + deltaQty;
+            } else {
+              invItem = queryRunner.manager.create(InventoryItem, {
+                productId: poItem.productId,
+                locationId,
+                inventoryId: inventory.id,
+                inventory,
+                quantity: deltaQty,
+                expiredQuantity: 0,
+                wastageQuantity: 0,
+              });
+            }
+            await queryRunner.manager.save(InventoryItem, invItem);
+
+            // 4. Create Audit Transaction Record
+            const transaction = queryRunner.manager.create(Transaction, {
+              productId: poItem.productId,
+              inventoryId: inventory.productId,
+              locationId,
+              quantity: deltaQty,
+              organizationId,
+              totalAmount: deltaQty * Number(poItem.unitPrice || 0),
+              type: 'IN',
+              referenceType: 'PURCHASE_RECEIPT',
+              referenceNumber: procurement.invoiceNumber,
+              remarks: `Purchase Order (${procurement.invoiceNumber}) Goods Received (+${deltaQty}) into warehouse`,
+              performedByName: 'Procurement Receiver',
+            });
+            await queryRunner.manager.save(Transaction, transaction);
+          }
+        }
+      }
+
+      // 5. Update overall Procurement status
+      const allCompleted = procurement.items?.every(
+        (item) =>
+          Number(item.receivedQuantity || 0) >=
+          Number(item.orderedQuantity || 0),
       );
+      procurement.status = allCompleted ? 'Completed' : 'Approved';
+      await queryRunner.manager.save(Procurement, procurement);
+
+      await queryRunner.commitTransaction();
+      return procurement;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
     }
+  }
+
+  async createDirectPurchase(dto: any, organizationId: string) {
+    let supplier: Supplier | null = null;
+    if (dto.supplierId) {
+      supplier = await this.supplierRepo.findOne({
+        where: { id: dto.supplierId },
+      });
+    }
+
+    const invoiceNumber = await this.generateInvoiceNumber();
+    const procurement = this.procurementRepo.create({
+      supplier: supplier || undefined,
+      billGenerated: true,
+      billAmount: dto.billAmount || 0,
+      invoiceNumber: `DIR-${invoiceNumber}`,
+      status: 'Completed',
+      notes: dto.notes || 'Direct Spot Purchase',
+      organizationId,
+    });
+
+    const savedProcurement = await this.procurementRepo.save(procurement);
+
+    const items = (dto.items || []).map((item: any) => {
+      const qty = Number(item.orderedQuantity || item.quantity || 0);
+      const price = Number(item.unitPrice || 0);
+      return this.procurementItemRepo.create({
+        procurement: savedProcurement,
+        productId: item.productId,
+        orderedQuantity: qty,
+        receivedQuantity: qty,
+        damageQuantity: 0,
+        unitPrice: price,
+        totalPrice: qty * price,
+      });
+    });
+
+    const savedItems = await this.procurementItemRepo.save(items);
+    savedProcurement.items = savedItems;
+
+    // Direct Stock Entry into specified warehouse
+    if (dto.warehouseId && Array.isArray(dto.items)) {
+      for (const item of dto.items) {
+        const qty = Number(item.orderedQuantity || item.quantity || 0);
+        const price = Number(item.unitPrice || 0);
+        if (qty > 0 && item.productId) {
+          await this.inventoryService.addProductToInventory({
+            productId: item.productId,
+            quantity: qty,
+            expiredQuantity: 0,
+            wastageQuantity: 0,
+            type: true,
+            organizationId,
+            referenceType: 'DIRECT_PURCHASE',
+            referenceNumber: savedProcurement.invoiceNumber,
+            remarks: `Direct Spot Purchase (${savedProcurement.invoiceNumber}) deposited into warehouse`,
+            performedByName: 'Direct Purchase System',
+            inventoryItems: [
+              {
+                locationId: dto.warehouseId,
+                productId: item.productId,
+                quantity: qty,
+                expiredQuantity: 0,
+                wastageQuantity: 0,
+              },
+            ],
+          });
+        }
+      }
+    }
+
+    return savedProcurement;
   }
 }

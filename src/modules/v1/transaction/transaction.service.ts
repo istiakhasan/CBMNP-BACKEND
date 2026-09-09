@@ -9,41 +9,88 @@ import { Repository } from 'typeorm';
 export class TransactionService {
   constructor(
     @InjectRepository(Transaction)
-    private readonly transactionRepository:Repository<Transaction>
-  ){}
+    private readonly transactionRepository: Repository<Transaction>,
+  ) {}
+
   create(createTransactionDto: CreateTransactionDto) {
     return 'This action adds a new transaction';
   }
 
-  async findAll(organizationId:string, query: any = {}) {
-    const { page = 1, limit = 10, productId, locationId } = query;
-    const where: any = { organizationId };
-    if (productId) where.productId = productId;
-    if (locationId || query.warehouseId) where.locationId = locationId || query.warehouseId;
+  async findAll(organizationId: string, query: any = {}) {
+    const {
+      page = 1,
+      limit = 10,
+      searchProducts,
+      searchTerm,
+      productId,
+      locationId,
+      warehouseId,
+      type,
+    } = query;
 
-    const [data, total] = await this.transactionRepository.findAndCount({
-      where,
-      relations:['product','location'],
-      order: { transactionDate: 'DESC' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
-    });
+    const qb = this.transactionRepository
+      .createQueryBuilder('tx')
+      .leftJoinAndSelect('tx.product', 'product')
+      .leftJoinAndSelect('tx.location', 'location')
+      .where('tx.organizationId = :organizationId', { organizationId });
+
+    if (productId) {
+      qb.andWhere('tx.productId = :productId', { productId });
+    }
+
+    const locId = locationId || warehouseId;
+    if (locId) {
+      qb.andWhere('tx.locationId = :locId', { locId });
+    }
+
+    if (type && (type === 'IN' || type === 'OUT')) {
+      qb.andWhere('tx.type = :type', { type });
+    }
+
+    const search = searchProducts || searchTerm;
+    if (search) {
+      qb.andWhere(
+        '(product.name ILIKE :search OR product.sku ILIKE :search OR tx.referenceNumber ILIKE :search OR tx.remarks ILIKE :search)',
+        { search: `%${search}%` },
+      );
+    }
+
+    const [data, total] = await qb
+      .orderBy('tx.transactionDate', 'DESC')
+      .skip((Number(page) - 1) * Number(limit))
+      .take(Number(limit))
+      .getManyAndCount();
 
     return { data, total };
   }
-  async findByProductId(id:string, organizationId?: string, query: any = {}) {
-    const { page = 1, limit = 20, locationId, warehouseId } = query;
-    const where: any = { productId: id };
-    if (organizationId) where.organizationId = organizationId;
-    if (locationId || warehouseId) where.locationId = locationId || warehouseId;
 
-    const [data, total] = await this.transactionRepository.findAndCount({
-      where,
-      relations:['product','location'],
-      order: { transactionDate: 'DESC' },
-      skip: (Number(page) - 1) * Number(limit),
-      take: Number(limit),
-    });
+  async findByProductId(id: string, organizationId?: string, query: any = {}) {
+    const { page = 1, limit = 20, locationId, warehouseId, type } = query;
+
+    const qb = this.transactionRepository
+      .createQueryBuilder('tx')
+      .leftJoinAndSelect('tx.product', 'product')
+      .leftJoinAndSelect('tx.location', 'location')
+      .where('tx.productId = :id', { id });
+
+    if (organizationId) {
+      qb.andWhere('tx.organizationId = :organizationId', { organizationId });
+    }
+
+    const locId = locationId || warehouseId;
+    if (locId) {
+      qb.andWhere('tx.locationId = :locId', { locId });
+    }
+
+    if (type && (type === 'IN' || type === 'OUT')) {
+      qb.andWhere('tx.type = :type', { type });
+    }
+
+    const [data, total] = await qb
+      .orderBy('tx.transactionDate', 'DESC')
+      .skip((Number(page) - 1) * Number(limit))
+      .take(Number(limit))
+      .getManyAndCount();
 
     return { data, total };
   }

@@ -16,13 +16,13 @@ export class ProcurementItem {
   @ManyToOne(() => Product, (product) => product.procurementItems, { eager: true })
   @JoinColumn({ name: 'productId', referencedColumnName: 'id' })
   product: Product;
-  @Column({ type: 'int' })
+  @Column({ type: 'int', default: 0 })
   orderedQuantity: number;
 
-  @Column({ type: 'int' })
+  @Column({ type: 'int', default: 0 })
   receivedQuantity: number;
 
-  @Column({ type: 'int' })
+  @Column({ type: 'int', default: 0 })
   damageQuantity: number;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
