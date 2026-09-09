@@ -4020,6 +4020,10 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .getRawMany();
 
     // Date-wise summary (orders/qty/amount per date)
+  
+
+
+    // Date-wise summary (orders/qty/amount per date)
     const dateBreakdownRaw = await baseQuery
       .clone()
       .select(`DATE(orders.${dateField})`, 'date')
@@ -4047,13 +4051,24 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .addOrderBy('quantity', 'DESC')
       .getRawMany();
 
-    // Group products under their respective date
+    // IMPORTANT: normalize date to a plain 'YYYY-MM-DD' string key.
+    // Postgres DATE() comes back as a JS Date object via TypeORM, and two
+    // Date instances for the same day are NOT === equal, so using them
+    // directly as Map keys silently fails to match (always empty products[]).
+    const normalizeDateKey = (d: any): string => {
+      if (!d) return '';
+      if (d instanceof Date) return d.toISOString().split('T')[0];
+      return String(d).split('T')[0];
+    };
+
+    // Group products under their respective date (string key)
     const productsByDate = new Map<string, any[]>();
     for (const row of dateProductRaw) {
-      if (!productsByDate.has(row.date)) {
-        productsByDate.set(row.date, []);
+      const key = normalizeDateKey(row.date);
+      if (!productsByDate.has(key)) {
+        productsByDate.set(key, []);
       }
-      productsByDate.get(row.date)!.push({
+      productsByDate.get(key)!.push({
         productId: row.productId,
         productName: row.productName,
         sku: row.sku,
@@ -4062,14 +4077,17 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       });
     }
 
-    const dateBreakdown = dateBreakdownRaw.map((item) => ({
-      date: item.date, // 'YYYY-MM-DD'
-      orderCount: Number(item.orderCount) || 0,
-      productQuantity: Number(item.productQuantity) || 0,
-      saleAmount: Number(item.saleAmount) || 0,
-      products: productsByDate.get(item.date) || [],
-    }));
-
+    const dateBreakdown = dateBreakdownRaw.map((item) => {
+      const key = normalizeDateKey(item.date);
+      return {
+        date: key, // clean 'YYYY-MM-DD' string, not a Date object
+        orderCount: Number(item.orderCount) || 0,
+        productQuantity: Number(item.productQuantity) || 0,
+        saleAmount: Number(item.saleAmount) || 0,
+        products: productsByDate.get(key) || [],
+      };
+    });
+    
     return {
       data,
       total,
