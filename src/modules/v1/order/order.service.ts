@@ -4019,8 +4019,8 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .addGroupBy('dp.partnerName')
       .getRawMany();
 
-    // NEW: Date-wise Breakdown (based on selected dateField, e.g. createdAt)
-    const dateBreakdown = await baseQuery
+    // Date-wise summary (orders/qty/amount per date)
+    const dateBreakdownRaw = await baseQuery
       .clone()
       .select(`DATE(orders.${dateField})`, 'date')
       .addSelect('COUNT(DISTINCT orders.id)', 'orderCount')
@@ -4029,6 +4029,46 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .groupBy(`DATE(orders.${dateField})`)
       .orderBy(`DATE(orders.${dateField})`, 'ASC')
       .getRawMany();
+
+    // Date + Product level detail — which product, how many pcs, on which date
+    const dateProductRaw = await baseQuery
+      .clone()
+      .select(`DATE(orders.${dateField})`, 'date')
+      .addSelect('prod.productId', 'productId')
+      .addSelect('p.name', 'productName')
+      .addSelect('p.sku', 'sku')
+      .addSelect('COALESCE(SUM(prod.productQuantity), 0)', 'quantity')
+      .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'saleAmount')
+      .groupBy(`DATE(orders.${dateField})`)
+      .addGroupBy('prod.productId')
+      .addGroupBy('p.name')
+      .addGroupBy('p.sku')
+      .orderBy(`DATE(orders.${dateField})`, 'ASC')
+      .addOrderBy('quantity', 'DESC')
+      .getRawMany();
+
+    // Group products under their respective date
+    const productsByDate = new Map<string, any[]>();
+    for (const row of dateProductRaw) {
+      if (!productsByDate.has(row.date)) {
+        productsByDate.set(row.date, []);
+      }
+      productsByDate.get(row.date)!.push({
+        productId: row.productId,
+        productName: row.productName,
+        sku: row.sku,
+        quantity: Number(row.quantity) || 0,
+        saleAmount: Number(row.saleAmount) || 0,
+      });
+    }
+
+    const dateBreakdown = dateBreakdownRaw.map((item) => ({
+      date: item.date, // 'YYYY-MM-DD'
+      orderCount: Number(item.orderCount) || 0,
+      productQuantity: Number(item.productQuantity) || 0,
+      saleAmount: Number(item.saleAmount) || 0,
+      products: productsByDate.get(item.date) || [],
+    }));
 
     return {
       data,
@@ -4053,12 +4093,7 @@ async getProductSalesReport(options, filterOptions, organizationId) {
           productQuantity: Number(item.productQuantity) || 0,
           saleAmount: Number(item.saleAmount) || 0,
         })),
-        dateBreakdown: dateBreakdown.map((item) => ({
-          date: item.date, // 'YYYY-MM-DD'
-          orderCount: Number(item.orderCount) || 0,
-          productQuantity: Number(item.productQuantity) || 0,
-          saleAmount: Number(item.saleAmount) || 0,
-        })),
+        dateBreakdown,
       },
     };
   }
