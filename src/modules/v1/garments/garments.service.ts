@@ -788,11 +788,13 @@ export class GarmentsService {
   // 7. MATERIAL FLOOR ISSUE & RETURNS
   // =========================================================================
   async createMaterialIssue(dto: any, userName: string, organizationId: string) {
-    const { bomId, inventoryId, qty, lineNo, lotNumber, remarks } = dto;
+    const { bomId, inventoryId, quantity, qty, lineNo, lotNumber, floorSection, issuedTo, remarks } = dto;
     const inv = await this.inventoryRepo.findOne({ where: { id: inventoryId } });
     if (!inv) throw new NotFoundException('Inventory item not found');
 
-    const issueQty = Number(qty || 0);
+    // Accept both 'quantity' (frontend form field) and 'qty' (legacy) field names
+    const issueQty = Number(quantity ?? qty ?? 0);
+    if (issueQty <= 0) throw new BadRequestException('Issue quantity must be greater than 0');
     if (issueQty > Number(inv.stock || 0)) {
       throw new BadRequestException(
         `Insufficient stock. Available: ${inv.stock} ${inv.unit}, Requested: ${issueQty}`,
@@ -811,13 +813,15 @@ export class GarmentsService {
       qty: issueQty,
       lineNo,
       lotNumber,
+      floorSection: floorSection || null,
+      issuedTo: issuedTo || null,
       issuedBy: userName || 'Store Keeper',
       remarks,
       organizationId,
     } as Partial<GarmentsMaterialIssue>);
     const savedIssue = await this.issueRepo.save(issue as GarmentsMaterialIssue);
 
-    // Update inventory
+    // Deduct from inventory stock
     inv.issueQty = Number(inv.issueQty || 0) + issueQty;
     inv.stock = Number(inv.receiveQty || 0) - Number(inv.issueQty || 0);
     await this.inventoryRepo.save(inv);
@@ -826,11 +830,14 @@ export class GarmentsService {
   }
 
   async createMaterialReturn(dto: any, userName: string, organizationId: string) {
-    const { bomId, inventoryId, qty, lineNo, lotNumber, remarks } = dto;
+    const { bomId, inventoryId, quantity, qty, lineNo, lotNumber, floorSection, issuedTo, remarks } = dto;
     const inv = await this.inventoryRepo.findOne({ where: { id: inventoryId } });
     if (!inv) throw new NotFoundException('Inventory item not found');
 
-    const returnQty = Number(qty || 0);
+    // Accept both 'quantity' (frontend form field) and 'qty' (legacy) field names
+    const returnQty = Number(quantity ?? qty ?? 0);
+    if (returnQty <= 0) throw new BadRequestException('Return quantity must be greater than 0');
+
     let bom: GarmentsBOM | null = null;
     if (bomId) {
       bom = await this.bomRepo.findOne({ where: { id: bomId } });
@@ -843,13 +850,15 @@ export class GarmentsService {
       qty: returnQty,
       lineNo,
       lotNumber,
+      floorSection: floorSection || null,
+      issuedTo: issuedTo || null,
       receivedBy: userName || 'Store Keeper',
       remarks: remarks || 'Leftover material returned from floor',
       organizationId,
     } as Partial<GarmentsMaterialIssue>);
     const savedReturn = await this.issueRepo.save(ret as GarmentsMaterialIssue);
 
-    // Update inventory
+    // Add back to inventory stock
     inv.issueQty = Math.max(0, Number(inv.issueQty || 0) - returnQty);
     inv.stock = Number(inv.receiveQty || 0) - Number(inv.issueQty || 0);
     await this.inventoryRepo.save(inv);

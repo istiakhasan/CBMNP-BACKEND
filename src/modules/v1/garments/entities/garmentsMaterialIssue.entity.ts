@@ -51,6 +51,12 @@ export class GarmentsMaterialIssue {
   remarks: string;
 
   @Column({ nullable: true })
+  floorSection: string; // e.g. 'Cutting Floor', 'Sewing Floor'
+
+  @Column({ nullable: true })
+  issuedTo: string; // Floor Master / Line In-Charge name
+
+  @Column({ nullable: true })
   organizationId: string;
 
   @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP(6)' })
