@@ -5,7 +5,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
 import * as crypto from 'crypto';
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
@@ -31,6 +31,18 @@ import { EmployeeAsset, AssetStatus } from './entities/employee-asset.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
 import { PromotionHistory } from './entities/promotion-history.entity';
 import { ResignationClearance, ClearanceStatus } from './entities/resignation-clearance.entity';
+// New entity imports
+import { EmployeeTimeline, TimelineEventType } from './entities/employee-timeline.entity';
+import { SalaryHistory } from './entities/salary-history.entity';
+import { AttendanceCorrection, CorrectionStatus } from './entities/attendance-correction.entity';
+import { OvertimeRequest, OvertimeStatus } from './entities/overtime-request.entity';
+import { EmployeeTransfer, TransferStatus } from './entities/employee-transfer.entity';
+import { PerformanceReview, ReviewStatus } from './entities/performance-review.entity';
+import { TrainingProgram, TrainingStatus } from './entities/training-program.entity';
+import { TrainingEnrollment, EnrollmentStatus } from './entities/training-enrollment.entity';
+import { DisciplinaryAction } from './entities/disciplinary-action.entity';
+import { HrAnnouncement } from './entities/hr-announcement.entity';
+import { LoanRepayment } from './entities/loan-repayment.entity';
 
 @Injectable()
 export class HrPayrollService {
@@ -84,6 +96,29 @@ export class HrPayrollService {
     private readonly promotionRepo: Repository<PromotionHistory>,
     @InjectRepository(ResignationClearance)
     private readonly clearanceRepo: Repository<ResignationClearance>,
+    // New repositories
+    @InjectRepository(EmployeeTimeline)
+    private readonly timelineRepo: Repository<EmployeeTimeline>,
+    @InjectRepository(SalaryHistory)
+    private readonly salaryHistoryRepo: Repository<SalaryHistory>,
+    @InjectRepository(AttendanceCorrection)
+    private readonly correctionRepo: Repository<AttendanceCorrection>,
+    @InjectRepository(OvertimeRequest)
+    private readonly overtimeRepo: Repository<OvertimeRequest>,
+    @InjectRepository(EmployeeTransfer)
+    private readonly transferRepo: Repository<EmployeeTransfer>,
+    @InjectRepository(PerformanceReview)
+    private readonly performanceRepo: Repository<PerformanceReview>,
+    @InjectRepository(TrainingProgram)
+    private readonly trainingRepo: Repository<TrainingProgram>,
+    @InjectRepository(TrainingEnrollment)
+    private readonly enrollmentRepo: Repository<TrainingEnrollment>,
+    @InjectRepository(DisciplinaryAction)
+    private readonly disciplinaryRepo: Repository<DisciplinaryAction>,
+    @InjectRepository(HrAnnouncement)
+    private readonly announcementRepo: Repository<HrAnnouncement>,
+    @InjectRepository(LoanRepayment)
+    private readonly loanRepaymentRepo: Repository<LoanRepayment>,
   ) {}
 
   // ================= 1. DEPARTMENTS & DESIGNATIONS =================
@@ -1148,5 +1183,728 @@ export class HrPayrollService {
       order: { year: 'DESC', periodValue: 'ASC' },
       relations: ['employee'],
     });
+  }
+
+  // ================= 15. HR DASHBOARD =================
+  async getDashboardSummary(organizationId: string) {
+    const today = new Date().toISOString().split('T')[0];
+    const now = new Date();
+
+    // Run each query safely so one failure doesn't crash the whole dashboard
+    const safeCount = async (fn: () => Promise<number>): Promise<number> => {
+      try { return await fn(); } catch { return 0; }
+    };
+    const safeFind = async <T>(fn: () => Promise<T[]>): Promise<T[]> => {
+      try { return await fn(); } catch { return []; }
+    };
+
+    const [
+      totalEmployees,
+      activeEmployees,
+      probationEmployees,
+      pendingLeaves,
+      pendingLoans,
+      openJobs,
+      onLeaveToday,
+      pendingPayroll,
+      pendingCorrections,
+      pendingOvertimes,
+    ] = await Promise.all([
+      safeCount(() => this.employeeRepo.count({ where: { organizationId } })),
+      safeCount(() => this.employeeRepo.count({ where: { organizationId, status: EmploymentStatus.ACTIVE } })),
+      safeCount(() => this.employeeRepo.count({ where: { organizationId, status: EmploymentStatus.PROBATION } })),
+      safeCount(() => this.leaveRequestRepo.count({ where: { organizationId, status: LeaveStatus.PENDING } })),
+      safeCount(() => this.loanRepo.count({ where: { organizationId, status: LoanStatus.PENDING } })),
+      safeCount(() => this.jobOpeningRepo.count({ where: { organizationId } })),
+      safeCount(() => this.leaveRequestRepo.count({ where: { organizationId, status: LeaveStatus.APPROVED } })),
+      safeCount(() => this.payrollSheetRepo.count({ where: { organizationId, status: PayrollStatus.DRAFT } })),
+      safeCount(() => this.correctionRepo.count({ where: { organizationId, status: CorrectionStatus.PENDING } })),
+      safeCount(() => this.overtimeRepo.count({ where: { organizationId, status: OvertimeStatus.PENDING } })),
+    ]);
+
+    // Today attendance — fetch all, no take limit
+    const todayAttendance = await safeFind(() =>
+      this.attendanceRepo.find({ where: { organizationId, attendanceDate: today } })
+    );
+    const presentToday = todayAttendance.filter(r => r.status === AttendanceStatus.PRESENT || r.status === AttendanceStatus.LATE).length;
+    const lateToday = todayAttendance.filter(r => r.status === AttendanceStatus.LATE).length;
+
+    // Recent joiners
+    const recentJoiners = await safeFind(() =>
+      this.employeeRepo.find({
+        where: { organizationId },
+        order: { joiningDate: 'DESC' },
+        take: 5,
+        relations: ['department', 'designation'],
+      })
+    );
+
+    // Upcoming birthdays in next 7 days
+    const allEmp = await safeFind(() =>
+      this.employeeRepo.find({ where: { organizationId, status: EmploymentStatus.ACTIVE } })
+    );
+    const upcomingBirthdays = allEmp
+      .filter(e => {
+        if (!e.dateOfBirth) return false;
+        try {
+          const bday = new Date(e.dateOfBirth);
+          const thisYearBday = new Date(now.getFullYear(), bday.getMonth(), bday.getDate());
+          const diff = (thisYearBday.getTime() - now.getTime()) / (1000 * 3600 * 24);
+          return diff >= 0 && diff <= 30;
+        } catch { return false; }
+      })
+      .map(e => ({ id: e.id, name: e.fullName, dateOfBirth: e.dateOfBirth, department: (e as any).department?.name }));
+
+    // Expiring probations in next 30 days
+    const expiringProbations = await safeFind(() =>
+      this.employeeRepo
+        .createQueryBuilder('emp')
+        .where('emp.organizationId = :organizationId', { organizationId })
+        .andWhere('emp.probationEndDate IS NOT NULL')
+        .andWhere('emp.probationEndDate >= :today', { today })
+        .andWhere('emp.probationEndDate <= :nextMonth', {
+          nextMonth: new Date(now.getFullYear(), now.getMonth() + 1, now.getDate()).toISOString().split('T')[0],
+        })
+        .select(['emp.id', 'emp.fullName', 'emp.probationEndDate'])
+        .getMany()
+    );
+
+    // Dept headcount
+    const departmentBreakdown = await safeFind(() =>
+      this.employeeRepo
+        .createQueryBuilder('emp')
+        .leftJoin('emp.department', 'dept')
+        .select('dept.name', 'department')
+        .addSelect('COUNT(emp.id)', 'count')
+        .where('emp.organizationId = :organizationId', { organizationId })
+        .andWhere('emp.status = :status', { status: EmploymentStatus.ACTIVE })
+        .groupBy('dept.name')
+        .getRawMany()
+    );
+
+    return {
+      totalEmployees,
+      activeEmployees,
+      probationEmployees,
+      presentToday,
+      lateToday,
+      onLeaveToday,
+      absentToday: Math.max(0, activeEmployees - presentToday - lateToday),
+      pendingLeaves,
+      pendingLoans,
+      pendingCorrections,
+      pendingOvertimes,
+      pendingPayroll,
+      openJobs,
+      recentJoiners,
+      upcomingBirthdays,
+      probationExpiring: expiringProbations,
+      departmentBreakdown,
+    };
+  }
+
+  // ================= 16. EMPLOYEE TIMELINE =================
+  async recordTimelineEvent(data: Partial<EmployeeTimeline>, organizationId: string): Promise<EmployeeTimeline> {
+    const event = this.timelineRepo.create({ ...data, organizationId });
+    return this.timelineRepo.save(event);
+  }
+
+  async getEmployeeTimeline(employeeId: string, organizationId: string): Promise<EmployeeTimeline[]> {
+    return this.timelineRepo.find({
+      where: { employeeId, organizationId },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // ================= 17. SALARY HISTORY & REVISIONS =================
+  async addSalaryRevision(data: {
+    employeeId: string;
+    newBasicSalary: number;
+    effectiveDate: string;
+    revisionType?: string;
+    reason?: string;
+    approvedByUserId?: string;
+    approvedByName?: string;
+  }, organizationId: string): Promise<SalaryHistory> {
+    const emp = await this.employeeRepo.findOne({ where: { id: data.employeeId, organizationId } });
+    if (!emp) throw new NotFoundException('Employee not found');
+
+    const struct = await this.salaryStructureRepo.findOne({ where: { employeeId: data.employeeId, organizationId } });
+    const prevBasic = Number(emp.basicSalary || 0);
+    const prevGross = prevBasic + Number(struct?.houseRentAllowance || 0) + Number(struct?.medicalAllowance || 0) + Number(struct?.conveyanceAllowance || 0);
+    const newGross = Number(data.newBasicSalary) + Number(struct?.houseRentAllowance || 0) + Number(struct?.medicalAllowance || 0) + Number(struct?.conveyanceAllowance || 0);
+
+    const history = this.salaryHistoryRepo.create({
+      employeeId: data.employeeId,
+      previousBasicSalary: prevBasic,
+      newBasicSalary: data.newBasicSalary,
+      previousGrossSalary: prevGross,
+      newGrossSalary: newGross,
+      incrementAmount: Number(data.newBasicSalary) - prevBasic,
+      incrementPercentage: prevBasic > 0 ? Number((((Number(data.newBasicSalary) - prevBasic) / prevBasic) * 100).toFixed(2)) : 0,
+      effectiveDate: data.effectiveDate,
+      revisionType: data.revisionType || 'Increment',
+      reason: data.reason,
+      approvedByUserId: data.approvedByUserId,
+      approvedByName: data.approvedByName,
+      organizationId,
+    });
+    const saved = await this.salaryHistoryRepo.save(history);
+
+    // Update employee and salary structure
+    await this.employeeRepo.update({ id: data.employeeId, organizationId }, { basicSalary: data.newBasicSalary });
+    if (struct) {
+      struct.basicSalary = data.newBasicSalary;
+      await this.salaryStructureRepo.save(struct);
+    }
+
+    // Add to timeline
+    await this.recordTimelineEvent({
+      employeeId: data.employeeId,
+      eventType: TimelineEventType.SALARY_REVISION,
+      title: `Salary Revised: ৳${prevBasic.toLocaleString()} → ৳${Number(data.newBasicSalary).toLocaleString()}`,
+      description: data.reason,
+      eventDate: data.effectiveDate,
+      metadata: { previousBasicSalary: prevBasic, newBasicSalary: data.newBasicSalary, incrementAmount: Number(data.newBasicSalary) - prevBasic },
+      performedByName: data.approvedByName,
+      performedByUserId: data.approvedByUserId,
+    }, organizationId);
+
+    return saved;
+  }
+
+  async getSalaryHistory(employeeId: string, organizationId: string): Promise<SalaryHistory[]> {
+    return this.salaryHistoryRepo.find({
+      where: { employeeId, organizationId },
+      order: { effectiveDate: 'DESC' },
+    });
+  }
+
+  // ================= 18. ATTENDANCE CORRECTIONS =================
+  async submitAttendanceCorrection(data: Partial<AttendanceCorrection>, organizationId: string): Promise<AttendanceCorrection> {
+    const correction = this.correctionRepo.create({
+      ...data,
+      status: CorrectionStatus.PENDING,
+      organizationId,
+    });
+    return this.correctionRepo.save(correction);
+  }
+
+  async getAttendanceCorrections(organizationId: string, employeeId?: string, status?: string) {
+    const query = this.correctionRepo.createQueryBuilder('c')
+      .leftJoinAndSelect('c.employee', 'emp')
+      .leftJoinAndSelect('emp.department', 'dept')
+      .where('c.organizationId = :organizationId', { organizationId });
+
+    if (employeeId) query.andWhere('c.employeeId = :employeeId', { employeeId });
+    if (status) query.andWhere('c.status = :status', { status });
+    query.orderBy('c.createdAt', 'DESC');
+    return query.getMany();
+  }
+
+  async approveAttendanceCorrection(id: string, approved: boolean, remarks: string, organizationId: string, userId?: string) {
+    const correction = await this.correctionRepo.findOne({ where: { id, organizationId } });
+    if (!correction) throw new NotFoundException('Correction request not found');
+
+    correction.status = approved ? CorrectionStatus.APPROVED : CorrectionStatus.REJECTED;
+    correction.approvalRemarks = remarks;
+    correction.approvedById = userId;
+    correction.approvedAt = new Date();
+    await this.correctionRepo.save(correction);
+
+    if (approved) {
+      // Apply the correction to the attendance record
+      const record = await this.attendanceRepo.findOne({
+        where: { organizationId, employeeId: correction.employeeId, attendanceDate: correction.attendanceDate },
+      });
+      if (record) {
+        if (correction.requestedClockIn) record.clockInTime = correction.requestedClockIn;
+        if (correction.requestedClockOut) record.clockOutTime = correction.requestedClockOut;
+        if (record.clockInTime && record.clockOutTime) {
+          const [inH, inM] = record.clockInTime.split(':').map(Number);
+          const [outH, outM] = record.clockOutTime.split(':').map(Number);
+          record.workHours = Math.max(0, Number(((outH * 60 + outM - (inH * 60 + inM)) / 60).toFixed(2)));
+        }
+        record.punchSource = PunchSource.WEB_MANUAL;
+        await this.attendanceRepo.save(record);
+      }
+    }
+    return correction;
+  }
+
+  // ================= 19. OVERTIME MANAGEMENT =================
+  async submitOvertimeRequest(data: Partial<OvertimeRequest>, organizationId: string): Promise<OvertimeRequest> {
+    const ot = this.overtimeRepo.create({
+      ...data,
+      status: OvertimeStatus.PENDING,
+      organizationId,
+    });
+    return this.overtimeRepo.save(ot);
+  }
+
+  async getOvertimeRequests(organizationId: string, employeeId?: string, status?: string) {
+    const query = this.overtimeRepo.createQueryBuilder('ot')
+      .leftJoinAndSelect('ot.employee', 'emp')
+      .leftJoinAndSelect('emp.department', 'dept')
+      .where('ot.organizationId = :organizationId', { organizationId });
+
+    if (employeeId) query.andWhere('ot.employeeId = :employeeId', { employeeId });
+    if (status) query.andWhere('ot.status = :status', { status });
+    query.orderBy('ot.overtimeDate', 'DESC');
+    return query.getMany();
+  }
+
+  async approveOvertimeRequest(id: string, approved: boolean, approvedHours: number, remarks: string, organizationId: string, userId?: string) {
+    const ot = await this.overtimeRepo.findOne({ where: { id, organizationId } });
+    if (!ot) throw new NotFoundException('Overtime request not found');
+
+    ot.status = approved ? OvertimeStatus.APPROVED : OvertimeStatus.REJECTED;
+    ot.approvalRemarks = remarks;
+    ot.approvedById = userId;
+    ot.approvedAt = new Date();
+    if (approved) {
+      ot.approvedHours = approvedHours || ot.requestedHours;
+      ot.overtimeAmount = Number((ot.approvedHours * Number(ot.overtimeRate || 0)).toFixed(2));
+    }
+    return this.overtimeRepo.save(ot);
+  }
+
+  // ================= 20. EMPLOYEE TRANSFERS =================
+  async recordTransfer(data: Partial<EmployeeTransfer>, organizationId: string): Promise<EmployeeTransfer> {
+    const transfer = this.transferRepo.create({
+      ...data,
+      status: TransferStatus.PENDING,
+      organizationId,
+    });
+    const saved = await this.transferRepo.save(transfer);
+    return saved;
+  }
+
+  async getTransfers(organizationId: string, employeeId?: string, status?: string) {
+    const query = this.transferRepo.createQueryBuilder('tr')
+      .leftJoinAndSelect('tr.employee', 'emp')
+      .leftJoinAndSelect('tr.fromDepartment', 'fromDept')
+      .leftJoinAndSelect('tr.toDepartment', 'toDept')
+      .leftJoinAndSelect('tr.fromDesignation', 'fromDesig')
+      .leftJoinAndSelect('tr.toDesignation', 'toDesig')
+      .where('tr.organizationId = :organizationId', { organizationId });
+
+    if (employeeId) query.andWhere('tr.employeeId = :employeeId', { employeeId });
+    if (status) query.andWhere('tr.status = :status', { status });
+    query.orderBy('tr.createdAt', 'DESC');
+    return query.getMany();
+  }
+
+  async approveTransfer(id: string, approved: boolean, remarks: string, organizationId: string, userId?: string) {
+    const transfer = await this.transferRepo.findOne({ where: { id, organizationId } });
+    if (!transfer) throw new NotFoundException('Transfer record not found');
+
+    transfer.status = approved ? TransferStatus.APPROVED : TransferStatus.REJECTED;
+    transfer.approvalRemarks = remarks;
+    transfer.approvedById = userId;
+    const saved = await this.transferRepo.save(transfer);
+
+    if (approved && transfer.employeeId) {
+      // Apply transfer to employee record
+      const updateData: any = {};
+      if (transfer.toDepartmentId) updateData.departmentId = transfer.toDepartmentId;
+      if (transfer.toDesignationId) updateData.designationId = transfer.toDesignationId;
+      if (transfer.toBranch) updateData.branchName = transfer.toBranch;
+      if (transfer.toReportingManagerId) updateData.reportingManagerId = transfer.toReportingManagerId;
+      if (Object.keys(updateData).length > 0) {
+        await this.employeeRepo.update({ id: transfer.employeeId, organizationId }, updateData);
+      }
+
+      // Add to timeline
+      await this.recordTimelineEvent({
+        employeeId: transfer.employeeId,
+        eventType: TimelineEventType.TRANSFER,
+        title: `Transfer Completed`,
+        description: transfer.reason,
+        eventDate: transfer.effectiveDate,
+        metadata: { fromDeptId: transfer.fromDepartmentId, toDeptId: transfer.toDepartmentId, fromBranch: transfer.fromBranch, toBranch: transfer.toBranch },
+        performedByUserId: userId,
+      }, organizationId);
+    }
+    return saved;
+  }
+
+  // ================= 21. PERFORMANCE REVIEWS =================
+  async createPerformanceReview(data: Partial<PerformanceReview>, organizationId: string): Promise<PerformanceReview> {
+    const review = this.performanceRepo.create({ ...data, organizationId });
+    const saved = await this.performanceRepo.save(review);
+
+    await this.recordTimelineEvent({
+      employeeId: data.employeeId,
+      eventType: TimelineEventType.PERFORMANCE_REVIEW,
+      title: `Performance Review: ${data.reviewCycle}`,
+      description: `Rating: ${data.rating || 'N/A'} | Score: ${data.finalScore || 0}`,
+      eventDate: data.reviewDate || new Date().toISOString().split('T')[0],
+    }, organizationId);
+
+    return saved;
+  }
+
+  async getPerformanceReviews(organizationId: string, employeeId?: string, cycle?: string) {
+    const query = this.performanceRepo.createQueryBuilder('pr')
+      .leftJoinAndSelect('pr.employee', 'emp')
+      .leftJoinAndSelect('emp.department', 'dept')
+      .leftJoinAndSelect('emp.designation', 'desig')
+      .where('pr.organizationId = :organizationId', { organizationId });
+
+    if (employeeId) query.andWhere('pr.employeeId = :employeeId', { employeeId });
+    if (cycle) query.andWhere('pr.reviewCycle = :cycle', { cycle });
+    query.orderBy('pr.createdAt', 'DESC');
+    return query.getMany();
+  }
+
+  async updatePerformanceReview(id: string, data: Partial<PerformanceReview>, organizationId: string): Promise<PerformanceReview> {
+    const review = await this.performanceRepo.findOne({ where: { id, organizationId } });
+    if (!review) throw new NotFoundException('Performance review not found');
+    Object.assign(review, data);
+    return this.performanceRepo.save(review);
+  }
+
+  // ================= 22. TRAINING MANAGEMENT =================
+  async createTrainingProgram(data: Partial<TrainingProgram>, organizationId: string): Promise<TrainingProgram> {
+    const training = this.trainingRepo.create({ ...data, organizationId });
+    return this.trainingRepo.save(training);
+  }
+
+  async getTrainingPrograms(organizationId: string, status?: string) {
+    const query = this.trainingRepo.createQueryBuilder('tp')
+      .leftJoinAndSelect('tp.enrollments', 'enr')
+      .leftJoinAndSelect('enr.employee', 'emp')
+      .where('tp.organizationId = :organizationId', { organizationId });
+
+    if (status) query.andWhere('tp.status = :status', { status });
+    query.orderBy('tp.startDate', 'DESC');
+    return query.getMany();
+  }
+
+  async updateTrainingProgram(id: string, data: Partial<TrainingProgram>, organizationId: string): Promise<TrainingProgram> {
+    const tp = await this.trainingRepo.findOne({ where: { id, organizationId } });
+    if (!tp) throw new NotFoundException('Training program not found');
+    Object.assign(tp, data);
+    return this.trainingRepo.save(tp);
+  }
+
+  async enrollInTraining(trainingProgramId: string, employeeIds: string[], organizationId: string) {
+    const training = await this.trainingRepo.findOne({ where: { id: trainingProgramId, organizationId } });
+    if (!training) throw new NotFoundException('Training program not found');
+
+    const results = [];
+    for (const empId of employeeIds) {
+      const existing = await this.enrollmentRepo.findOne({ where: { trainingProgramId, employeeId: empId, organizationId } });
+      if (existing) continue;
+
+      const enrollment = this.enrollmentRepo.create({
+        trainingProgramId,
+        employeeId: empId,
+        status: EnrollmentStatus.ENROLLED,
+        organizationId,
+      });
+      results.push(await this.enrollmentRepo.save(enrollment));
+    }
+    return results;
+  }
+
+  async updateEnrollment(id: string, data: Partial<TrainingEnrollment>, organizationId: string): Promise<TrainingEnrollment> {
+    const enr = await this.enrollmentRepo.findOne({ where: { id, organizationId } });
+    if (!enr) throw new NotFoundException('Enrollment not found');
+    Object.assign(enr, data);
+    return this.enrollmentRepo.save(enr);
+  }
+
+  async getEnrollmentsByEmployee(employeeId: string, organizationId: string) {
+    return this.enrollmentRepo.find({
+      where: { employeeId, organizationId },
+      relations: ['trainingProgram'],
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  // ================= 23. DISCIPLINARY ACTIONS =================
+  async createDisciplinaryAction(data: Partial<DisciplinaryAction>, organizationId: string): Promise<DisciplinaryAction> {
+    const action = this.disciplinaryRepo.create({ ...data, organizationId });
+    const saved = await this.disciplinaryRepo.save(action);
+
+    await this.recordTimelineEvent({
+      employeeId: data.employeeId,
+      eventType: TimelineEventType.DISCIPLINARY,
+      title: `${data.actionType}: ${data.subject}`,
+      description: data.description,
+      eventDate: data.actionDate || new Date().toISOString().split('T')[0],
+      performedByName: data.issuedByName,
+      performedByUserId: data.issuedByUserId,
+    }, organizationId);
+
+    return saved;
+  }
+
+  async getDisciplinaryActions(organizationId: string, employeeId?: string, status?: string) {
+    const query = this.disciplinaryRepo.createQueryBuilder('da')
+      .leftJoinAndSelect('da.employee', 'emp')
+      .leftJoinAndSelect('emp.department', 'dept')
+      .where('da.organizationId = :organizationId', { organizationId });
+
+    if (employeeId) query.andWhere('da.employeeId = :employeeId', { employeeId });
+    if (status) query.andWhere('da.status = :status', { status });
+    query.orderBy('da.createdAt', 'DESC');
+    return query.getMany();
+  }
+
+  async updateDisciplinaryAction(id: string, data: Partial<DisciplinaryAction>, organizationId: string): Promise<DisciplinaryAction> {
+    const action = await this.disciplinaryRepo.findOne({ where: { id, organizationId } });
+    if (!action) throw new NotFoundException('Disciplinary action not found');
+    Object.assign(action, data);
+    return this.disciplinaryRepo.save(action);
+  }
+
+  // ================= 24. HR ANNOUNCEMENTS =================
+  async createAnnouncement(data: Partial<HrAnnouncement>, organizationId: string): Promise<HrAnnouncement> {
+    const announcement = this.announcementRepo.create({ ...data, organizationId });
+    return this.announcementRepo.save(announcement);
+  }
+
+  async getAnnouncements(organizationId: string, activeOnly = false) {
+    const query = this.announcementRepo.createQueryBuilder('ann')
+      .where('ann.organizationId = :organizationId', { organizationId });
+
+    if (activeOnly) {
+      const today = new Date().toISOString().split('T')[0];
+      query.andWhere('ann.isActive = true')
+        .andWhere('(ann.expiryDate IS NULL OR ann.expiryDate >= :today)', { today });
+    }
+    query.orderBy('ann.createdAt', 'DESC');
+    return query.getMany();
+  }
+
+  async updateAnnouncement(id: string, data: Partial<HrAnnouncement>, organizationId: string): Promise<HrAnnouncement> {
+    const ann = await this.announcementRepo.findOne({ where: { id, organizationId } });
+    if (!ann) throw new NotFoundException('Announcement not found');
+    Object.assign(ann, data);
+    return this.announcementRepo.save(ann);
+  }
+
+  async deleteAnnouncement(id: string, organizationId: string) {
+    const ann = await this.announcementRepo.findOne({ where: { id, organizationId } });
+    if (!ann) throw new NotFoundException('Announcement not found');
+    await this.announcementRepo.remove(ann);
+    return { success: true };
+  }
+
+  // ================= 25. LOAN REPAYMENTS =================
+  async recordLoanRepayment(data: Partial<LoanRepayment>, organizationId: string): Promise<LoanRepayment> {
+    const loan = await this.loanRepo.findOne({ where: { id: data.loanId, organizationId } });
+    if (!loan) throw new NotFoundException('Loan not found');
+
+    loan.totalPaidAmount = Number(loan.totalPaidAmount || 0) + Number(data.amount || 0);
+    const outstanding = Math.max(0, Number(loan.principalAmount) - loan.totalPaidAmount);
+
+    if (outstanding <= 0) {
+      loan.status = LoanStatus.PAID;
+    }
+    await this.loanRepo.save(loan);
+
+    const repayment = this.loanRepaymentRepo.create({
+      ...data,
+      outstandingAfterPayment: outstanding,
+      organizationId,
+    });
+    return this.loanRepaymentRepo.save(repayment);
+  }
+
+  async getLoanRepayments(loanId: string, organizationId: string): Promise<LoanRepayment[]> {
+    return this.loanRepaymentRepo.find({
+      where: { loanId, organizationId },
+      order: { paymentDate: 'DESC' },
+    });
+  }
+
+  // ================= 26. FINAL SETTLEMENT =================
+  async computeFinalSettlement(employeeId: string, organizationId: string) {
+    const emp = await this.employeeRepo.findOne({
+      where: { id: employeeId, organizationId },
+      relations: ['department', 'designation'],
+    });
+    if (!emp) throw new NotFoundException('Employee not found');
+
+    const clearance = await this.clearanceRepo.findOne({
+      where: { employeeId, organizationId },
+      order: { createdAt: 'DESC' },
+    });
+
+    const salaryStruct = await this.salaryStructureRepo.findOne({ where: { employeeId, organizationId } });
+    const basic = Number(salaryStruct?.basicSalary || emp.basicSalary || 0);
+
+    // Loan outstanding
+    const activeLoans = await this.loanRepo.find({
+      where: { organizationId, employeeId, status: LoanStatus.APPROVED },
+    });
+    const totalLoanOutstanding = activeLoans.reduce((sum, l) => {
+      return sum + Math.max(0, Number(l.principalAmount) - Number(l.totalPaidAmount));
+    }, 0);
+
+    // Leave encashment (unused annual leave * daily salary rate)
+    const leaveBalances = await this.getLeaveBalances(employeeId, organizationId);
+    const annualLeave = leaveBalances.find(lb => lb.leaveTypeName.toLowerCase().includes('annual') || lb.leaveTypeName.toLowerCase().includes('earned'));
+    const encashmentDays = annualLeave ? annualLeave.remainingDays : 0;
+    const dailySalary = Number((basic / 26).toFixed(2)); // 26 working days per month
+    const leaveEncashment = Number((encashmentDays * dailySalary).toFixed(2));
+
+    // Pending expense claims
+    const pendingExpenses = await this.expenseClaimRepo.find({
+      where: { employeeId, organizationId, status: ExpenseClaimStatus.APPROVED },
+    });
+    const expenseReimbursements = pendingExpenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
+
+    // Unpaid approved overtime
+    const unpaidOvertimes = await this.overtimeRepo.find({
+      where: { employeeId, organizationId, status: OvertimeStatus.APPROVED, includedInPayroll: false },
+    });
+    const overtimePay = unpaidOvertimes.reduce((sum, ot) => sum + Number(ot.overtimeAmount || 0), 0);
+
+    const totalEarnings = leaveEncashment + expenseReimbursements + overtimePay;
+    const totalDeductions = totalLoanOutstanding;
+    const finalAmount = Number((totalEarnings - totalDeductions).toFixed(2));
+
+    return {
+      employee: emp,
+      clearance,
+      salaryStructure: salaryStruct,
+      basicSalary: basic,
+      dailySalary,
+      leaveEncashment: { days: encashmentDays, amount: leaveEncashment },
+      expenseReimbursements,
+      overtimePay,
+      totalLoanOutstanding,
+      totalEarnings,
+      totalDeductions,
+      finalSettlementAmount: finalAmount,
+      activeLoans,
+    };
+  }
+
+  // ================= 27. SHIFT UPDATE/DELETE =================
+  async updateWorkShift(id: string, data: Partial<WorkShift>, organizationId: string): Promise<WorkShift> {
+    const shift = await this.workShiftRepo.findOne({ where: { id, organizationId } });
+    if (!shift) throw new NotFoundException('Work shift not found');
+    if (data.isDefault) {
+      await this.workShiftRepo.update({ organizationId }, { isDefault: false });
+    }
+    Object.assign(shift, data);
+    return this.workShiftRepo.save(shift);
+  }
+
+  async deleteWorkShift(id: string, organizationId: string): Promise<{ success: boolean }> {
+    const shift = await this.workShiftRepo.findOne({ where: { id, organizationId } });
+    if (!shift) throw new NotFoundException('Work shift not found');
+    await this.workShiftRepo.remove(shift);
+    return { success: true };
+  }
+
+  async updateHoliday(id: string, data: Partial<Holiday>, organizationId: string): Promise<Holiday> {
+    const holiday = await this.holidayRepo.findOne({ where: { id, organizationId } });
+    if (!holiday) throw new NotFoundException('Holiday not found');
+    Object.assign(holiday, data);
+    return this.holidayRepo.save(holiday);
+  }
+
+  // ================= 28. HR REPORTS =================
+  async getHrReport(organizationId: string, reportType: string, params: any = {}) {
+    switch (reportType) {
+      case 'employee-master':
+        return this.employeeRepo.find({
+          where: { organizationId },
+          relations: ['department', 'designation', 'reportingManager'],
+          order: { employeeCode: 'ASC' },
+        });
+
+      case 'attendance-report': {
+        const query = this.attendanceRepo.createQueryBuilder('att')
+          .leftJoinAndSelect('att.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .where('att.organizationId = :organizationId', { organizationId });
+        if (params.fromDate) query.andWhere('att.attendanceDate >= :fromDate', { fromDate: params.fromDate });
+        if (params.toDate) query.andWhere('att.attendanceDate <= :toDate', { toDate: params.toDate });
+        if (params.employeeId) query.andWhere('att.employeeId = :employeeId', { employeeId: params.employeeId });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        query.orderBy('att.attendanceDate', 'DESC');
+        return query.getMany();
+      }
+
+      case 'leave-report': {
+        const query = this.leaveRequestRepo.createQueryBuilder('lr')
+          .leftJoinAndSelect('lr.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .leftJoinAndSelect('lr.leaveType', 'lt')
+          .where('lr.organizationId = :organizationId', { organizationId });
+        if (params.fromDate) query.andWhere('lr.startDate >= :fromDate', { fromDate: params.fromDate });
+        if (params.toDate) query.andWhere('lr.endDate <= :toDate', { toDate: params.toDate });
+        if (params.status) query.andWhere('lr.status = :status', { status: params.status });
+        query.orderBy('lr.createdAt', 'DESC');
+        return query.getMany();
+      }
+
+      case 'payroll-report':
+        return this.payrollSheetRepo.find({
+          where: { organizationId },
+          relations: ['items', 'items.employee', 'items.employee.department'],
+          order: { year: 'DESC', month: 'DESC' },
+        });
+
+      case 'recruitment-report':
+        return this.jobApplicationRepo.find({
+          where: { organizationId },
+          relations: ['jobOpening', 'convertedEmployee'],
+          order: { createdAt: 'DESC' },
+        });
+
+      case 'training-report':
+        return this.enrollmentRepo.find({
+          where: { organizationId },
+          relations: ['trainingProgram', 'employee', 'employee.department'],
+          order: { createdAt: 'DESC' },
+        });
+
+      default:
+        throw new BadRequestException(`Unknown report type: ${reportType}`);
+    }
+  }
+
+  // ================= 29. LEAVE CALENDAR =================
+  async getLeaveCalendar(organizationId: string, month: number, year: number) {
+    const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+    const endDay = new Date(year, month, 0).getDate();
+    const endDate = `${year}-${String(month).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+
+    const [leaves, holidays] = await Promise.all([
+      this.leaveRequestRepo.createQueryBuilder('lr')
+        .leftJoinAndSelect('lr.employee', 'emp')
+        .leftJoinAndSelect('lr.leaveType', 'lt')
+        .where('lr.organizationId = :organizationId', { organizationId })
+        .andWhere('lr.status = :status', { status: LeaveStatus.APPROVED })
+        .andWhere('lr.startDate <= :endDate', { endDate })
+        .andWhere('lr.endDate >= :startDate', { startDate })
+        .getMany(),
+      this.holidayRepo.find({ where: { organizationId } }),
+    ]);
+
+    return { leaves, holidays, month, year };
+  }
+
+  // ================= 30. PAYROLL SHEET ITEMS =================
+  async getPayrollSheetItems(sheetId: string, organizationId: string) {
+    const sheet = await this.payrollSheetRepo.findOne({
+      where: { id: sheetId, organizationId },
+    });
+    if (!sheet) throw new NotFoundException('Payroll sheet not found');
+
+    const items = await this.payrollItemRepo.find({
+      where: { payrollSheetId: sheetId, organizationId },
+      relations: ['employee', 'employee.department', 'employee.designation'],
+    });
+    return { sheet, items };
   }
 }

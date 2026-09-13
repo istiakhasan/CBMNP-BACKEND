@@ -575,4 +575,458 @@ export class HrPayrollController {
     const result = await this.hrPayrollService.getSalesTargets(orgId);
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
+
+  // ================= SHIFT UPDATE / DELETE =================
+  @Patch('shifts/:id')
+  @ApiOperation({ summary: 'Update work shift' })
+  async updateWorkShift(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateWorkShift(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Delete('shifts/:id')
+  @ApiOperation({ summary: 'Delete work shift' })
+  async deleteWorkShift(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    await this.hrPayrollService.deleteWorkShift(id, orgId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Shift deleted' };
+  }
+
+  // ================= HOLIDAY UPDATE =================
+  @Patch('holidays/:id')
+  @ApiOperation({ summary: 'Update holiday' })
+  async updateHoliday(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateHoliday(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= DASHBOARD =================
+  @Get('dashboard')
+  @ApiOperation({ summary: 'HR Dashboard summary' })
+  async getDashboardSummary(@Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getDashboardSummary(orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= EMPLOYEE TIMELINE =================
+  @Get('employees/:id/timeline')
+  @ApiOperation({ summary: 'Get employee timeline events' })
+  async getEmployeeTimeline(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getEmployeeTimeline(id, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('employees/:id/timeline')
+  @ApiOperation({ summary: 'Record employee timeline event' })
+  async recordTimelineEvent(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.recordTimelineEvent(
+      { ...data, employeeId: id },
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  // ================= SALARY HISTORY =================
+  @Get('salary-history/:employeeId')
+  @ApiOperation({ summary: 'Get salary revision history for employee' })
+  async getSalaryHistory(
+    @Param('employeeId') employeeId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getSalaryHistory(employeeId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('salary-history')
+  @ApiOperation({ summary: 'Add salary revision' })
+  async addSalaryRevision(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.addSalaryRevision(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  // ================= ATTENDANCE CORRECTIONS =================
+  @Post('attendance/corrections')
+  @ApiOperation({ summary: 'Submit attendance correction request' })
+  async submitAttendanceCorrection(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.submitAttendanceCorrection(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('attendance/corrections')
+  @ApiOperation({ summary: 'Get attendance correction requests' })
+  async getAttendanceCorrections(
+    @Query('employeeId') employeeId: string,
+    @Query('status') status: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getAttendanceCorrections(
+      orgId,
+      employeeId,
+      status,
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('attendance/corrections/:id/approve')
+  @ApiOperation({ summary: 'Approve/reject attendance correction' })
+  async approveAttendanceCorrection(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.approveAttendanceCorrection(
+      id,
+      !!data.approved,
+      data.remarks || '',
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= OVERTIME =================
+  @Post('overtime')
+  @ApiOperation({ summary: 'Submit overtime request' })
+  async submitOvertimeRequest(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.submitOvertimeRequest(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('overtime')
+  @ApiOperation({ summary: 'Get overtime requests' })
+  async getOvertimeRequests(
+    @Query('employeeId') employeeId: string,
+    @Query('status') status: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getOvertimeRequests(
+      orgId,
+      employeeId,
+      status,
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('overtime/:id/approve')
+  @ApiOperation({ summary: 'Approve/reject overtime request' })
+  async approveOvertimeRequest(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.approveOvertimeRequest(
+      id,
+      !!data.approved,
+      Number(data.approvedHours || 0),
+      data.remarks || '',
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= TRANSFERS =================
+  @Post('transfers')
+  @ApiOperation({ summary: 'Record employee transfer' })
+  async recordTransfer(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.recordTransfer(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('transfers')
+  @ApiOperation({ summary: 'Get employee transfers' })
+  async getTransfers(
+    @Query('employeeId') employeeId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getTransfers(orgId, employeeId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('transfers/:id/approve')
+  @ApiOperation({ summary: 'Approve/reject transfer' })
+  async approveTransfer(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.approveTransfer(
+      id,
+      !!data.approved,
+      data.remarks || '',
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= PERFORMANCE REVIEWS =================
+  @Post('performance-reviews')
+  @ApiOperation({ summary: 'Create performance review' })
+  async createPerformanceReview(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.createPerformanceReview(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('performance-reviews')
+  @ApiOperation({ summary: 'Get performance reviews' })
+  async getPerformanceReviews(
+    @Query('employeeId') employeeId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getPerformanceReviews(orgId, employeeId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('performance-reviews/:id')
+  @ApiOperation({ summary: 'Update performance review' })
+  async updatePerformanceReview(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updatePerformanceReview(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= TRAINING =================
+  @Post('training')
+  @ApiOperation({ summary: 'Create training program' })
+  async createTrainingProgram(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.createTrainingProgram(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('training')
+  @ApiOperation({ summary: 'Get training programs' })
+  async getTrainingPrograms(@Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getTrainingPrograms(orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('training/:id')
+  @ApiOperation({ summary: 'Update training program' })
+  async updateTrainingProgram(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateTrainingProgram(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('training/enroll')
+  @ApiOperation({ summary: 'Enroll employee in training' })
+  async enrollInTraining(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    // Accept either a single employeeId or an array
+    const employeeIds: string[] = Array.isArray(data.employeeIds)
+      ? data.employeeIds
+      : [data.employeeId].filter(Boolean);
+    const result = await this.hrPayrollService.enrollInTraining(
+      data.trainingProgramId,
+      employeeIds,
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Patch('training/enrollments/:id')
+  @ApiOperation({ summary: 'Update training enrollment' })
+  async updateEnrollment(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateEnrollment(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Get('training/enrollments/:employeeId')
+  @ApiOperation({ summary: 'Get enrollments by employee' })
+  async getEnrollmentsByEmployee(
+    @Param('employeeId') employeeId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getEnrollmentsByEmployee(employeeId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= DISCIPLINARY ACTIONS =================
+  @Post('disciplinary')
+  @ApiOperation({ summary: 'Create disciplinary action' })
+  async createDisciplinaryAction(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.createDisciplinaryAction(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('disciplinary')
+  @ApiOperation({ summary: 'Get disciplinary actions' })
+  async getDisciplinaryActions(
+    @Query('employeeId') employeeId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getDisciplinaryActions(orgId, employeeId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('disciplinary/:id')
+  @ApiOperation({ summary: 'Update disciplinary action' })
+  async updateDisciplinaryAction(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateDisciplinaryAction(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= ANNOUNCEMENTS =================
+  @Post('announcements')
+  @ApiOperation({ summary: 'Create HR announcement' })
+  async createAnnouncement(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.createAnnouncement(data, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('announcements')
+  @ApiOperation({ summary: 'Get HR announcements' })
+  async getAnnouncements(@Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getAnnouncements(orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Patch('announcements/:id')
+  @ApiOperation({ summary: 'Update HR announcement' })
+  async updateAnnouncement(
+    @Param('id') id: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.updateAnnouncement(id, data, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Delete('announcements/:id')
+  @ApiOperation({ summary: 'Delete HR announcement' })
+  async deleteAnnouncement(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    await this.hrPayrollService.deleteAnnouncement(id, orgId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Announcement deleted' };
+  }
+
+  // ================= LOAN REPAYMENTS =================
+  @Post('loans/:loanId/repayments')
+  @ApiOperation({ summary: 'Record loan repayment' })
+  async recordLoanRepayment(
+    @Param('loanId') loanId: string,
+    @Body() data: any,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.recordLoanRepayment(
+      { ...data, loanId },
+      orgId,
+    );
+    return { success: true, statusCode: HttpStatus.CREATED, data: result };
+  }
+
+  @Get('loans/:loanId/repayments')
+  @ApiOperation({ summary: 'Get loan repayments' })
+  async getLoanRepayments(@Param('loanId') loanId: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getLoanRepayments(loanId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= FINAL SETTLEMENT =================
+  @Get('employees/:id/final-settlement')
+  @ApiOperation({ summary: 'Compute final settlement for employee' })
+  async computeFinalSettlement(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.computeFinalSettlement(id, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= REPORTS =================
+  @Get('reports')
+  @ApiOperation({ summary: 'Generate HR report' })
+  async getHrReport(
+    @Query('type') type: string,
+    @Query('from') from: string,
+    @Query('to') to: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getHrReport(orgId, type, { fromDate: from, toDate: to });
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= LEAVE CALENDAR =================
+  @Get('leave-calendar')
+  @ApiOperation({ summary: 'Get leave calendar for month' })
+  async getLeaveCalendar(
+    @Query('year') year: string,
+    @Query('month') month: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getLeaveCalendar(
+      orgId,
+      parseInt(month),
+      parseInt(year),
+    );
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  // ================= PAYROLL SHEET ITEMS =================
+  @Get('payroll-sheets/:sheetId/items')
+  @ApiOperation({ summary: 'Get payroll sheet with items' })
+  async getPayrollSheetItems(
+    @Param('sheetId') sheetId: string,
+    @Req() req: Request,
+  ) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getPayrollSheetItems(sheetId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
 }

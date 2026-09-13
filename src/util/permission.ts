@@ -79,4 +79,30 @@ export const permissionData = [
   { id: 74, label: "CREATE_SAMPLE_INWARD", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
   { id: 75, label: "APPROVE_SAMPLE_INWARD", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
   { id: 76, label: "ISSUE_GARMENTS_FLOOR_MATERIALS", base: "Garments ERP", createdAt: "2026-09-09 00:00:00", updatedAt: "2026-09-09 00:00:00" },
+
+  // ==========================================
+  // HR MODULE PERMISSIONS
+  // ==========================================
+  { id: 77, label: "HR", base: "Menu", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 78, label: "VIEW_HR_EMPLOYEES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 79, label: "CREATE_HR_EMPLOYEES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 80, label: "EDIT_HR_EMPLOYEES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 81, label: "DELETE_HR_EMPLOYEES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 82, label: "VIEW_HR_ATTENDANCE", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 83, label: "MANAGE_HR_ATTENDANCE", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 84, label: "VIEW_HR_LEAVES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 85, label: "APPROVE_HR_LEAVES", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 86, label: "VIEW_HR_PAYROLL", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 87, label: "MANAGE_HR_PAYROLL", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 88, label: "VIEW_HR_RECRUITMENT", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 89, label: "MANAGE_HR_RECRUITMENT", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 90, label: "VIEW_HR_PERFORMANCE", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 91, label: "MANAGE_HR_PERFORMANCE", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 92, label: "VIEW_HR_TRAINING", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 93, label: "MANAGE_HR_TRAINING", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 94, label: "MANAGE_HR_OVERTIME", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 95, label: "MANAGE_HR_TRANSFERS", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 96, label: "MANAGE_HR_DISCIPLINARY", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+  { id: 97, label: "VIEW_HR_REPORTS", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
 ];
+

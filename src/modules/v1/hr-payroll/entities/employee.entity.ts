@@ -59,6 +59,9 @@ export class Employee {
   @Column({ type: 'varchar', length: 50, nullable: true })
   nidNumber: string; // National ID or Passport
 
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  passportNumber: string;
+
   @Column({ type: 'varchar', length: 20, nullable: true })
   gender: string; // Male, Female, Other
 
@@ -70,6 +73,24 @@ export class Employee {
 
   @Column({ type: 'varchar', length: 30, nullable: true })
   maritalStatus: string; // Single, Married, etc.
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  religion: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  nationality: string;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  fatherName: string;
+
+  @Column({ type: 'varchar', length: 150, nullable: true })
+  motherName: string;
+
+  @Column({ type: 'integer', nullable: true })
+  numberOfChildren: number;
+
+  @Column({ type: 'text', nullable: true })
+  profilePhoto: string; // URL of profile photo
 
   @Column({ type: 'text', nullable: true })
   presentAddress: string;
@@ -120,7 +141,25 @@ export class Employee {
   joiningDate: string;
 
   @Column({ type: 'date', nullable: true })
+  probationEndDate: string;
+
+  @Column({ type: 'date', nullable: true })
   confirmationDate: string;
+
+  @Column({ type: 'date', nullable: true })
+  contractEndDate: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  branchName: string;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  teamName: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  jobGrade: string; // e.g., Grade-1, G2, M3
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  jobLevel: string; // e.g., Junior, Mid, Senior, Lead, Manager
 
   @Column({
     type: 'enum',

@@ -24,6 +24,18 @@ import { EmployeeAsset } from './entities/employee-asset.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
 import { PromotionHistory } from './entities/promotion-history.entity';
 import { ResignationClearance } from './entities/resignation-clearance.entity';
+// New entities
+import { EmployeeTimeline } from './entities/employee-timeline.entity';
+import { SalaryHistory } from './entities/salary-history.entity';
+import { AttendanceCorrection } from './entities/attendance-correction.entity';
+import { OvertimeRequest } from './entities/overtime-request.entity';
+import { EmployeeTransfer } from './entities/employee-transfer.entity';
+import { PerformanceReview } from './entities/performance-review.entity';
+import { TrainingProgram } from './entities/training-program.entity';
+import { TrainingEnrollment } from './entities/training-enrollment.entity';
+import { DisciplinaryAction } from './entities/disciplinary-action.entity';
+import { HrAnnouncement } from './entities/hr-announcement.entity';
+import { LoanRepayment } from './entities/loan-repayment.entity';
 import { HrPayrollService } from './hr-payroll.service';
 import { HrPayrollController } from './hr-payroll.controller';
 
@@ -54,6 +66,18 @@ import { HrPayrollController } from './hr-payroll.controller';
       EmployeeDocument,
       PromotionHistory,
       ResignationClearance,
+      // New entities
+      EmployeeTimeline,
+      SalaryHistory,
+      AttendanceCorrection,
+      OvertimeRequest,
+      EmployeeTransfer,
+      PerformanceReview,
+      TrainingProgram,
+      TrainingEnrollment,
+      DisciplinaryAction,
+      HrAnnouncement,
+      LoanRepayment,
     ]),
   ],
   controllers: [HrPayrollController],
