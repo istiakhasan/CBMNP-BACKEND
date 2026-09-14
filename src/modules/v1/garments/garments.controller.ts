@@ -82,6 +82,23 @@ export class GarmentsController {
     });
   }
 
+  // =========================================================================
+  // INVENTORY - Get all inventory items (for debugging / check item codes)
+  // =========================================================================
+  @Get('inventory/all')
+  async getAllInventoryItems(@Req() req: Request) {
+    return catchAsync(async (): Promise<IResponse<any[]>> => {
+      const organizationId = req.headers['x-organization-id'] as string;
+      const items = await this.garmentsService.getAllInventoryItems(organizationId);
+      return {
+        success: true,
+        statusCode: HttpStatus.OK,
+        message: 'Inventory items retrieved',
+        data: items,
+      };
+    });
+  }
+
   @Patch('orders/:id')
   async updateOrder(@Param('id') id: string, @Body() dto: any) {
     return catchAsync(async (): Promise<IResponse<any>> => {

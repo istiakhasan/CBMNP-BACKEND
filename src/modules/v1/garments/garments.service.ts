@@ -1049,4 +1049,16 @@ export class GarmentsService {
       recentPos,
     };
   }
+
+  /**
+   * Get all inventory items with itemCode (for debugging / check item codes)
+   */
+  async getAllInventoryItems(organizationId: string) {
+    const items = await this.inventoryRepo.find({
+      where: organizationId ? { organizationId } : {},
+      order: { createdAt: 'ASC' },
+      select: ['id', 'itemCode', 'itemName', 'itemCategory', 'itemColor', 'unit', 'bookingQty', 'receiveQty', 'issueQty', 'stock', 'unitPrice', 'createdAt'],
+    });
+    return items;
+  }
 }
