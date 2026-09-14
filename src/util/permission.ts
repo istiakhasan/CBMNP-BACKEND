@@ -104,5 +104,15 @@ export const permissionData = [
   { id: 95, label: "MANAGE_HR_TRANSFERS", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
   { id: 96, label: "MANAGE_HR_DISCIPLINARY", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
   { id: 97, label: "VIEW_HR_REPORTS", base: "HR", createdAt: "2026-09-13 00:00:00", updatedAt: "2026-09-13 00:00:00" },
+    // ==========================================
+  // MISSING MENU PERMISSIONS
+  // ==========================================
+  { id: 98, label: "Customers", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 99, label: "Configuration", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 100, label: "Accounting", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 101, label: "Finance & Banking", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 102, label: "Sales Ops & POS", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 103, label: "Logistics Ops", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 104, label: "Governance & Audit", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
 ];
 
