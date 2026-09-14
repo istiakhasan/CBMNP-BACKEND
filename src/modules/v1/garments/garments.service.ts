@@ -70,6 +70,104 @@ export class GarmentsService {
     return `PO-${year}-${counter.lastPoNumber}`;
   }
 
+  /**
+   * Generate unique inventory item code based on category
+   * Format: <PREFIX>-<YEAR>-<6-DIGIT SEQUENCE>
+   * Examples: MF-2026-000001 (Main Fabric), TR-2026-000001 (Trim)
+   */
+  async generateInventoryItemCode(itemCategory: string): Promise<string> {
+    const categoryPrefixMap: Record<string, string> = {
+      FABRICS: 'MF',
+      fabric: 'MF',
+      MAIN_FABRIC: 'MF',
+      main_fabric: 'MF',
+      SEWING_TRIMS: 'TR',
+      sewing_trims: 'TR',
+      trims: 'TR',
+      trim: 'TR',
+      FINISHING_TRIMS: 'FT',
+      finishing_trims: 'FT',
+      ACCESSORIES: 'AC',
+      accessories: 'AC',
+      PACKAGING: 'PK',
+      packaging: 'PK',
+      FINISHED_GOODS: 'FG',
+      finished_goods: 'FG',
+      OTHERS: 'OT',
+      others: 'OT',
+    };
+
+    let prefix = categoryPrefixMap[itemCategory] || 'IN';
+    const year = new Date().getFullYear();
+
+    // Use a transaction-safe approach to get next sequence number
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // Get the last used code with this prefix
+      const lastCode = await queryRunner.manager
+        .createQueryBuilder(GarmentsInventory, 'inv')
+        .where('inv.itemCode LIKE :prefix', { prefix: `${prefix}-%` })
+        .orderBy('inv.createdAt', 'DESC')
+        .getOne();
+
+      let nextSeq = 1;
+      if (lastCode && lastCode.itemCode) {
+        const parts = lastCode.itemCode.split('-');
+        if (parts.length >= 3 && parts[0] === prefix) {
+          const seqStr = parts[2];
+          const parsed = parseInt(seqStr, 10);
+          if (!isNaN(parsed)) {
+            nextSeq = parsed + 1;
+          }
+        }
+      }
+
+      const itemCode = `${prefix}-${year}-${nextSeq.toString().padStart(6, '0')}`;
+
+      await queryRunner.commitTransaction();
+      return itemCode;
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Generate unique sample lot number
+   * Format: SMP-LOT-YYYY-NNNNNN
+   * Example: SMP-LOT-2026-000001
+   */
+  async generateSampleLotNumber(): Promise<string> {
+    const year = new Date().getFullYear();
+    const prefix = `SMP-LOT-${year}-`;
+
+    // Get the last used lot number with this prefix
+    const lastLot = await this.lotRepo
+      .createQueryBuilder('lot')
+      .where('lot.lotNumber LIKE :prefix', { prefix: `${prefix}%` })
+      .orderBy('lot.createdAt', 'DESC')
+      .getOne();
+
+    let nextSeq = 1;
+    if (lastLot && lastLot.lotNumber) {
+      const parts = lastLot.lotNumber.split('-');
+      if (parts.length >= 3) {
+        const seqStr = parts[2];
+        const parsed = parseInt(seqStr, 10);
+        if (!isNaN(parsed)) {
+          nextSeq = parsed + 1;
+        }
+      }
+    }
+
+    return `${prefix}${nextSeq.toString().padStart(6, '0')}`;
+  }
+
   // =========================================================================
   // 1. BUYER ORDERS & SAMPLE DEVELOPMENT
   // =========================================================================
@@ -262,9 +360,11 @@ export class GarmentsService {
         where: { itemName: item.itemName, itemCategory: item.itemCategory },
       });
       if (!inv) {
+        const itemCode = await this.generateInventoryItemCode(item.itemCategory);
         inv = this.inventoryRepo.create({
           itemName: item.itemName,
           itemCategory: item.itemCategory,
+          itemCode,
           unit: item.unit,
           itemColor: item.itemColor,
           bookingQty: Number(item.totalQty || 0),
@@ -488,8 +588,10 @@ export class GarmentsService {
         });
 
         if (!inv) {
+          const itemCode = await this.generateInventoryItemCode(poItem.itemCategory);
           inv = queryRunner.manager.create(GarmentsInventory, {
             itemName: poItem.itemName,
+            itemCode,
             itemCategory: poItem.itemCategory,
             unit: poItem.unit,
             itemColor: poItem.itemColor,
@@ -606,8 +708,10 @@ export class GarmentsService {
     });
 
     if (!inv) {
+      const itemCode = await this.generateInventoryItemCode(itemCategory || 'SEWING_TRIMS');
       inv = this.inventoryRepo.create({
         itemName,
+        itemCode,
         itemCategory: itemCategory || 'SEWING_TRIMS',
         unit: unit || 'Pcs',
         itemColor: itemColor || null,
@@ -626,7 +730,7 @@ export class GarmentsService {
     const savedInv = await this.inventoryRepo.save(inv);
 
     const timeStamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(2, 14);
-    const lotNumber = `SMP-LOT-${timeStamp}`;
+    const lotNumber = await this.generateSampleLotNumber();
     const lotRemarks = [
       sourceType ? `[${sourceType}]` : '[Sample Inward]',
       orderNo ? `Ref Order/Sample: ${orderNo}` : '',

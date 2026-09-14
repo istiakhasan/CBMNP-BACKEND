@@ -25,6 +25,7 @@ export class GarmentsInventory {
   itemName: string;
 
   @Column({ nullable: true })
+  @Index()
   itemCode: string;
 
   @Column({ nullable: true })
