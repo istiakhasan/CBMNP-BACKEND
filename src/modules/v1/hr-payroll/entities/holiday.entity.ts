@@ -16,6 +16,7 @@ export enum HolidayType {
   COMPANY = 'Company Special',
   WEEKLY_OFF = 'Weekly Weekend',
 }
+export enum HolidayApprovalStatus { PENDING = 'Pending', APPROVED = 'Approved', REJECTED = 'Rejected' }
 
 @Entity({ name: 'holidays' })
 export class Holiday {
@@ -43,6 +44,13 @@ export class Holiday {
 
   @Column({ type: 'text', nullable: true })
   description: string;
+
+  @Column({ type: 'enum', enum: HolidayApprovalStatus, default: HolidayApprovalStatus.PENDING })
+  approvalStatus: HolidayApprovalStatus;
+
+  @Column({ type: 'uuid', nullable: true }) approverEmployeeId: string;
+  @Column({ type: 'uuid', nullable: true }) approvedByEmployeeId: string;
+  @Column({ type: 'text', nullable: true }) approvalRemarks: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

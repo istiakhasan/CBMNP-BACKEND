@@ -1,4 +1,5 @@
 import { Module, OnApplicationBootstrap } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { UserModule } from './modules/v1/user/user.module';
@@ -54,6 +55,7 @@ import { GarmentsModule } from './modules/v1/garments/garments.module';
       serveRoot: '/api/v1/images/',
     }),
     ConfigModule.forRoot({ isGlobal: true }),
+    ScheduleModule.forRoot(),
     UserModule,
     PermissionModule,
     DatabaseModule,

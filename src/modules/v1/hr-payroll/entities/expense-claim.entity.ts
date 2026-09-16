@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Organization } from '../../organization/entities/organization.entity';
 import { Employee } from './employee.entity';
+import { ApprovalStage } from './approval-stage.enum';
 
 export enum ExpenseClaimStatus {
   PENDING = 'Pending',
@@ -58,6 +59,18 @@ export class ExpenseClaim {
 
   @Column({ type: 'text', nullable: true })
   remarks: string;
+
+  @Column({ type: 'enum', enum: ApprovalStage, nullable: true })
+  approvalStage: ApprovalStage;
+
+  @Column({ type: 'uuid', nullable: true })
+  deptHeadApprovedById: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deptHeadActionAt: Date;
+
+  @Column({ type: 'text', nullable: true })
+  deptHeadRemarks: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

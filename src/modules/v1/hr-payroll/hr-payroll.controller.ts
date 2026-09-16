@@ -9,16 +9,51 @@ import {
   Req,
   Patch,
   Delete,
-  Headers,
+  UseGuards,
+  ForbiddenException,
+  UnauthorizedException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiHeader } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { HrPayrollService } from './hr-payroll.service';
+import { BiometricDevicePollerService } from './biometric-device-poller.service';
+import { AuthGuard } from '../../../middleware/auth.guard';
 import { Request } from 'express';
 
 @ApiTags('HR & Payroll Enterprise')
 @Controller('v1/hr-payroll')
+@UseGuards(AuthGuard)
 export class HrPayrollController {
-  constructor(private readonly hrPayrollService: HrPayrollService) {}
+  private static readonly FULL_VISIBILITY_ROLES = ['admin', 'owner', 'super_admin', 'master_admin'];
+
+  // Strict: used for actually approving something — you must be a real Employee, since
+  // approval authority is tied to being the specific Department Head / Final Approver.
+  private async resolveActingEmployeeId(req: any, organizationId: string): Promise<string> {
+    const userId = req.user?.userId || req.user?.id;
+    if (!userId) throw new UnauthorizedException('You must be logged in to approve requests');
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, organizationId);
+    if (!employee) {
+      throw new ForbiddenException('Your login is not linked to an Employee profile, so you cannot approve requests. Ask an admin to link your account under Employee > Edit.');
+    }
+    return employee.id;
+  }
+
+  // Lenient: used for VIEWING request lists — an org admin/owner with no Employee
+  // profile at all should still get full oversight via their role, not be blocked.
+  private async resolveActingEmployeeIdForViewing(req: any, organizationId: string): Promise<string> {
+    const userId = req.user?.userId || req.user?.id;
+    if (!userId) throw new UnauthorizedException('You must be logged in to view these requests');
+    const role = req.user?.role;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, organizationId);
+    if (!employee && !HrPayrollController.FULL_VISIBILITY_ROLES.includes(role)) {
+      throw new ForbiddenException('Your login is not linked to an Employee profile, so you cannot view these requests.');
+    }
+    return employee?.id || '';
+  }
+
+  constructor(
+    private readonly hrPayrollService: HrPayrollService,
+    private readonly biometricPollerService: BiometricDevicePollerService,
+  ) {}
 
   // ================= DEPARTMENTS & DESIGNATIONS =================
   @Post('departments')
@@ -115,24 +150,41 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
-  @Post('biometric/sync')
-  @ApiHeader({ name: 'x-device-api-key', required: false, description: 'Biometric device API key' })
-  async syncBiometricPunches(
-    @Body() body: any,
-    @Headers('x-device-api-key') headerApiKey: string,
-    @Req() req: Request,
-  ) {
-    const orgId = req.headers['x-organization-id'] as string;
-    const apiKey = headerApiKey || body?.apiKey;
-    const result = await this.hrPayrollService.processBiometricSync(apiKey, body, orgId);
-    return { success: true, statusCode: HttpStatus.OK, ...result };
-  }
+  // Note: POST biometric/sync (the device push webhook) now lives in
+  // BiometricWebhookController — it must stay outside AuthGuard since a physical device
+  // has no user JWT, and mixing it into this class-guarded controller would have either
+  // broken the device integration or left the guard bypassable.
 
   @Get('biometric/logs')
   async getPunchLogs(@Query('limit') limit = 50, @Query('offset') offset = 0, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
     const result = await this.hrPayrollService.getBiometricPunchLogs(orgId, Number(limit), Number(offset));
     return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('biometric/devices/:id/sync-now')
+  @ApiOperation({ summary: 'Connect to the physical device right now and pull any new punches' })
+  async syncDeviceNow(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.biometricPollerService.syncDeviceById(id, orgId);
+    return { success: result.success, statusCode: HttpStatus.OK, ...result };
+  }
+
+  @Get('biometric/devices/:id/users')
+  @ApiOperation({ summary: 'Employees who punched on this device with their check-in/check-out times' })
+  async getDeviceUsers(@Param('id') id: string, @Query('date') date: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.getBiometricDeviceUsers(id, orgId, date);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Get('biometric/devices/:id/enrolled-users')
+  @ApiOperation({ summary: 'Live roster of users/fingerprints enrolled directly on the physical device' })
+  async getEnrolledDeviceUsers(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.biometricPollerService.getEnrolledUsers(id, orgId);
+    const users = await this.hrPayrollService.attachEmployeeMapping(result.users, orgId);
+    return { success: result.success, statusCode: HttpStatus.OK, message: result.message, data: { users } };
   }
 
   // ================= WORK SHIFTS & HOLIDAYS =================
@@ -164,6 +216,15 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
+  @Patch('holidays/:id/approve')
+  @UseGuards(AuthGuard)
+  async approveHoliday(@Param('id') id: string, @Body() body: { approved: boolean; remarks?: string }, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
+    const result = await this.hrPayrollService.approveHoliday(id, body.approved, body.remarks || '', orgId, actingEmployeeId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
   @Delete('holidays/:id')
   async deleteHoliday(@Param('id') id: string, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
@@ -191,6 +252,26 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
+  @Get('self-service/profile')
+  @ApiOperation({ summary: 'Get the current user employee self-service profile' })
+  async getSelfServiceProfile(@Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const result = await this.hrPayrollService.getSelfServiceProfile(userId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('self-service/leaves')
+  @ApiOperation({ summary: 'Apply for leave as the current employee' })
+  async applySelfServiceLeave(@Body() data: any, @Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, orgId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    const result = await this.hrPayrollService.applyLeave({ ...data, employeeId: employee.id }, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, message: 'Leave application submitted', data: result };
+  }
+
   @Get('employees/:id')
   async getEmployeeById(@Param('id') id: string, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
@@ -213,17 +294,35 @@ export class HrPayrollController {
   }
 
   // ================= ATTENDANCE =================
-  @Post('attendance/clock-in')
-  async clockIn(@Body() body: { employeeId: string }, @Req() req: Request) {
+  @Get('offices')
+  async getOffices(@Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.clockIn(body.employeeId, orgId);
+    return { success: true, data: await this.hrPayrollService.getOffices(orgId) };
+  }
+
+  @Post('offices')
+  async createOffice(@Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    return { success: true, data: await this.hrPayrollService.createOffice(data, orgId) };
+  }
+
+  @Patch('offices/:id')
+  async updateOffice(@Param('id') id: string, @Body() data: any, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    return { success: true, data: await this.hrPayrollService.updateOffice(id, data, orgId) };
+  }
+
+  @Post('attendance/clock-in')
+  async clockIn(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string }, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const result = await this.hrPayrollService.clockIn(body.employeeId, orgId, body.latitude, body.longitude, body.remarks);
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Clock-in recorded', data: result };
   }
 
   @Post('attendance/clock-out')
-  async clockOut(@Body() body: { employeeId: string }, @Req() req: Request) {
+  async clockOut(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string }, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.clockOut(body.employeeId, orgId);
+    const result = await this.hrPayrollService.clockOut(body.employeeId, orgId, body.latitude, body.longitude, body.remarks);
     return { success: true, statusCode: HttpStatus.OK, message: 'Clock-out recorded', data: result };
   }
 
@@ -284,25 +383,28 @@ export class HrPayrollController {
   }
 
   @Patch('leaves/:id/approve')
+  @UseGuards(AuthGuard)
   async approveLeave(
     @Param('id') id: string,
     @Body() body: { approved: boolean; remarks: string },
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
-    const userId = (req as any).user?.userId || (req as any).user?.id;
-    const result = await this.hrPayrollService.approveLeave(id, body.approved, body.remarks, orgId, userId);
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
+    const result = await this.hrPayrollService.approveLeave(id, body.approved, body.remarks, orgId, actingEmployeeId);
     return { success: true, statusCode: HttpStatus.OK, message: 'Leave status updated', data: result };
   }
 
   @Get('leaves/requests')
+  @UseGuards(AuthGuard)
   async getLeaveRequests(
     @Query('employeeId') employeeId: string,
     @Query('status') status: string,
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.getLeaveRequests(orgId, employeeId, status);
+    const actingEmployeeId = await this.resolveActingEmployeeIdForViewing(req, orgId);
+    const result = await this.hrPayrollService.getLeaveRequests(orgId, actingEmployeeId, employeeId, status, (req as any).user?.role);
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
@@ -349,25 +451,28 @@ export class HrPayrollController {
   }
 
   @Get('expenses')
+  @UseGuards(AuthGuard)
   async getExpenseClaims(
     @Query('employeeId') employeeId: string,
     @Query('status') status: string,
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.getExpenseClaims(orgId, employeeId, status);
+    const actingEmployeeId = await this.resolveActingEmployeeIdForViewing(req, orgId);
+    const result = await this.hrPayrollService.getExpenseClaims(orgId, actingEmployeeId, employeeId, status, (req as any).user?.role);
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
   @Patch('expenses/:id/approve')
+  @UseGuards(AuthGuard)
   async approveExpense(
     @Param('id') id: string,
     @Body() body: { approved: boolean; remarks: string },
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
-    const userId = (req as any).user?.userId || (req as any).user?.id;
-    const result = await this.hrPayrollService.approveExpenseClaim(id, body.approved, body.remarks, orgId, userId);
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
+    const result = await this.hrPayrollService.approveExpenseClaim(id, body.approved, body.remarks, orgId, actingEmployeeId);
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
@@ -673,6 +778,7 @@ export class HrPayrollController {
   }
 
   @Get('attendance/corrections')
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Get attendance correction requests' })
   async getAttendanceCorrections(
     @Query('employeeId') employeeId: string,
@@ -680,15 +786,19 @@ export class HrPayrollController {
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeIdForViewing(req, orgId);
     const result = await this.hrPayrollService.getAttendanceCorrections(
       orgId,
+      actingEmployeeId,
       employeeId,
       status,
+      (req as any).user?.role,
     );
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
   @Patch('attendance/corrections/:id/approve')
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Approve/reject attendance correction' })
   async approveAttendanceCorrection(
     @Param('id') id: string,
@@ -696,11 +806,13 @@ export class HrPayrollController {
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
     const result = await this.hrPayrollService.approveAttendanceCorrection(
       id,
       !!data.approved,
       data.remarks || '',
       orgId,
+      actingEmployeeId,
     );
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
@@ -715,6 +827,7 @@ export class HrPayrollController {
   }
 
   @Get('overtime')
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Get overtime requests' })
   async getOvertimeRequests(
     @Query('employeeId') employeeId: string,
@@ -722,15 +835,19 @@ export class HrPayrollController {
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeIdForViewing(req, orgId);
     const result = await this.hrPayrollService.getOvertimeRequests(
       orgId,
+      actingEmployeeId,
       employeeId,
       status,
+      (req as any).user?.role,
     );
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
   @Patch('overtime/:id/approve')
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'Approve/reject overtime request' })
   async approveOvertimeRequest(
     @Param('id') id: string,
@@ -738,12 +855,14 @@ export class HrPayrollController {
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
     const result = await this.hrPayrollService.approveOvertimeRequest(
       id,
       !!data.approved,
       Number(data.approvedHours || 0),
       data.remarks || '',
       orgId,
+      actingEmployeeId,
     );
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
@@ -987,6 +1106,19 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
+  // ================= APPROVAL CENTER =================
+  // Unified inbox: everything currently sitting at a stage THIS logged-in person is
+  // entitled to act on, across Leave/Expense/Overtime/Attendance Correction — as
+  // Department Head and/or Final Approver, whichever applies to them.
+  @Get('approval-center')
+  @ApiOperation({ summary: 'Get pending approvals assigned to the logged-in user' })
+  async getApprovalCenterItems(@Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const actingEmployeeId = await this.resolveActingEmployeeId(req, orgId);
+    const result = await this.hrPayrollService.getApprovalCenterItems(orgId, actingEmployeeId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
   // ================= REPORTS =================
   @Get('reports')
   @ApiOperation({ summary: 'Generate HR report' })
@@ -994,10 +1126,15 @@ export class HrPayrollController {
     @Query('type') type: string,
     @Query('from') from: string,
     @Query('to') to: string,
+    @Query('departmentId') departmentId: string,
+    @Query('employeeId') employeeId: string,
+    @Query('year') year: string,
+    @Query('month') month: string,
+    @Query('status') status: string,
     @Req() req: Request,
   ) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.getHrReport(orgId, type, { fromDate: from, toDate: to });
+    const result = await this.hrPayrollService.getHrReport(orgId, type, { from, to, departmentId, employeeId, year, month, status });
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 

@@ -1,4 +1,4 @@
-import { Catch, ExceptionFilter, ArgumentsHost, HttpStatus, BadRequestException } from '@nestjs/common';
+import { Catch, ExceptionFilter, ArgumentsHost, HttpStatus, BadRequestException, HttpException } from '@nestjs/common';
 import { ValidationError } from 'yup';
 import { ApiError } from './ApiError';
 import { IGenericErrorMessage } from 'src/interface/error';
@@ -29,8 +29,18 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       }));
     } else if (error instanceof BadRequestException) {
       statusCode = HttpStatus.BAD_REQUEST;
-      message = 'Bad Request';
-      errorMessages = error.getResponse()['message'] ? [{ path: '', message: error.getResponse()['message'] }] : [];
+      const badRequestResponse = error.getResponse();
+      const badRequestMessage =
+        typeof badRequestResponse === 'string'
+          ? badRequestResponse
+          : (badRequestResponse as any)?.message || 'Bad Request';
+      message = Array.isArray(badRequestMessage) ? badRequestMessage.join(', ') : badRequestMessage;
+      errorMessages = [{ path: '', message }];
+    } else if (error instanceof HttpException) {
+      statusCode = error.getStatus();
+      const response = error.getResponse();
+      message = typeof response === 'string' ? response : (response as any)?.message || error.message;
+      errorMessages = message ? [{ path: '', message: Array.isArray(message) ? message.join(', ') : message }] : [];
     } else if (error instanceof Error) {
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
       message = error.message || 'Internal server error';

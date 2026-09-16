@@ -114,5 +114,6 @@ export const permissionData = [
   { id: 102, label: "Sales Ops & POS", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
   { id: 103, label: "Logistics Ops", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
   { id: 104, label: "Governance & Audit", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 105, label: "Approval Center", base: "Menu", createdAt: "2026-09-14 00:00:00", updatedAt: "2026-09-14 00:00:00" },
+  { id: 106, label: "MANAGE_HR_OFFICES", base: "HR", createdAt: "2026-09-15 00:00:00", updatedAt: "2026-09-15 00:00:00" },
 ];
-

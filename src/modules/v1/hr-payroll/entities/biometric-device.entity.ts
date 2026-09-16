@@ -52,7 +52,13 @@ export class BiometricDevice {
   status: BiometricDeviceStatus;
 
   @Column({ type: 'timestamp', nullable: true })
-  lastSyncAt: Date;
+  lastSyncAt: Date; // Last successful connection/communication with the physical device
+
+  @Column({ type: 'timestamp', nullable: true })
+  lastPolledRecordTime: Date; // High-water mark of device-side attendance records already ingested, used to avoid re-processing old logs on every poll
+
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  lastConnectionError: string; // Last error encountered while trying to reach the device (e.g. "connect ETIMEDOUT")
 
   @Column({ type: 'int', default: 0 })
   totalPunchesRecorded: number;

@@ -12,6 +12,7 @@ export enum UserRole {
   ADMIN = 'admin',
   CTGADMIN = 'ctgadmin',
   HR = 'hr',
+  EMPLOYEE = 'employee',
   AGENT = 'agent',
   USER = 'user',
   COS = 'cos',

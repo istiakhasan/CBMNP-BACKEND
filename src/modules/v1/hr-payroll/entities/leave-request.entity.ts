@@ -11,6 +11,7 @@ import {
 import { Employee } from './employee.entity';
 import { LeaveType } from './leave-type.entity';
 import { Organization } from '../../organization/entities/organization.entity';
+import { ApprovalStage } from './approval-stage.enum';
 
 export enum LeaveStatus {
   PENDING = 'Pending',
@@ -61,11 +62,25 @@ export class LeaveRequest {
   })
   status: LeaveStatus;
 
+  // Final approver's decision (e.g. CCO/CEO) — the request is only truly Approved once
+  // this stage is reached and signed off.
   @Column({ type: 'varchar', length: 100, nullable: true })
   approvedById: string;
 
   @Column({ type: 'text', nullable: true })
   approvalRemarks: string;
+
+  @Column({ type: 'enum', enum: ApprovalStage, nullable: true })
+  approvalStage: ApprovalStage;
+
+  @Column({ type: 'uuid', nullable: true })
+  deptHeadApprovedById: string;
+
+  @Column({ type: 'timestamp', nullable: true })
+  deptHeadActionAt: Date;
+
+  @Column({ type: 'text', nullable: true })
+  deptHeadRemarks: string;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

@@ -9,6 +9,7 @@ import {
   Index,
 } from 'typeorm';
 import { Organization } from '../../organization/entities/organization.entity';
+import { Employee } from './employee.entity';
 
 @Entity({ name: 'departments' })
 @Index(['organizationId', 'name'], { unique: true })
@@ -24,6 +25,20 @@ export class Department {
 
   @Column({ type: 'boolean', default: true })
   isActive: boolean;
+
+  // JSON array of weekday indexes (0=Sunday ... 6=Saturday). Empty means company default.
+  @Column({ type: 'simple-json', nullable: true })
+  weeklyOffDays: number[];
+
+  // Department Head — first-stage approver for this department's leave/expense/overtime/
+  // attendance-correction requests. Requests from an employee in this department go to
+  // this person before moving on to a designated Final Approver (e.g. CCO/CEO).
+  @Column({ type: 'uuid', nullable: true })
+  headEmployeeId: string;
+
+  @ManyToOne(() => Employee, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'headEmployeeId' })
+  headEmployee: Employee;
 
   @Column({ type: 'uuid', nullable: false })
   @Index()

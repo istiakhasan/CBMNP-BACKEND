@@ -36,8 +36,12 @@ import { TrainingEnrollment } from './entities/training-enrollment.entity';
 import { DisciplinaryAction } from './entities/disciplinary-action.entity';
 import { HrAnnouncement } from './entities/hr-announcement.entity';
 import { LoanRepayment } from './entities/loan-repayment.entity';
+import { HrOffice } from './entities/office.entity';
+import { Users } from '../user/entities/user.entity';
 import { HrPayrollService } from './hr-payroll.service';
 import { HrPayrollController } from './hr-payroll.controller';
+import { BiometricWebhookController } from './biometric-webhook.controller';
+import { BiometricDevicePollerService } from './biometric-device-poller.service';
 
 @Module({
   imports: [
@@ -78,10 +82,12 @@ import { HrPayrollController } from './hr-payroll.controller';
       DisciplinaryAction,
       HrAnnouncement,
       LoanRepayment,
+      HrOffice,
+      Users,
     ]),
   ],
-  controllers: [HrPayrollController],
-  providers: [HrPayrollService],
-  exports: [HrPayrollService],
+  controllers: [HrPayrollController, BiometricWebhookController],
+  providers: [HrPayrollService, BiometricDevicePollerService],
+  exports: [HrPayrollService, BiometricDevicePollerService],
 })
 export class HrPayrollModule {}

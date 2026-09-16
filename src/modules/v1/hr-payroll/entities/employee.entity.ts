@@ -12,6 +12,8 @@ import { Organization } from '../../organization/entities/organization.entity';
 import { Department } from './department.entity';
 import { Designation } from './designation.entity';
 import { Users } from '../../user/entities/user.entity';
+import { WorkShift } from './work-shift.entity';
+import { HrOffice } from './office.entity';
 
 export enum EmploymentStatus {
   ACTIVE = 'Active',
@@ -124,6 +126,13 @@ export class Employee {
   department: Department;
 
   @Column({ type: 'uuid', nullable: true })
+  officeId: string;
+
+  @ManyToOne(() => HrOffice, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'officeId' })
+  office: HrOffice;
+
+  @Column({ type: 'uuid', nullable: true })
   designationId: string;
 
   @ManyToOne(() => Designation, { nullable: true, onDelete: 'SET NULL' })
@@ -137,6 +146,22 @@ export class Employee {
   @JoinColumn({ name: 'reportingManagerId' })
   reportingManager: Employee;
 
+  // Employee's own work shift. When unset, attendance/late calculations fall back to
+  // the organization's single default shift — lets different employees/departments
+  // (e.g. day shift vs night shift) follow different official in-times.
+  @Column({ type: 'uuid', nullable: true })
+  workShiftId: string;
+
+  @ManyToOne(() => WorkShift, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'workShiftId' })
+  workShift: WorkShift;
+
+  // Designated final sign-off authority (e.g. CCO/CEO) for the second and last stage of
+  // the Leave/Expense/Overtime/Attendance-Correction approval chain, org-wide — not tied
+  // to any one department.
+  @Column({ type: 'boolean', default: false })
+  isFinalApprover: boolean;
+
   @Column({ type: 'date', nullable: true })
   joiningDate: string;
 
@@ -148,6 +173,9 @@ export class Employee {
 
   @Column({ type: 'date', nullable: true })
   contractEndDate: string;
+
+  @Column({ type: 'int', nullable: true })
+  customLeaveQuota: number; // Per-employee override for leave quota (e.g. 20 instead of default 14). If null, use LeaveType.daysAllowedPerYear.
 
   @Column({ type: 'varchar', length: 100, nullable: true })
   branchName: string;

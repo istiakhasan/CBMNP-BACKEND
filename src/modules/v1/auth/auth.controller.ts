@@ -68,6 +68,9 @@ export class AuthenTicationController {
     'cs_agent',
     'media_manager',
     'cs_website_agent',
+    'owner',
+    'super_admin',
+    'master_admin',
   )
   async getProfile(@Res() res: Response, @Req() req: any) {
     const result = await this.authenTicationService.getProfile(req.user);

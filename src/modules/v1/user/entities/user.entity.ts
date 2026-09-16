@@ -26,6 +26,13 @@ export enum UserRole {
   OWNER = 'owner',
   SUPER = 'super_admin',
   MASTER_ADMIN = 'master_admin',
+  HR = 'hr',
+  EMPLOYEE = 'employee',
+  // Executive-tier — anyone with one of these roles is automatically the org-wide
+  // Final Approver for HR approval workflows (Leave/Expense/Overtime/Attendance
+  // Correction), without needing a separate per-employee toggle.
+  CEO = 'ceo',
+  CCO = 'cco',
 }
 
 @Entity({ name: 'users' })

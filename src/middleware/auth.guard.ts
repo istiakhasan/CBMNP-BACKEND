@@ -29,6 +29,16 @@ export class AuthGuard implements CanActivate {
         process.env.JWT_SECRET as Secret,
       );
       request.user = verifiedUser;
+
+      // The client sends x-organization-id on every request to scope queries, but a
+      // header is just client-supplied text — without this check, any authenticated
+      // user could put a different organization's ID in it and read/write that org's
+      // data. Cross-checking against the org baked into the signed JWT closes that.
+      const headerOrgId = request.headers['x-organization-id'];
+      if (!headerOrgId || headerOrgId !== verifiedUser.organizationId) {
+        throw new ForbiddenException('You are not authorized to access this organization\'s data');
+      }
+
       if (roles && roles.length > 0 && !roles.includes(verifiedUser.role)) {
         throw new ForbiddenException('Forbidden');
       }

@@ -1,11 +1,12 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, Between, MoreThanOrEqual, LessThanOrEqual } from 'typeorm';
+import { DataSource, Repository, Between, MoreThanOrEqual, LessThanOrEqual, In, IsNull } from 'typeorm';
 import * as crypto from 'crypto';
 import { Department } from './entities/department.entity';
 import { Designation } from './entities/designation.entity';
@@ -26,7 +27,7 @@ import { JobOpening } from './entities/job-opening.entity';
 import { JobApplication, ApplicationStage } from './entities/job-application.entity';
 import { EmployeeLoan, LoanStatus } from './entities/employee-loan.entity';
 import { ExpenseClaim, ExpenseClaimStatus } from './entities/expense-claim.entity';
-import { Holiday } from './entities/holiday.entity';
+import { Holiday, HolidayApprovalStatus } from './entities/holiday.entity';
 import { EmployeeAsset, AssetStatus } from './entities/employee-asset.entity';
 import { EmployeeDocument } from './entities/employee-document.entity';
 import { PromotionHistory } from './entities/promotion-history.entity';
@@ -43,6 +44,9 @@ import { TrainingEnrollment, EnrollmentStatus } from './entities/training-enroll
 import { DisciplinaryAction } from './entities/disciplinary-action.entity';
 import { HrAnnouncement } from './entities/hr-announcement.entity';
 import { LoanRepayment } from './entities/loan-repayment.entity';
+import { ApprovalStage } from './entities/approval-stage.enum';
+import { Users, UserRole } from '../user/entities/user.entity';
+import { HrOffice } from './entities/office.entity';
 
 @Injectable()
 export class HrPayrollService {
@@ -119,7 +123,276 @@ export class HrPayrollService {
     private readonly announcementRepo: Repository<HrAnnouncement>,
     @InjectRepository(LoanRepayment)
     private readonly loanRepaymentRepo: Repository<LoanRepayment>,
+    @InjectRepository(Users)
+    private readonly usersRepo: Repository<Users>,
+    @InjectRepository(HrOffice)
+    private readonly officeRepo: Repository<HrOffice>,
   ) {}
+
+  // All attendance date/time math is pinned to Asia/Dhaka explicitly rather than the
+  // server process's OS timezone — the server happens to run in BDT today, but if this
+  // ever gets deployed to a cloud VM (which typically default to UTC), relying on the
+  // ambient timezone would silently shift every check-in/check-out by 6 hours.
+  private static readonly BD_TIMEZONE = 'Asia/Dhaka';
+
+  private getBangladeshDateTime(d: Date): { date: string; time: string } {
+    const fmt = new Intl.DateTimeFormat('en-GB', {
+      timeZone: HrPayrollService.BD_TIMEZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23',
+    });
+    const parts = fmt.formatToParts(d).reduce((acc, p) => {
+      acc[p.type] = p.value;
+      return acc;
+    }, {} as Record<string, string>);
+    return {
+      date: `${parts.year}-${parts.month}-${parts.day}`,
+      time: `${parts.hour}:${parts.minute}:${parts.second}`,
+    };
+  }
+
+  private getBangladeshDateString(d: Date): string {
+    return this.getBangladeshDateTime(d).date;
+  }
+
+  // Shared two-step approval chain (Department Head -> Final Approver) used by Leave,
+  // Expense Claims, Overtime Requests and Attendance Corrections. Resolved dynamically
+  // off the employee's CURRENT department/head rather than frozen at submit time, so an
+  // org-chart change (e.g. new dept head) takes effect for any request still pending.
+  private async resolveApprovalChain(
+    employeeId: string,
+    organizationId: string,
+  ): Promise<{ stage: ApprovalStage; deptHeadEmployeeId: string | null }> {
+    const employee = await this.employeeRepo.findOne({ where: { id: employeeId, organizationId } });
+    const department = employee?.departmentId
+      ? await this.departmentRepo.findOne({ where: { id: employee.departmentId, organizationId } })
+      : null;
+    const deptHeadEmployeeId = department?.headEmployeeId || null;
+
+    // No department head configured, or the requester IS the department head — skip
+    // straight to final approval instead of leaving the request stuck with no one to act.
+    if (!deptHeadEmployeeId || deptHeadEmployeeId === employeeId) {
+      return { stage: ApprovalStage.PENDING_FINAL, deptHeadEmployeeId: null };
+    }
+    return { stage: ApprovalStage.PENDING_DEPT_HEAD, deptHeadEmployeeId };
+  }
+
+  // Who is allowed to SEE which Leave/Expense/Overtime/Correction requests:
+  // - Final Approver (CCO/CEO-level): everything, org-wide.
+  // - Department Head: their own requests + everyone in the department(s) they head.
+  // - Everyone else: only their own requests.
+  private static readonly FULL_VISIBILITY_ROLES = ['admin', 'owner', 'super_admin', 'master_admin'];
+
+  // Anyone whose LOGIN account carries an executive-tier role is automatically the
+  // org-wide Final Approver — no per-employee configuration needed. The Employee-level
+  // `isFinalApprover` flag still works too, as a manual override for anyone who should
+  // have this power without necessarily holding one of these role names.
+  private static readonly FINAL_APPROVER_ROLES = [UserRole.CEO, UserRole.CCO];
+
+  private async isFinalApprover(employee: Employee | null): Promise<boolean> {
+    if (!employee) return false;
+    if (employee.isFinalApprover) return true;
+    if (!employee.userId) return false;
+    const user = await this.usersRepo.findOne({ where: { userId: employee.userId } });
+    return !!user && HrPayrollService.FINAL_APPROVER_ROLES.includes(user.role);
+  }
+
+  private async resolveVisibilityScope(
+    actingEmployeeId: string,
+    organizationId: string,
+    actingRole?: string,
+  ): Promise<{ seeAll: boolean; employeeIds: string[] }> {
+    // Org admins/owners get full oversight regardless of whether they're personally in
+    // the approval chain — this does NOT let them approve on someone else's behalf,
+    // approval authority is still checked strictly in assertAuthorizedApprover.
+    if (actingRole && HrPayrollService.FULL_VISIBILITY_ROLES.includes(actingRole)) {
+      return { seeAll: true, employeeIds: [] };
+    }
+
+    const actor = await this.employeeRepo.findOne({ where: { id: actingEmployeeId, organizationId } });
+    if (await this.isFinalApprover(actor)) return { seeAll: true, employeeIds: [] };
+
+    const headedDepartments = await this.departmentRepo.find({
+      where: { organizationId, headEmployeeId: actingEmployeeId },
+    });
+    if (headedDepartments.length > 0) {
+      const deptIds = headedDepartments.map((d) => d.id);
+      const teamMembers = await this.employeeRepo.find({ where: { organizationId, departmentId: In(deptIds) } });
+      const ids = new Set(teamMembers.map((e) => e.id));
+      ids.add(actingEmployeeId);
+      return { seeAll: false, employeeIds: Array.from(ids) };
+    }
+
+    return { seeAll: false, employeeIds: [actingEmployeeId] };
+  }
+
+  private async assertAuthorizedApprover(
+    actingEmployeeId: string,
+    organizationId: string,
+    stage: ApprovalStage,
+    deptHeadEmployeeId: string | null,
+  ): Promise<void> {
+    if (stage === ApprovalStage.PENDING_DEPT_HEAD) {
+      if (actingEmployeeId !== deptHeadEmployeeId) {
+        throw new ForbiddenException("Only this employee's Department Head can approve at this stage");
+      }
+      return;
+    }
+    const actor = await this.employeeRepo.findOne({ where: { id: actingEmployeeId, organizationId } });
+    if (!(await this.isFinalApprover(actor))) {
+      throw new ForbiddenException('Only a designated Final Approver can give final approval');
+    }
+  }
+
+  // A single, cross-type inbox: everything currently sitting at a stage this specific
+  // person is entitled to act on (Department Head for their team's Stage 1 items,
+  // Final Approver for anyone's Stage 2 items) — not "everything visible to them"
+  // (that's resolveVisibilityScope, used by the per-module HR list pages instead).
+  async getApprovalCenterItems(organizationId: string, actingEmployeeId: string) {
+    const actor = await this.employeeRepo.findOne({ where: { id: actingEmployeeId, organizationId } });
+    if (!actor) return { items: [], isDeptHead: false, isFinalApprover: false, headedDepartments: [] };
+
+    const headedDepartments = await this.departmentRepo.find({
+      where: { organizationId, headEmployeeId: actingEmployeeId },
+    });
+    const headedDeptIds = headedDepartments.map((d) => d.id);
+    const isFinal = await this.isFinalApprover(actor);
+    const holidayRows = await this.holidayRepo.find({ where: { organizationId, approverEmployeeId: actingEmployeeId, approvalStatus: HolidayApprovalStatus.PENDING }, order: { createdAt: 'ASC' } });
+
+    if (headedDeptIds.length === 0 && !isFinal) {
+      return { items: holidayRows.map((holiday) => ({ id: holiday.id, requestType: 'holiday', approvalStage: 'PendingSelectedApprover', createdAt: holiday.createdAt, summary: `${holiday.name}: ${holiday.fromDate} ~ ${holiday.toDate}`, reason: holiday.description, holiday })), isDeptHead: false, isFinalApprover: false, headedDepartments: [] };
+    }
+
+    const stageConditionSql = (alias: string, empAlias: string, params: any) => {
+      const conditions: string[] = [];
+      if (headedDeptIds.length > 0) {
+        conditions.push(`(${alias}.approvalStage = :deptStage AND ${empAlias}.departmentId IN (:...deptIds))`);
+        params.deptStage = ApprovalStage.PENDING_DEPT_HEAD;
+        params.deptIds = headedDeptIds;
+      }
+      if (isFinal) {
+        conditions.push(`${alias}.approvalStage = :finalStage`);
+        params.finalStage = ApprovalStage.PENDING_FINAL;
+      }
+      return conditions.join(' OR ');
+    };
+
+    const items: any[] = [];
+    items.push(...holidayRows.map((holiday) => ({ id: holiday.id, requestType: 'holiday', approvalStage: 'PendingSelectedApprover', createdAt: holiday.createdAt, summary: `${holiday.name}: ${holiday.fromDate} ~ ${holiday.toDate}`, reason: holiday.description, holiday })));
+
+    {
+      const params: any = { organizationId, status: LeaveStatus.PENDING };
+      const sql = stageConditionSql('lr', 'emp', params);
+      const rows = await this.leaveRequestRepo.createQueryBuilder('lr')
+        .leftJoinAndSelect('lr.employee', 'emp')
+        .leftJoinAndSelect('emp.department', 'dept')
+        .leftJoinAndSelect('lr.leaveType', 'lt')
+        .where('lr.organizationId = :organizationId', { organizationId })
+        .andWhere('lr.status = :status', { status: LeaveStatus.PENDING })
+        .andWhere(`(${sql})`, params)
+        .orderBy('lr.createdAt', 'ASC')
+        .getMany();
+      items.push(...rows.map((r) => ({
+        id: r.id,
+        requestType: 'leave',
+        employee: r.employee,
+        approvalStage: r.approvalStage,
+        createdAt: r.createdAt,
+        summary: `${r.leaveType?.name || 'Leave'}: ${r.startDate} ~ ${r.endDate} (${r.daysCount}d)`,
+        reason: r.reason,
+      })));
+    }
+
+    {
+      const params: any = { organizationId, status: ExpenseClaimStatus.PENDING };
+      const sql = stageConditionSql('claim', 'emp', params);
+      const rows = await this.expenseClaimRepo.createQueryBuilder('claim')
+        .leftJoinAndSelect('claim.employee', 'emp')
+        .leftJoinAndSelect('emp.department', 'dept')
+        .where('claim.organizationId = :organizationId', { organizationId })
+        .andWhere('claim.status = :status', { status: ExpenseClaimStatus.PENDING })
+        .andWhere(`(${sql})`, params)
+        .orderBy('claim.createdAt', 'ASC')
+        .getMany();
+      items.push(...rows.map((r) => ({
+        id: r.id,
+        requestType: 'expense',
+        employee: r.employee,
+        approvalStage: r.approvalStage,
+        createdAt: r.createdAt,
+        summary: `${r.category}: ৳${Number(r.amount).toLocaleString()} on ${r.expenseDate}`,
+        reason: r.description,
+      })));
+    }
+
+    {
+      const params: any = { organizationId, status: OvertimeStatus.PENDING };
+      const sql = stageConditionSql('ot', 'emp', params);
+      const rows = await this.overtimeRepo.createQueryBuilder('ot')
+        .leftJoinAndSelect('ot.employee', 'emp')
+        .leftJoinAndSelect('emp.department', 'dept')
+        .where('ot.organizationId = :organizationId', { organizationId })
+        .andWhere('ot.status = :status', { status: OvertimeStatus.PENDING })
+        .andWhere(`(${sql})`, params)
+        .orderBy('ot.createdAt', 'ASC')
+        .getMany();
+      items.push(...rows.map((r) => ({
+        id: r.id,
+        requestType: 'overtime',
+        employee: r.employee,
+        approvalStage: r.approvalStage,
+        createdAt: r.createdAt,
+        summary: `Overtime on ${r.overtimeDate}: ${r.requestedHours} hrs requested`,
+        reason: r.reason,
+      })));
+    }
+
+    {
+      const params: any = { organizationId, status: CorrectionStatus.PENDING };
+      const sql = stageConditionSql('c', 'emp', params);
+      const rows = await this.correctionRepo.createQueryBuilder('c')
+        .leftJoinAndSelect('c.employee', 'emp')
+        .leftJoinAndSelect('emp.department', 'dept')
+        .where('c.organizationId = :organizationId', { organizationId })
+        .andWhere('c.status = :status', { status: CorrectionStatus.PENDING })
+        .andWhere(`(${sql})`, params)
+        .orderBy('c.createdAt', 'ASC')
+        .getMany();
+      items.push(...rows.map((r) => ({
+        id: r.id,
+        requestType: 'correction',
+        employee: r.employee,
+        approvalStage: r.approvalStage,
+        createdAt: r.createdAt,
+        summary: `Attendance correction for ${r.attendanceDate}`,
+        reason: r.reason,
+      })));
+    }
+
+    items.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return {
+      items,
+      isDeptHead: headedDeptIds.length > 0,
+      isFinalApprover: isFinal,
+      headedDepartments: headedDepartments.map((d) => d.name),
+    };
+  }
+
+  // An employee's own assigned shift (day/night/etc.) takes priority; falls back to the
+  // organization's single default shift when the employee has no shift assigned.
+  private async resolveShiftForEmployee(employee: Employee, organizationId: string): Promise<WorkShift | null> {
+    if (employee.workShiftId) {
+      const assigned = await this.workShiftRepo.findOne({ where: { id: employee.workShiftId, organizationId } });
+      if (assigned) return assigned;
+    }
+    return this.workShiftRepo.findOne({ where: { organizationId, isDefault: true } });
+  }
 
   // ================= 1. DEPARTMENTS & DESIGNATIONS =================
   async createDepartment(data: Partial<Department>, organizationId: string): Promise<Department> {
@@ -128,7 +401,11 @@ export class HrPayrollService {
   }
 
   async getDepartments(organizationId: string): Promise<Department[]> {
-    return this.departmentRepo.find({ where: { organizationId }, order: { name: 'ASC' } });
+    return this.departmentRepo.find({
+      where: { organizationId },
+      order: { name: 'ASC' },
+      relations: ['headEmployee'],
+    });
   }
 
   async updateDepartment(id: string, data: Partial<Department>, organizationId: string): Promise<Department> {
@@ -174,6 +451,17 @@ export class HrPayrollService {
 
   // ================= 2. BIOMETRIC DEVICES & HARDWARE WEBHOOK =================
   async registerBiometricDevice(data: Partial<BiometricDevice>, organizationId: string): Promise<BiometricDevice> {
+    if (data.ipAddress) {
+      const existing = await this.biometricDeviceRepo.findOne({
+        where: { organizationId, ipAddress: data.ipAddress, port: data.port || 4370 },
+      });
+      if (existing) {
+        throw new BadRequestException(
+          `A device ("${existing.name}") is already registered at ${data.ipAddress}:${data.port || 4370}. Registering the same physical machine twice causes every punch to be counted double.`,
+        );
+      }
+    }
+
     const generatedKey = `cbmnp_bio_${crypto.randomBytes(16).toString('hex')}`;
     const device = this.biometricDeviceRepo.create({
       ...data,
@@ -183,11 +471,71 @@ export class HrPayrollService {
     return this.biometricDeviceRepo.save(device);
   }
 
-  async getBiometricDevices(organizationId: string): Promise<BiometricDevice[]> {
-    return this.biometricDeviceRepo.find({
+  static readonly DEVICE_ONLINE_THRESHOLD_MS = 15 * 60 * 1000; // consider "online" if synced within last 15 mins
+
+  async getBiometricDevices(organizationId: string): Promise<any[]> {
+    const devices = await this.biometricDeviceRepo.find({
       where: { organizationId },
       order: { createdAt: 'DESC' },
     });
+    return devices.map((device) => ({
+      ...device,
+      isOnline: this.isDeviceOnline(device),
+    }));
+  }
+
+  private isDeviceOnline(device: BiometricDevice): boolean {
+    if (!device.lastSyncAt) return false;
+    return Date.now() - new Date(device.lastSyncAt).getTime() <= HrPayrollService.DEVICE_ONLINE_THRESHOLD_MS;
+  }
+
+  async getBiometricDeviceUsers(deviceId: string, organizationId: string, date?: string) {
+    const device = await this.biometricDeviceRepo.findOne({ where: { id: deviceId, organizationId } });
+    if (!device) throw new NotFoundException('Biometric device not found');
+
+    const targetDate = date || this.getBangladeshDateString(new Date());
+    const dayStart = new Date(`${targetDate}T00:00:00`);
+    const dayEnd = new Date(`${targetDate}T23:59:59.999`);
+
+    const logs = await this.punchLogRepo.find({
+      where: {
+        deviceId,
+        organizationId,
+        punchTime: Between(dayStart, dayEnd),
+      },
+      relations: ['matchedEmployee', 'matchedEmployee.department'],
+      order: { punchTime: 'ASC' },
+    });
+
+    const byUser = new Map<string, any>();
+    for (const log of logs) {
+      const key = log.matchedEmployeeId || `unmatched:${log.biometricUserId}`;
+      if (!byUser.has(key)) {
+        byUser.set(key, {
+          biometricUserId: log.biometricUserId,
+          employee: log.matchedEmployee || null,
+          matched: !!log.matchedEmployeeId,
+          checkInTime: log.punchTime,
+          checkOutTime: null,
+          totalPunches: 0,
+        });
+      }
+      const entry = byUser.get(key);
+      entry.totalPunches += 1;
+      if (log.punchTime < entry.checkInTime) entry.checkInTime = log.punchTime;
+      if (log.punchTime > entry.checkInTime) entry.checkOutTime = log.punchTime;
+    }
+
+    const users = Array.from(byUser.values()).sort((a, b) =>
+      (a.employee?.fullName || a.biometricUserId).localeCompare(b.employee?.fullName || b.biometricUserId),
+    );
+
+    return {
+      device: { id: device.id, name: device.name, isOnline: this.isDeviceOnline(device), lastSyncAt: device.lastSyncAt },
+      date: targetDate,
+      totalPunchesToday: logs.length,
+      users,
+    };
   }
 
   async updateBiometricDevice(id: string, data: Partial<BiometricDevice>, organizationId: string): Promise<BiometricDevice> {
@@ -255,12 +603,21 @@ export class HrPayrollService {
 
     if (rawLogs.length === 0) throw new BadRequestException('No punch logs provided in payload');
 
-    const defaultShift = await this.workShiftRepo.findOne({
-      where: { organizationId, isDefault: true },
-    });
-    const shiftStartTime = defaultShift?.startTime || '09:00:00';
-    const graceMinutes = defaultShift?.graceMinutes !== undefined ? defaultShift.graceMinutes : 15;
+    return this.ingestPunchLogs(device, organizationId, rawLogs);
+  }
 
+  // Shared by the webhook push endpoint (processBiometricSync) and the local network
+  // poller (BiometricDevicePollerService) that pulls logs directly off a LAN device.
+  async ingestPunchLogs(
+    device: BiometricDevice | null,
+    organizationId: string,
+    rawLogs: Array<{
+      biometricUserId: string;
+      timestamp: string | Date;
+      punchType?: string;
+      verifyType?: string;
+    }>,
+  ) {
     let processedCount = 0;
     let matchedCount = 0;
     const results: any[] = [];
@@ -269,8 +626,7 @@ export class HrPayrollService {
       if (!item.biometricUserId) continue;
 
       const punchDateObj = new Date(item.timestamp);
-      const attendanceDate = punchDateObj.toISOString().split('T')[0];
-      const punchTimeStr = punchDateObj.toTimeString().split(' ')[0];
+      const { date: attendanceDate, time: punchTimeStr } = this.getBangladeshDateTime(punchDateObj);
 
       const employee = await this.employeeRepo.findOne({
         where: [
@@ -295,6 +651,11 @@ export class HrPayrollService {
 
       if (employee) {
         matchedCount++;
+        const shift = await this.resolveShiftForEmployee(employee, organizationId);
+        const shiftStartTime = shift?.startTime || '09:00:00';
+        const graceMinutes = shift?.graceMinutes !== undefined ? shift.graceMinutes : 15;
+        const standardHours = shift?.fullDayHours || 8;
+
         let record = await this.attendanceRepo.findOne({
           where: { organizationId, employeeId: employee.id, attendanceDate },
         });
@@ -334,7 +695,6 @@ export class HrPayrollService {
             const hours = Math.max(0, Number((totalSecs / 3600).toFixed(2)));
             record.workHours = hours;
 
-            const standardHours = defaultShift?.fullDayHours || 8;
             if (hours > standardHours) {
               record.overtimeMinutes = Math.round((hours - standardHours) * 60);
             }
@@ -376,6 +736,33 @@ export class HrPayrollService {
     return { logs, total };
   }
 
+  // Cross-references a device's raw enrolled-user roster (deviceUserId, name) against
+  // our employees table so the UI can show which device users are mapped to real staff.
+  async attachEmployeeMapping(
+    users: Array<{ deviceUserId: string; name: string; cardNumber?: number | null }>,
+    organizationId: string,
+  ) {
+    if (users.length === 0) return [];
+    const ids = users.map((u) => u.deviceUserId).filter(Boolean);
+    const employees = await this.employeeRepo.find({
+      where: [
+        { organizationId, biometricUserId: In(ids) },
+        { organizationId, employeeCode: In(ids) },
+      ],
+      relations: ['department'],
+    });
+    const byId = new Map<string, Employee>();
+    for (const emp of employees) {
+      if (emp.biometricUserId) byId.set(emp.biometricUserId, emp);
+      if (emp.employeeCode) byId.set(emp.employeeCode, emp);
+    }
+    return users.map((u) => ({
+      ...u,
+      employee: byId.get(u.deviceUserId) || null,
+      matched: byId.has(u.deviceUserId),
+    }));
+  }
+
   // ================= 3. WORK SHIFTS & HOLIDAYS =================
   async getWorkShifts(organizationId: string): Promise<WorkShift[]> {
     return this.workShiftRepo.find({ where: { organizationId }, order: { createdAt: 'ASC' } });
@@ -411,6 +798,17 @@ export class HrPayrollService {
     return { success: true };
   }
 
+  async approveHoliday(id: string, approved: boolean, remarks: string, organizationId: string, actingEmployeeId: string) {
+    const holiday = await this.holidayRepo.findOne({ where: { id, organizationId } });
+    if (!holiday) throw new NotFoundException('Holiday request not found');
+    if (holiday.approvalStatus !== HolidayApprovalStatus.PENDING) throw new BadRequestException('This holiday request has already been decided');
+    if (holiday.approverEmployeeId !== actingEmployeeId) throw new ForbiddenException('This holiday request is assigned to another approver');
+    holiday.approvalStatus = approved ? HolidayApprovalStatus.APPROVED : HolidayApprovalStatus.REJECTED;
+    holiday.approvedByEmployeeId = actingEmployeeId;
+    holiday.approvalRemarks = remarks || null;
+    return this.holidayRepo.save(holiday);
+  }
+
   // ================= 4. EMPLOYEE MASTER & 360 PROFILE =================
   async createEmployee(data: Partial<Employee>, organizationId: string): Promise<Employee> {
     const existing = await this.employeeRepo.findOne({
@@ -427,8 +825,19 @@ export class HrPayrollService {
       }
     }
 
+    if (data.userId) {
+      const existingLogin = await this.employeeRepo.findOne({ where: { organizationId, userId: data.userId } });
+      if (existingLogin) {
+        throw new BadRequestException(`This login account is already linked to ${existingLogin.fullName}`);
+      }
+    }
+
     const emp = this.employeeRepo.create({ ...data, organizationId });
     const saved = await this.employeeRepo.save(emp);
+
+    if (saved.biometricUserId) {
+      await this.backfillAttendanceFromUnmatchedPunches(saved, organizationId);
+    }
 
     if (data.basicSalary && Number(data.basicSalary) > 0) {
       await this.setSalaryStructure(
@@ -519,8 +928,172 @@ export class HrPayrollService {
       }
     }
 
+    if (data.userId && data.userId !== emp.userId) {
+      const existingLogin = await this.employeeRepo.findOne({ where: { organizationId, userId: data.userId } });
+      if (existingLogin && existingLogin.id !== id) {
+        throw new BadRequestException(`This login account is already linked to ${existingLogin.fullName}`);
+      }
+    }
+
+    const biometricIdChanged = data.biometricUserId && data.biometricUserId !== emp.biometricUserId;
     Object.assign(emp, data);
-    return this.employeeRepo.save(emp);
+    const saved = await this.employeeRepo.save(emp);
+
+    if (biometricIdChanged) {
+      await this.backfillAttendanceFromUnmatchedPunches(saved, organizationId);
+    }
+
+    return saved;
+  }
+
+  // Employee-matching for biometric punches only runs once, at ingestion time. If a punch
+  // arrives before an employee's Biometric ID is mapped in the ERP, it's stored as
+  // "unmatched" and silently never becomes attendance. Whenever a Biometric ID gets
+  // (re)assigned, re-scan any already-stored unmatched logs for that ID and turn them
+  // into real attendance records — otherwise historical punches are lost forever.
+  private async backfillAttendanceFromUnmatchedPunches(employee: Employee, organizationId: string) {
+    const candidateIds = [employee.biometricUserId, employee.employeeCode].filter(Boolean) as string[];
+    if (candidateIds.length === 0) return { matchedLogs: 0, backfilledDates: 0 };
+
+    const unmatchedLogs = await this.punchLogRepo.find({
+      where: { organizationId, biometricUserId: In(candidateIds), matchedEmployeeId: IsNull() },
+      order: { punchTime: 'ASC' },
+    });
+    if (unmatchedLogs.length === 0) return { matchedLogs: 0, backfilledDates: 0 };
+
+    await this.punchLogRepo.update(
+      { id: In(unmatchedLogs.map((l) => l.id)) },
+      { matchedEmployeeId: employee.id },
+    );
+
+    const byDate = new Map<string, Date[]>();
+    for (const log of unmatchedLogs) {
+      const date = this.getBangladeshDateString(log.punchTime);
+      if (!byDate.has(date)) byDate.set(date, []);
+      byDate.get(date)!.push(log.punchTime);
+    }
+
+    const shift = await this.resolveShiftForEmployee(employee, organizationId);
+    const shiftStartTime = shift?.startTime || '09:00:00';
+    const graceMinutes = shift?.graceMinutes ?? 15;
+    const standardHours = shift?.fullDayHours || 8;
+
+    for (const [attendanceDate, punchTimes] of byDate) {
+      punchTimes.sort((a, b) => a.getTime() - b.getTime());
+      const { time: clockInStr } = this.getBangladeshDateTime(punchTimes[0]);
+
+      let record = await this.attendanceRepo.findOne({
+        where: { organizationId, employeeId: employee.id, attendanceDate },
+      });
+
+      if (!record) {
+        const [sH, sM] = shiftStartTime.split(':').map(Number);
+        const [pH, pM] = clockInStr.split(':').map(Number);
+        const shiftMinutes = sH * 60 + sM + graceMinutes;
+        const punchMinutes = pH * 60 + pM;
+        let lateMins = 0;
+        let status = AttendanceStatus.PRESENT;
+        if (punchMinutes > shiftMinutes) {
+          lateMins = punchMinutes - (sH * 60 + sM);
+          status = AttendanceStatus.LATE;
+        }
+        record = this.attendanceRepo.create({
+          employeeId: employee.id,
+          attendanceDate,
+          clockInTime: clockInStr,
+          status,
+          lateMinutes: lateMins,
+          punchSource: PunchSource.BIOMETRIC,
+          remarks: 'Backfilled after Biometric ID was mapped to this employee',
+          organizationId,
+        });
+      }
+
+      if (punchTimes.length > 1) {
+        const { time: clockOutStr } = this.getBangladeshDateTime(punchTimes[punchTimes.length - 1]);
+        record.clockOutTime = clockOutStr;
+        record.punchSource = PunchSource.BIOMETRIC;
+        if (record.clockInTime) {
+          const [inH, inM, inS] = record.clockInTime.split(':').map(Number);
+          const [outH, outM, outS] = clockOutStr.split(':').map(Number);
+          const totalSecs = (outH * 3600 + outM * 60 + (outS || 0)) - (inH * 3600 + inM * 60 + (inS || 0));
+          record.workHours = Math.max(0, Number((totalSecs / 3600).toFixed(2)));
+          if (record.workHours > standardHours) {
+            record.overtimeMinutes = Math.round((record.workHours - standardHours) * 60);
+          }
+        }
+      }
+
+      await this.attendanceRepo.save(record);
+    }
+
+    return { matchedLogs: unmatchedLogs.length, backfilledDates: byDate.size };
+  }
+
+  // Resolves the Employee profile linked to a logged-in Users account (JWT `userId`
+  // claim) — used to figure out "which employee is actually clicking Approve" for the
+  // Department Head / Final Approver checks.
+  async getEmployeeByUserId(userId: string, organizationId: string): Promise<Employee | null> {
+    if (!userId) return null;
+    return this.employeeRepo.findOne({
+      where: { userId, organizationId },
+      relations: ['department', 'designation', 'reportingManager', 'office'],
+    });
+  }
+
+  async getSelfServiceProfile(userId: string, organizationId: string) {
+    const employee = await this.getEmployeeByUserId(userId, organizationId);
+    const user = await this.usersRepo.findOne({ where: { userId, organizationId } });
+    const profile = user ? { name: user.name, email: user.email, phone: user.phone, address: user.address, role: user.role } : null;
+    if (!employee) return { user: profile, employee: null, attendance: [], leaves: [], holidays: [], leaveBalances: [] };
+
+    const [attendance, leaves, leaveBalances, holidays] = await Promise.all([
+      this.attendanceRepo.find({
+        where: { organizationId, employeeId: employee.id },
+        order: { attendanceDate: 'DESC' },
+        take: 90,
+      }),
+      this.leaveRequestRepo.find({
+        where: { organizationId, employeeId: employee.id },
+        relations: ['leaveType'],
+        order: { createdAt: 'DESC' },
+        take: 50,
+      }),
+      this.getLeaveBalances(employee.id, organizationId),
+      this.holidayRepo.find({ where: { organizationId, approvalStatus: HolidayApprovalStatus.APPROVED }, order: { fromDate: 'ASC' } }),
+    ]);
+    const approverIds = Array.from(new Set(leaves.flatMap((leave) => [leave.deptHeadApprovedById, leave.approvedById]).filter(Boolean)));
+    const approvers = approverIds.length
+      ? await this.employeeRepo.find({ where: { organizationId, id: In(approverIds) }, relations: ['designation'] })
+      : [];
+    const approverDetails = new Map(approvers.map((approver) => [approver.id, { name: approver.fullName, title: approver.designation?.name || 'Approver' }]));
+    const department = employee.departmentId
+      ? await this.departmentRepo.findOne({ where: { id: employee.departmentId, organizationId }, relations: ['headEmployee', 'headEmployee.designation'] })
+      : null;
+    // The final approver can be set either on the Employee profile or by assigning the
+    // linked ERP user the CEO/CCO role. Resolve the name here so self-service users see
+    // a person, not just the generic "Final Approver" label.
+    const organizationEmployees = await this.employeeRepo.find({
+      where: { organizationId },
+      relations: ['user', 'designation'],
+    });
+    const finalApprover = organizationEmployees.find((candidate) =>
+      candidate.isFinalApprover ||
+      (candidate.user && HrPayrollService.FINAL_APPROVER_ROLES.includes(candidate.user.role)),
+    );
+    const enhancedLeaves = leaves.map((leave) => ({
+      ...leave,
+      approvalInfo: {
+        currentWith: leave.status === LeaveStatus.PENDING
+          ? leave.approvalStage === ApprovalStage.PENDING_DEPT_HEAD
+            ? { name: department?.headEmployee?.fullName || 'Department Head not configured', title: department?.headEmployee?.designation?.name || 'Department Head' }
+            : { name: finalApprover?.fullName || 'Final Approver not configured', title: finalApprover?.designation?.name || 'Final Approver' }
+          : null,
+        departmentHeadApprovedBy: leave.deptHeadApprovedById ? approverDetails.get(leave.deptHeadApprovedById) || { name: 'Department Head', title: 'Department Head' } : null,
+        finalApprovedBy: leave.approvedById ? approverDetails.get(leave.approvedById) || { name: 'Final Approver', title: 'Final Approver' } : null,
+      },
+    }));
+    return { user: profile, employee, attendance, leaves: enhancedLeaves, holidays, leaveBalances };
   }
 
   async deleteEmployee(id: string, organizationId: string): Promise<{ success: boolean }> {
@@ -530,48 +1103,97 @@ export class HrPayrollService {
     return { success: true };
   }
 
+  async getOffices(organizationId: string) { return this.officeRepo.find({ where: { organizationId }, order: { name: 'ASC' } }); }
+  async createOffice(data: Partial<HrOffice>, organizationId: string) { return this.officeRepo.save(this.officeRepo.create({ ...data, organizationId })); }
+  async updateOffice(id: string, data: Partial<HrOffice>, organizationId: string) {
+    const office = await this.officeRepo.findOne({ where: { id, organizationId } });
+    if (!office) throw new NotFoundException('Office not found');
+    Object.assign(office, data);
+    return this.officeRepo.save(office);
+  }
+
+  private async validateOfficeRange(organizationId: string, officeId?: string, latitude?: number, longitude?: number) {
+    // Browser/manual attendance is only allowed against the employee's assigned,
+    // active office. Biometric sync uses a separate path and deliberately bypasses it.
+    if (!officeId) throw new BadRequestException('No office is assigned to your employee profile. Contact HR.');
+    const offices = await this.officeRepo.find({ where: { organizationId, id: officeId, isActive: true } });
+    if (!offices.length) throw new BadRequestException('Your assigned office is inactive or unavailable. Contact HR.');
+    if (latitude === undefined || longitude === undefined) throw new BadRequestException('Location permission is required for attendance.');
+    const toRad = (value: number) => value * Math.PI / 180;
+    const matched = offices.find((office) => {
+      const lat1 = Number(office.latitude), lng1 = Number(office.longitude);
+      const a = Math.sin(toRad(latitude - lat1) / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(latitude)) * Math.sin(toRad(longitude - lng1) / 2) ** 2;
+      return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) <= office.radiusMeters;
+    });
+    if (!matched) throw new BadRequestException('You are outside the allowed office attendance range.');
+  }
+
   // ================= 5. ATTENDANCE & ROSTER =================
-  async clockIn(employeeId: string, organizationId: string): Promise<AttendanceRecord> {
-    const today = new Date().toISOString().split('T')[0];
-    const timeStr = new Date().toTimeString().split(' ')[0];
+  async clockIn(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string): Promise<AttendanceRecord> {
+    const now = new Date();
+    const { date: today, time: timeStr } = this.getBangladeshDateTime(now);
+
+    const employee = await this.employeeRepo.findOne({ where: { id: employeeId, organizationId } });
+    if (!employee) throw new NotFoundException('Employee not found');
+    await this.validateOfficeRange(organizationId, employee.officeId, latitude, longitude);
 
     let record = await this.attendanceRepo.findOne({
       where: { organizationId, employeeId, attendanceDate: today },
     });
-    if (record) throw new BadRequestException('Employee already clocked in today');
+    // Attendance is the source of truth. A real punch on an approved-leave day
+    // automatically rejects that leave; balances are calculated from Approved leaves,
+    // so the day is immediately returned to the employee's available balance.
+    const overlappingLeaves = await this.leaveRequestRepo.createQueryBuilder('leave')
+      .where('leave.organizationId = :organizationId', { organizationId })
+      .andWhere('leave.employeeId = :employeeId', { employeeId })
+      .andWhere('leave.status = :status', { status: LeaveStatus.APPROVED })
+      .andWhere('leave.startDate <= :today', { today })
+      .andWhere('leave.endDate >= :today', { today })
+      .getMany();
+    for (const leave of overlappingLeaves) {
+      leave.status = LeaveStatus.REJECTED;
+      leave.approvalRemarks = [leave.approvalRemarks, `Automatically rejected: employee checked in on ${today}.`].filter(Boolean).join(' ');
+    }
+    if (overlappingLeaves.length) await this.leaveRequestRepo.save(overlappingLeaves);
 
-    const hours = new Date().getHours();
-    const minutes = new Date().getMinutes();
+    const canReplaceAutoRecord = record && [AttendanceStatus.ON_LEAVE, AttendanceStatus.ABSENT].includes(record.status);
+    if (record && !canReplaceAutoRecord) throw new BadRequestException('Employee already clocked in today');
+
+    const shift = await this.resolveShiftForEmployee(employee, organizationId);
+    const shiftStartTime = shift?.startTime || '09:00:00';
+    const graceMinutes = shift?.graceMinutes !== undefined ? shift.graceMinutes : 15;
+
+    const [sH, sM] = shiftStartTime.split(':').map(Number);
+    const [hours, minutes] = timeStr.split(':').map(Number);
+    const shiftMinutes = sH * 60 + sM + graceMinutes;
+    const punchMinutes = hours * 60 + minutes;
+
     let lateMins = 0;
     let status = AttendanceStatus.PRESENT;
-
-    if (hours > 9 || (hours === 9 && minutes > 30)) {
-      lateMins = (hours - 9) * 60 + (minutes - 30);
+    if (punchMinutes > shiftMinutes) {
+      lateMins = punchMinutes - (sH * 60 + sM);
       status = AttendanceStatus.LATE;
     }
 
-    record = this.attendanceRepo.create({
-      employeeId,
-      attendanceDate: today,
-      clockInTime: timeStr,
-      status,
-      lateMinutes: lateMins,
-      punchSource: PunchSource.WEB_MANUAL,
-      organizationId,
-    });
+    record = record
+      ? this.attendanceRepo.merge(record, { clockInTime: timeStr, clockOutTime: null, workHours: null, status, lateMinutes: lateMins, punchSource: PunchSource.WEB_MANUAL, remarks: remarks || record.remarks || null })
+      : this.attendanceRepo.create({ employeeId, attendanceDate: today, clockInTime: timeStr, status, lateMinutes: lateMins, punchSource: PunchSource.WEB_MANUAL, remarks: remarks || null, organizationId });
     return this.attendanceRepo.save(record);
   }
 
-  async clockOut(employeeId: string, organizationId: string): Promise<AttendanceRecord> {
-    const today = new Date().toISOString().split('T')[0];
-    const timeStr = new Date().toTimeString().split(' ')[0];
+  async clockOut(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string): Promise<AttendanceRecord> {
+    const now = new Date();
+    const { date: today, time: timeStr } = this.getBangladeshDateTime(now);
 
     const record = await this.attendanceRepo.findOne({
       where: { organizationId, employeeId, attendanceDate: today },
     });
     if (!record) throw new NotFoundException('Clock-in record not found for today');
+    const employee = await this.employeeRepo.findOne({ where: { id: employeeId, organizationId } });
+    await this.validateOfficeRange(organizationId, employee?.officeId, latitude, longitude);
 
     record.clockOutTime = timeStr;
+    if (remarks) record.remarks = record.remarks ? `${record.remarks} | Check-out: ${remarks}` : `Check-out: ${remarks}`;
     if (record.clockInTime) {
       const [inH, inM] = record.clockInTime.split(':').map(Number);
       const [outH, outM] = timeStr.split(':').map(Number);
@@ -612,13 +1234,19 @@ export class HrPayrollService {
     organizationId: string,
     params?: { date?: string; month?: number; year?: number; departmentId?: string; employeeId?: string },
   ) {
+    // Single-day roster view: show EVERY active employee for that date, not just the
+    // ones who happen to have a punch — otherwise anyone who forgot to punch (or whose
+    // device was offline) simply vanishes from the list instead of showing as Absent.
+    if (params?.date && !params?.month && !params?.year) {
+      return this.getDailyRosterWithAbsentees(organizationId, params.date, params.departmentId, params.employeeId);
+    }
+
     const query = this.attendanceRepo.createQueryBuilder('att')
       .leftJoinAndSelect('att.employee', 'emp')
       .leftJoinAndSelect('emp.department', 'dept')
       .leftJoinAndSelect('att.device', 'dev')
       .where('att.organizationId = :organizationId', { organizationId });
 
-    if (params?.date) query.andWhere('att.attendanceDate = :date', { date: params.date });
     if (params?.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
     if (params?.employeeId) query.andWhere('att.employeeId = :empId', { empId: params.employeeId });
 
@@ -626,8 +1254,60 @@ export class HrPayrollService {
     return query.getMany();
   }
 
+  private async getDailyRosterWithAbsentees(
+    organizationId: string,
+    date: string,
+    departmentId?: string,
+    employeeId?: string,
+  ) {
+    const empWhere: any = { organizationId, status: EmploymentStatus.ACTIVE };
+    if (departmentId) empWhere.departmentId = departmentId;
+    if (employeeId) empWhere.id = employeeId;
+
+    const [employees, records, approvedLeaves] = await Promise.all([
+      this.employeeRepo.find({ where: empWhere, relations: ['department'] }),
+      this.attendanceRepo.find({
+        where: { organizationId, attendanceDate: date },
+        relations: ['employee', 'employee.department', 'device'],
+      }),
+      this.leaveRequestRepo.find({
+        where: { organizationId, status: LeaveStatus.APPROVED, startDate: LessThanOrEqual(date), endDate: MoreThanOrEqual(date) },
+      }),
+    ]);
+
+    const recordByEmployeeId = new Map(records.map((r) => [r.employeeId, r]));
+    const onLeaveEmployeeIds = new Set(approvedLeaves.map((l) => l.employeeId));
+
+    const roster = employees.map((emp) => {
+      const existing = recordByEmployeeId.get(emp.id);
+      if (existing) return existing;
+
+      return {
+        id: `absent-${emp.id}-${date}`,
+        employeeId: emp.id,
+        employee: emp,
+        attendanceDate: date,
+        clockInTime: null,
+        clockOutTime: null,
+        status: onLeaveEmployeeIds.has(emp.id) ? AttendanceStatus.ON_LEAVE : AttendanceStatus.ABSENT,
+        lateMinutes: 0,
+        earlyLeavingMinutes: 0,
+        workHours: 0,
+        overtimeMinutes: 0,
+        punchSource: null,
+        deviceId: null,
+        device: null,
+        remarks: onLeaveEmployeeIds.has(emp.id) ? 'On approved leave' : 'No punch recorded yet',
+        organizationId,
+        isSynthesized: true,
+      } as unknown as AttendanceRecord;
+    });
+
+    return roster.sort((a, b) => (a.employee?.fullName || '').localeCompare(b.employee?.fullName || ''));
+  }
+
   async getAttendanceSummary(organizationId: string, date?: string) {
-    const targetDate = date || new Date().toISOString().split('T')[0];
+    const targetDate = date || this.getBangladeshDateString(new Date());
     const totalEmployees = await this.employeeRepo.count({
       where: { organizationId, status: EmploymentStatus.ACTIVE },
     });
@@ -661,30 +1341,70 @@ export class HrPayrollService {
       const e = new Date(data.endDate);
       days = Math.ceil(Math.abs(e.getTime() - s.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     }
+
+    // Balance enforcement: check if employee has enough remaining days for this leave type
+    const balances = await this.getLeaveBalances(data.employeeId!, organizationId);
+    const balance = balances.find(b => b.leaveTypeId === data.leaveTypeId);
+    if (!balance) {
+      throw new BadRequestException('Leave type not found for this organization');
+    }
+    if (balance.remainingDays < days) {
+      throw new BadRequestException(
+        `Insufficient leave balance. ${balance.leaveTypeName} remaining: ${balance.remainingDays} days, requested: ${days} days.`,
+      );
+    }
+
+    const { stage } = await this.resolveApprovalChain(data.employeeId, organizationId);
     const req = this.leaveRequestRepo.create({
       ...data,
       daysCount: days || 1,
       status: LeaveStatus.PENDING,
+      approvalStage: stage,
       organizationId,
     });
     return this.leaveRequestRepo.save(req);
   }
 
-  async approveLeave(requestId: string, approved: boolean, remarks: string, organizationId: string, userId?: string) {
+  async approveLeave(requestId: string, approved: boolean, remarks: string, organizationId: string, actingEmployeeId: string) {
     const req = await this.leaveRequestRepo.findOne({ where: { id: requestId, organizationId } });
     if (!req) throw new NotFoundException('Leave request not found');
-    req.status = approved ? LeaveStatus.APPROVED : LeaveStatus.REJECTED;
-    req.approvedById = userId;
+    if (req.status !== LeaveStatus.PENDING) throw new BadRequestException('This leave request has already been decided');
+
+    const { deptHeadEmployeeId } = await this.resolveApprovalChain(req.employeeId, organizationId);
+    await this.assertAuthorizedApprover(actingEmployeeId, organizationId, req.approvalStage, deptHeadEmployeeId);
+
+    if (!approved) {
+      req.status = LeaveStatus.REJECTED;
+      req.approvedById = actingEmployeeId;
+      req.approvalRemarks = remarks;
+      return this.leaveRequestRepo.save(req);
+    }
+
+    if (req.approvalStage === ApprovalStage.PENDING_DEPT_HEAD) {
+      req.deptHeadApprovedById = actingEmployeeId;
+      req.deptHeadActionAt = new Date();
+      req.deptHeadRemarks = remarks;
+      req.approvalStage = ApprovalStage.PENDING_FINAL;
+      return this.leaveRequestRepo.save(req);
+    }
+
+    req.status = LeaveStatus.APPROVED;
+    req.approvedById = actingEmployeeId;
     req.approvalRemarks = remarks;
     return this.leaveRequestRepo.save(req);
   }
 
-  async getLeaveRequests(organizationId: string, employeeId?: string, status?: string) {
+  async getLeaveRequests(organizationId: string, actingEmployeeId: string, employeeId?: string, status?: string, actingRole?: string) {
     const query = this.leaveRequestRepo.createQueryBuilder('lr')
       .leftJoinAndSelect('lr.employee', 'emp')
       .leftJoinAndSelect('emp.department', 'dept')
       .leftJoinAndSelect('lr.leaveType', 'lt')
       .where('lr.organizationId = :organizationId', { organizationId });
+
+    const scope = await this.resolveVisibilityScope(actingEmployeeId, organizationId, actingRole);
+    if (!scope.seeAll) {
+      query.andWhere('lr.employeeId IN (:...visibleIds)', { visibleIds: scope.employeeIds.length ? scope.employeeIds : ['__none__'] });
+    }
 
     if (employeeId) query.andWhere('lr.employeeId = :employeeId', { employeeId });
     if (status) query.andWhere('lr.status = :status', { status });
@@ -693,16 +1413,22 @@ export class HrPayrollService {
   }
 
   async getLeaveBalances(employeeId: string, organizationId: string) {
-    const leaveTypes = await this.leaveTypeRepo.find({ where: { organizationId, isActive: true } });
-    const approvedRequests = await this.leaveRequestRepo.find({
-      where: { employeeId, organizationId, status: LeaveStatus.APPROVED },
-    });
+    const [employee, leaveTypes, approvedRequests] = await Promise.all([
+      this.employeeRepo.findOne({ where: { id: employeeId, organizationId } }),
+      this.leaveTypeRepo.find({ where: { organizationId, isActive: true } }),
+      this.leaveRequestRepo.find({
+        where: { employeeId, organizationId, status: LeaveStatus.APPROVED },
+      }),
+    ]);
+
+    const employeeQuota = employee?.customLeaveQuota ?? null;
 
     return leaveTypes.map(lt => {
       const usedDays = approvedRequests
         .filter(r => r.leaveTypeId === lt.id)
         .reduce((sum, r) => sum + (r.daysCount || 0), 0);
-      const totalAllowed = lt.daysAllowedPerYear || 14;
+      // If employee has a custom quota set, use it; otherwise fall back to leave type default
+      const totalAllowed = employeeQuota !== null ? employeeQuota : (lt.daysAllowedPerYear || 14);
       return {
         leaveTypeId: lt.id,
         leaveTypeName: lt.name,
@@ -754,19 +1480,26 @@ export class HrPayrollService {
 
   // ================= 8. EXPENSE CLAIMS & REIMBURSEMENTS =================
   async submitExpenseClaim(data: Partial<ExpenseClaim>, organizationId: string): Promise<ExpenseClaim> {
+    const { stage } = await this.resolveApprovalChain(data.employeeId, organizationId);
     const claim = this.expenseClaimRepo.create({
       ...data,
       status: ExpenseClaimStatus.PENDING,
+      approvalStage: stage,
       organizationId,
     });
     return this.expenseClaimRepo.save(claim);
   }
 
-  async getExpenseClaims(organizationId: string, employeeId?: string, status?: string): Promise<ExpenseClaim[]> {
+  async getExpenseClaims(organizationId: string, actingEmployeeId: string, employeeId?: string, status?: string, actingRole?: string): Promise<ExpenseClaim[]> {
     const query = this.expenseClaimRepo.createQueryBuilder('claim')
       .leftJoinAndSelect('claim.employee', 'emp')
       .leftJoinAndSelect('emp.department', 'dept')
       .where('claim.organizationId = :organizationId', { organizationId });
+
+    const scope = await this.resolveVisibilityScope(actingEmployeeId, organizationId, actingRole);
+    if (!scope.seeAll) {
+      query.andWhere('claim.employeeId IN (:...visibleIds)', { visibleIds: scope.employeeIds.length ? scope.employeeIds : ['__none__'] });
+    }
 
     if (employeeId) query.andWhere('claim.employeeId = :employeeId', { employeeId });
     if (status) query.andWhere('claim.status = :status', { status });
@@ -774,11 +1507,31 @@ export class HrPayrollService {
     return query.getMany();
   }
 
-  async approveExpenseClaim(id: string, approved: boolean, remarks: string, organizationId: string, userId?: string) {
+  async approveExpenseClaim(id: string, approved: boolean, remarks: string, organizationId: string, actingEmployeeId: string) {
     const claim = await this.expenseClaimRepo.findOne({ where: { id, organizationId } });
     if (!claim) throw new NotFoundException('Expense claim not found');
-    claim.status = approved ? ExpenseClaimStatus.APPROVED : ExpenseClaimStatus.REJECTED;
-    claim.approvedById = userId;
+    if (claim.status !== ExpenseClaimStatus.PENDING) throw new BadRequestException('This expense claim has already been decided');
+
+    const { deptHeadEmployeeId } = await this.resolveApprovalChain(claim.employeeId, organizationId);
+    await this.assertAuthorizedApprover(actingEmployeeId, organizationId, claim.approvalStage, deptHeadEmployeeId);
+
+    if (!approved) {
+      claim.status = ExpenseClaimStatus.REJECTED;
+      claim.approvedById = actingEmployeeId;
+      claim.remarks = remarks;
+      return this.expenseClaimRepo.save(claim);
+    }
+
+    if (claim.approvalStage === ApprovalStage.PENDING_DEPT_HEAD) {
+      claim.deptHeadApprovedById = actingEmployeeId;
+      claim.deptHeadActionAt = new Date();
+      claim.deptHeadRemarks = remarks;
+      claim.approvalStage = ApprovalStage.PENDING_FINAL;
+      return this.expenseClaimRepo.save(claim);
+    }
+
+    claim.status = ExpenseClaimStatus.APPROVED;
+    claim.approvedById = actingEmployeeId;
     claim.remarks = remarks;
     return this.expenseClaimRepo.save(claim);
   }
@@ -1205,7 +1958,6 @@ export class HrPayrollService {
       pendingLeaves,
       pendingLoans,
       openJobs,
-      onLeaveToday,
       pendingPayroll,
       pendingCorrections,
       pendingOvertimes,
@@ -1216,11 +1968,19 @@ export class HrPayrollService {
       safeCount(() => this.leaveRequestRepo.count({ where: { organizationId, status: LeaveStatus.PENDING } })),
       safeCount(() => this.loanRepo.count({ where: { organizationId, status: LoanStatus.PENDING } })),
       safeCount(() => this.jobOpeningRepo.count({ where: { organizationId } })),
-      safeCount(() => this.leaveRequestRepo.count({ where: { organizationId, status: LeaveStatus.APPROVED } })),
       safeCount(() => this.payrollSheetRepo.count({ where: { organizationId, status: PayrollStatus.DRAFT } })),
       safeCount(() => this.correctionRepo.count({ where: { organizationId, status: CorrectionStatus.PENDING } })),
       safeCount(() => this.overtimeRepo.count({ where: { organizationId, status: OvertimeStatus.PENDING } })),
     ]);
+
+    const onLeaveToday = await safeCount(() =>
+      this.leaveRequestRepo.createQueryBuilder('leave')
+        .where('leave.organizationId = :organizationId', { organizationId })
+        .andWhere('leave.status = :status', { status: LeaveStatus.APPROVED })
+        .andWhere('leave.startDate <= :today', { today })
+        .andWhere('leave.endDate >= :today', { today })
+        .getCount()
+    );
 
     // Today attendance — fetch all, no take limit
     const todayAttendance = await safeFind(() =>
@@ -1289,7 +2049,7 @@ export class HrPayrollService {
       presentToday,
       lateToday,
       onLeaveToday,
-      absentToday: Math.max(0, activeEmployees - presentToday - lateToday),
+      absentToday: Math.max(0, activeEmployees - presentToday - onLeaveToday),
       pendingLeaves,
       pendingLoans,
       pendingCorrections,
@@ -1382,19 +2142,26 @@ export class HrPayrollService {
 
   // ================= 18. ATTENDANCE CORRECTIONS =================
   async submitAttendanceCorrection(data: Partial<AttendanceCorrection>, organizationId: string): Promise<AttendanceCorrection> {
+    const { stage } = await this.resolveApprovalChain(data.employeeId, organizationId);
     const correction = this.correctionRepo.create({
       ...data,
       status: CorrectionStatus.PENDING,
+      approvalStage: stage,
       organizationId,
     });
     return this.correctionRepo.save(correction);
   }
 
-  async getAttendanceCorrections(organizationId: string, employeeId?: string, status?: string) {
+  async getAttendanceCorrections(organizationId: string, actingEmployeeId: string, employeeId?: string, status?: string, actingRole?: string) {
     const query = this.correctionRepo.createQueryBuilder('c')
       .leftJoinAndSelect('c.employee', 'emp')
       .leftJoinAndSelect('emp.department', 'dept')
       .where('c.organizationId = :organizationId', { organizationId });
+
+    const scope = await this.resolveVisibilityScope(actingEmployeeId, organizationId, actingRole);
+    if (!scope.seeAll) {
+      query.andWhere('c.employeeId IN (:...visibleIds)', { visibleIds: scope.employeeIds.length ? scope.employeeIds : ['__none__'] });
+    }
 
     if (employeeId) query.andWhere('c.employeeId = :employeeId', { employeeId });
     if (status) query.andWhere('c.status = :status', { status });
@@ -1402,51 +2169,76 @@ export class HrPayrollService {
     return query.getMany();
   }
 
-  async approveAttendanceCorrection(id: string, approved: boolean, remarks: string, organizationId: string, userId?: string) {
+  async approveAttendanceCorrection(id: string, approved: boolean, remarks: string, organizationId: string, actingEmployeeId: string) {
     const correction = await this.correctionRepo.findOne({ where: { id, organizationId } });
     if (!correction) throw new NotFoundException('Correction request not found');
+    if (correction.status !== CorrectionStatus.PENDING) throw new BadRequestException('This correction request has already been decided');
 
-    correction.status = approved ? CorrectionStatus.APPROVED : CorrectionStatus.REJECTED;
+    const { deptHeadEmployeeId } = await this.resolveApprovalChain(correction.employeeId, organizationId);
+    await this.assertAuthorizedApprover(actingEmployeeId, organizationId, correction.approvalStage, deptHeadEmployeeId);
+
+    if (!approved) {
+      correction.status = CorrectionStatus.REJECTED;
+      correction.approvalRemarks = remarks;
+      correction.approvedById = actingEmployeeId;
+      correction.approvedAt = new Date();
+      return this.correctionRepo.save(correction);
+    }
+
+    if (correction.approvalStage === ApprovalStage.PENDING_DEPT_HEAD) {
+      correction.deptHeadApprovedById = actingEmployeeId;
+      correction.deptHeadActionAt = new Date();
+      correction.deptHeadRemarks = remarks;
+      correction.approvalStage = ApprovalStage.PENDING_FINAL;
+      return this.correctionRepo.save(correction);
+    }
+
+    correction.status = CorrectionStatus.APPROVED;
     correction.approvalRemarks = remarks;
-    correction.approvedById = userId;
+    correction.approvedById = actingEmployeeId;
     correction.approvedAt = new Date();
     await this.correctionRepo.save(correction);
 
-    if (approved) {
-      // Apply the correction to the attendance record
-      const record = await this.attendanceRepo.findOne({
-        where: { organizationId, employeeId: correction.employeeId, attendanceDate: correction.attendanceDate },
-      });
-      if (record) {
-        if (correction.requestedClockIn) record.clockInTime = correction.requestedClockIn;
-        if (correction.requestedClockOut) record.clockOutTime = correction.requestedClockOut;
-        if (record.clockInTime && record.clockOutTime) {
-          const [inH, inM] = record.clockInTime.split(':').map(Number);
-          const [outH, outM] = record.clockOutTime.split(':').map(Number);
-          record.workHours = Math.max(0, Number(((outH * 60 + outM - (inH * 60 + inM)) / 60).toFixed(2)));
-        }
-        record.punchSource = PunchSource.WEB_MANUAL;
-        await this.attendanceRepo.save(record);
+    // Apply the correction to the attendance record only once it's fully (finally) approved
+    const record = await this.attendanceRepo.findOne({
+      where: { organizationId, employeeId: correction.employeeId, attendanceDate: correction.attendanceDate },
+    });
+    if (record) {
+      if (correction.requestedClockIn) record.clockInTime = correction.requestedClockIn;
+      if (correction.requestedClockOut) record.clockOutTime = correction.requestedClockOut;
+      if (record.clockInTime && record.clockOutTime) {
+        const [inH, inM] = record.clockInTime.split(':').map(Number);
+        const [outH, outM] = record.clockOutTime.split(':').map(Number);
+        record.workHours = Math.max(0, Number(((outH * 60 + outM - (inH * 60 + inM)) / 60).toFixed(2)));
       }
+      record.punchSource = PunchSource.WEB_MANUAL;
+      await this.attendanceRepo.save(record);
     }
     return correction;
   }
 
   // ================= 19. OVERTIME MANAGEMENT =================
   async submitOvertimeRequest(data: Partial<OvertimeRequest>, organizationId: string): Promise<OvertimeRequest> {
+    const { stage } = await this.resolveApprovalChain(data.employeeId, organizationId);
     const ot = this.overtimeRepo.create({
       ...data,
       status: OvertimeStatus.PENDING,
+      approvalStage: stage,
       organizationId,
     });
     return this.overtimeRepo.save(ot);
   }
 
-  async getOvertimeRequests(organizationId: string, employeeId?: string, status?: string) {
+  async getOvertimeRequests(organizationId: string, actingEmployeeId: string, employeeId?: string, status?: string, actingRole?: string) {
     const query = this.overtimeRepo.createQueryBuilder('ot')
       .leftJoinAndSelect('ot.employee', 'emp')
       .leftJoinAndSelect('emp.department', 'dept')
       .where('ot.organizationId = :organizationId', { organizationId });
+
+    const scope = await this.resolveVisibilityScope(actingEmployeeId, organizationId, actingRole);
+    if (!scope.seeAll) {
+      query.andWhere('ot.employeeId IN (:...visibleIds)', { visibleIds: scope.employeeIds.length ? scope.employeeIds : ['__none__'] });
+    }
 
     if (employeeId) query.andWhere('ot.employeeId = :employeeId', { employeeId });
     if (status) query.andWhere('ot.status = :status', { status });
@@ -1454,18 +2246,38 @@ export class HrPayrollService {
     return query.getMany();
   }
 
-  async approveOvertimeRequest(id: string, approved: boolean, approvedHours: number, remarks: string, organizationId: string, userId?: string) {
+  async approveOvertimeRequest(id: string, approved: boolean, approvedHours: number, remarks: string, organizationId: string, actingEmployeeId: string) {
     const ot = await this.overtimeRepo.findOne({ where: { id, organizationId } });
     if (!ot) throw new NotFoundException('Overtime request not found');
+    if (ot.status !== OvertimeStatus.PENDING) throw new BadRequestException('This overtime request has already been decided');
 
-    ot.status = approved ? OvertimeStatus.APPROVED : OvertimeStatus.REJECTED;
-    ot.approvalRemarks = remarks;
-    ot.approvedById = userId;
-    ot.approvedAt = new Date();
-    if (approved) {
-      ot.approvedHours = approvedHours || ot.requestedHours;
-      ot.overtimeAmount = Number((ot.approvedHours * Number(ot.overtimeRate || 0)).toFixed(2));
+    const { deptHeadEmployeeId } = await this.resolveApprovalChain(ot.employeeId, organizationId);
+    await this.assertAuthorizedApprover(actingEmployeeId, organizationId, ot.approvalStage, deptHeadEmployeeId);
+
+    if (!approved) {
+      ot.status = OvertimeStatus.REJECTED;
+      ot.approvalRemarks = remarks;
+      ot.approvedById = actingEmployeeId;
+      ot.approvedAt = new Date();
+      return this.overtimeRepo.save(ot);
     }
+
+    if (ot.approvalStage === ApprovalStage.PENDING_DEPT_HEAD) {
+      ot.deptHeadApprovedById = actingEmployeeId;
+      ot.deptHeadActionAt = new Date();
+      ot.deptHeadRemarks = remarks;
+      ot.approvalStage = ApprovalStage.PENDING_FINAL;
+      // Department Head's suggested hours (if any) carry forward as a starting point for final approval.
+      if (approvedHours) ot.approvedHours = approvedHours;
+      return this.overtimeRepo.save(ot);
+    }
+
+    ot.status = OvertimeStatus.APPROVED;
+    ot.approvalRemarks = remarks;
+    ot.approvedById = actingEmployeeId;
+    ot.approvedAt = new Date();
+    ot.approvedHours = approvedHours || ot.approvedHours || ot.requestedHours;
+    ot.overtimeAmount = Number((ot.approvedHours * Number(ot.overtimeRate || 0)).toFixed(2));
     return this.overtimeRepo.save(ot);
   }
 
@@ -1814,62 +2626,202 @@ export class HrPayrollService {
   // ================= 28. HR REPORTS =================
   async getHrReport(organizationId: string, reportType: string, params: any = {}) {
     switch (reportType) {
-      case 'employee-master':
-        return this.employeeRepo.find({
-          where: { organizationId },
-          relations: ['department', 'designation', 'reportingManager'],
-          order: { employeeCode: 'ASC' },
-        });
+      case 'employee-summary': {
+        const query = this.employeeRepo.createQueryBuilder('emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .leftJoinAndSelect('emp.designation', 'desig')
+          .leftJoinAndSelect('emp.reportingManager', 'mgr')
+          .where('emp.organizationId = :organizationId', { organizationId });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        if (params.status) query.andWhere('emp.status = :status', { status: params.status });
+        query.orderBy('emp.employeeCode', 'ASC');
+        const rows = await query.getMany();
 
-      case 'attendance-report': {
+        const summary = {
+          totalEmployees: rows.length,
+          activeCount: rows.filter((e) => e.status === EmploymentStatus.ACTIVE).length,
+          probationCount: rows.filter((e) => e.status === EmploymentStatus.PROBATION).length,
+          resignedCount: rows.filter((e) => e.status === EmploymentStatus.RESIGNED || e.status === EmploymentStatus.TERMINATED).length,
+        };
+        return { summary, rows };
+      }
+
+      case 'attendance': {
         const query = this.attendanceRepo.createQueryBuilder('att')
           .leftJoinAndSelect('att.employee', 'emp')
           .leftJoinAndSelect('emp.department', 'dept')
           .where('att.organizationId = :organizationId', { organizationId });
-        if (params.fromDate) query.andWhere('att.attendanceDate >= :fromDate', { fromDate: params.fromDate });
-        if (params.toDate) query.andWhere('att.attendanceDate <= :toDate', { toDate: params.toDate });
+        if (params.from) query.andWhere('att.attendanceDate >= :from', { from: params.from });
+        if (params.to) query.andWhere('att.attendanceDate <= :to', { to: params.to });
         if (params.employeeId) query.andWhere('att.employeeId = :employeeId', { employeeId: params.employeeId });
         if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
         query.orderBy('att.attendanceDate', 'DESC');
-        return query.getMany();
+        const rows = await query.getMany();
+
+        const totalWorkHours = rows.reduce((sum, r) => sum + Number(r.workHours || 0), 0);
+        const summary = {
+          totalRecords: rows.length,
+          presentCount: rows.filter((r) => r.status === AttendanceStatus.PRESENT).length,
+          lateCount: rows.filter((r) => r.status === AttendanceStatus.LATE).length,
+          onLeaveCount: rows.filter((r) => r.status === AttendanceStatus.ON_LEAVE).length,
+          avgWorkHours: rows.length ? Number((totalWorkHours / rows.length).toFixed(2)) : 0,
+        };
+        return { summary, rows };
       }
 
-      case 'leave-report': {
+      case 'employee-attendance': {
+        const query = this.attendanceRepo.createQueryBuilder('att')
+          .leftJoinAndSelect('att.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .where('att.organizationId = :organizationId', { organizationId });
+        if (params.from) query.andWhere('att.attendanceDate >= :from', { from: params.from });
+        if (params.to) query.andWhere('att.attendanceDate <= :to', { to: params.to });
+        if (params.employeeId) query.andWhere('att.employeeId = :employeeId', { employeeId: params.employeeId });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        const records = await query.getMany();
+        const grouped = new Map<string, any>();
+        records.forEach((record) => {
+          const key = record.employeeId;
+          const row = grouped.get(key) || { id: key, employee: record.employee, totalDays: 0, presentDays: 0, lateDays: 0, leaveDays: 0, absentDays: 0, totalWorkHours: 0 };
+          row.totalDays += 1;
+          row.totalWorkHours += Number(record.workHours || 0);
+          if (record.status === AttendanceStatus.PRESENT) row.presentDays += 1;
+          else if (record.status === AttendanceStatus.LATE) row.lateDays += 1;
+          else if (record.status === AttendanceStatus.ON_LEAVE) row.leaveDays += 1;
+          else row.absentDays += 1;
+          grouped.set(key, row);
+        });
+        const rows = Array.from(grouped.values()).map((row) => ({ ...row, totalWorkHours: Number(row.totalWorkHours.toFixed(2)), attendanceRate: row.totalDays ? Number((((row.presentDays + row.lateDays) / row.totalDays) * 100).toFixed(1)) : 0 })).sort((a, b) => a.employee?.employeeCode?.localeCompare(b.employee?.employeeCode || '') || 0);
+        return { summary: { totalEmployees: rows.length, presentDays: rows.reduce((sum, row) => sum + row.presentDays, 0), lateDays: rows.reduce((sum, row) => sum + row.lateDays, 0), totalWorkHours: Number(rows.reduce((sum, row) => sum + row.totalWorkHours, 0).toFixed(2)) }, rows };
+      }
+
+      case 'department-attendance': {
+        const query = this.attendanceRepo.createQueryBuilder('att')
+          .leftJoinAndSelect('att.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .where('att.organizationId = :organizationId', { organizationId });
+        if (params.from) query.andWhere('att.attendanceDate >= :from', { from: params.from });
+        if (params.to) query.andWhere('att.attendanceDate <= :to', { to: params.to });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        const records = await query.getMany();
+        const grouped = new Map<string, any>();
+        records.forEach((record) => {
+          const key = record.employee?.departmentId || 'unassigned';
+          const row = grouped.get(key) || { id: key, department: record.employee?.department, totalRecords: 0, employees: new Set<string>(), presentCount: 0, lateCount: 0, leaveCount: 0, absentCount: 0, totalWorkHours: 0 };
+          row.totalRecords += 1; row.employees.add(record.employeeId); row.totalWorkHours += Number(record.workHours || 0);
+          if (record.status === AttendanceStatus.PRESENT) row.presentCount += 1;
+          else if (record.status === AttendanceStatus.LATE) row.lateCount += 1;
+          else if (record.status === AttendanceStatus.ON_LEAVE) row.leaveCount += 1;
+          else row.absentCount += 1;
+          grouped.set(key, row);
+        });
+        const rows = Array.from(grouped.values()).map((row) => ({ ...row, employeeCount: row.employees.size, employees: undefined, totalWorkHours: Number(row.totalWorkHours.toFixed(2)), attendanceRate: row.totalRecords ? Number((((row.presentCount + row.lateCount) / row.totalRecords) * 100).toFixed(1)) : 0 }));
+        return { summary: { totalDepartments: rows.length, totalEmployees: rows.reduce((sum, row) => sum + row.employeeCount, 0), presentCount: rows.reduce((sum, row) => sum + row.presentCount, 0), totalWorkHours: Number(rows.reduce((sum, row) => sum + row.totalWorkHours, 0).toFixed(2)) }, rows };
+      }
+
+      case 'leave': {
         const query = this.leaveRequestRepo.createQueryBuilder('lr')
           .leftJoinAndSelect('lr.employee', 'emp')
           .leftJoinAndSelect('emp.department', 'dept')
           .leftJoinAndSelect('lr.leaveType', 'lt')
           .where('lr.organizationId = :organizationId', { organizationId });
-        if (params.fromDate) query.andWhere('lr.startDate >= :fromDate', { fromDate: params.fromDate });
-        if (params.toDate) query.andWhere('lr.endDate <= :toDate', { toDate: params.toDate });
+        if (params.from) query.andWhere('lr.startDate >= :from', { from: params.from });
+        if (params.to) query.andWhere('lr.endDate <= :to', { to: params.to });
         if (params.status) query.andWhere('lr.status = :status', { status: params.status });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
         query.orderBy('lr.createdAt', 'DESC');
-        return query.getMany();
+        const rows = await query.getMany();
+
+        const summary = {
+          totalRequests: rows.length,
+          approvedCount: rows.filter((r) => r.status === LeaveStatus.APPROVED).length,
+          pendingCount: rows.filter((r) => r.status === LeaveStatus.PENDING).length,
+          rejectedCount: rows.filter((r) => r.status === LeaveStatus.REJECTED).length,
+          totalDaysApproved: rows.filter((r) => r.status === LeaveStatus.APPROVED).reduce((sum, r) => sum + (r.daysCount || 0), 0),
+        };
+        return { summary, rows };
       }
 
-      case 'payroll-report':
-        return this.payrollSheetRepo.find({
-          where: { organizationId },
-          relations: ['items', 'items.employee', 'items.employee.department'],
-          order: { year: 'DESC', month: 'DESC' },
-        });
+      case 'payroll': {
+        // PayrollSheet is a monthly run, not a single date — a day-range picker doesn't
+        // map cleanly onto it, so only department filters here; date range is used by
+        // the other (day-level) report types.
+        const query = this.payrollItemRepo.createQueryBuilder('item')
+          .leftJoinAndSelect('item.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .leftJoinAndSelect('item.payrollSheet', 'sheet')
+          .where('item.organizationId = :organizationId', { organizationId });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        if (params.employeeId) query.andWhere('item.employeeId = :employeeId', { employeeId: params.employeeId });
+        if (params.year) query.andWhere('sheet.year = :year', { year: Number(params.year) });
+        if (params.month) query.andWhere('sheet.month = :month', { month: Number(params.month) });
+        query.orderBy('sheet.year', 'DESC').addOrderBy('sheet.month', 'DESC').addOrderBy('emp.employeeCode', 'ASC');
+        query.take(500);
+        const rows = await query.getMany();
 
-      case 'recruitment-report':
-        return this.jobApplicationRepo.find({
+        const summary = {
+          employeeCount: new Set(rows.map((r) => r.employeeId)).size,
+          totalGross: Number(rows.reduce((sum, r) => sum + Number(r.basicSalary || 0) + Number(r.totalAllowances || 0) + Number(r.commissionsEarned || 0) + Number(r.bonus || 0), 0).toFixed(2)),
+          totalDeductions: Number(rows.reduce((sum, r) => sum + Number(r.unpaidLeaveDeductions || 0) + Number(r.taxDeductions || 0), 0).toFixed(2)),
+          totalNetSalary: Number(rows.reduce((sum, r) => sum + Number(r.netSalary || 0), 0).toFixed(2)),
+        };
+        return { summary, rows };
+      }
+
+      case 'salary':
+        return this.getHrReport(organizationId, 'payroll', params);
+
+      case 'overtime': {
+        const query = this.overtimeRepo.createQueryBuilder('ot')
+          .leftJoinAndSelect('ot.employee', 'emp')
+          .leftJoinAndSelect('emp.department', 'dept')
+          .where('ot.organizationId = :organizationId', { organizationId });
+        if (params.from) query.andWhere('ot.overtimeDate >= :from', { from: params.from });
+        if (params.to) query.andWhere('ot.overtimeDate <= :to', { to: params.to });
+        if (params.status) query.andWhere('ot.status = :status', { status: params.status });
+        if (params.departmentId) query.andWhere('emp.departmentId = :deptId', { deptId: params.departmentId });
+        query.orderBy('ot.overtimeDate', 'DESC');
+        const rows = await query.getMany();
+
+        const summary = {
+          totalRequests: rows.length,
+          approvedCount: rows.filter((r) => r.status === OvertimeStatus.APPROVED).length,
+          pendingCount: rows.filter((r) => r.status === OvertimeStatus.PENDING).length,
+          totalApprovedHours: Number(rows.filter((r) => r.status === OvertimeStatus.APPROVED).reduce((sum, r) => sum + Number(r.approvedHours || 0), 0).toFixed(2)),
+          totalOvertimeAmount: Number(rows.filter((r) => r.status === OvertimeStatus.APPROVED).reduce((sum, r) => sum + Number(r.overtimeAmount || 0), 0).toFixed(2)),
+        };
+        return { summary, rows };
+      }
+
+      case 'recruitment': {
+        const rows = await this.jobApplicationRepo.find({
           where: { organizationId },
           relations: ['jobOpening', 'convertedEmployee'],
           order: { createdAt: 'DESC' },
         });
+        const summary = {
+          totalApplications: rows.length,
+          hiredCount: rows.filter((r) => r.stage === ApplicationStage.HIRED).length,
+          inProgressCount: rows.filter((r) => r.stage !== ApplicationStage.HIRED && r.stage !== ApplicationStage.REJECTED).length,
+        };
+        return { summary, rows };
+      }
 
-      case 'training-report':
-        return this.enrollmentRepo.find({
+      case 'training': {
+        const rows = await this.enrollmentRepo.find({
           where: { organizationId },
           relations: ['trainingProgram', 'employee', 'employee.department'],
           order: { createdAt: 'DESC' },
         });
+        const summary = {
+          totalEnrollments: rows.length,
+          completedCount: rows.filter((r) => r.status === EnrollmentStatus.COMPLETED).length,
+        };
+        return { summary, rows };
+      }
 
       default:
-        throw new BadRequestException(`Unknown report type: ${reportType}`);
+        throw new BadRequestException(`Unknown report type: '${reportType}'. Valid types: employee-summary, attendance, employee-attendance, department-attendance, leave, payroll, salary, overtime, recruitment, training`);
     }
   }
 
