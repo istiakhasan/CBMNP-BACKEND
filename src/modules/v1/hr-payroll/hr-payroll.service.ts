@@ -1723,7 +1723,7 @@ export class HrPayrollService {
    * - Tax & PF Deductions
    * - Active Loan / Salary Advance Monthly EMI Installments (and updates totalPaidAmount on the Loan)
    */
-  async generatePayroll(year: number, month: number, organizationId: string): Promise<PayrollSheet> {
+  async generatePayroll(year: number, month: number, organizationId: string, departmentId?: string): Promise<PayrollSheet> {
     const monthNames = [
       'January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'
@@ -1731,14 +1731,14 @@ export class HrPayrollService {
     const sheetName = `Payroll - ${monthNames[month - 1]} ${year}`;
 
     const existing = await this.payrollSheetRepo.findOne({
-      where: { organizationId, year, month },
+      where: { organizationId, year, month, departmentId: departmentId || null },
     });
     if (existing) {
       throw new BadRequestException(`Payroll sheet for ${monthNames[month - 1]} ${year} already generated`);
     }
 
     const employees = await this.employeeRepo.find({
-      where: { organizationId, status: EmploymentStatus.ACTIVE },
+      where: { organizationId, status: EmploymentStatus.ACTIVE, ...(departmentId ? { departmentId } : {}) },
     });
 
     const structures = await this.salaryStructureRepo.find({ where: { organizationId } });
@@ -1789,6 +1789,7 @@ export class HrPayrollService {
         totalNetSalary: 0,
         status: PayrollStatus.DRAFT,
         organizationId,
+        departmentId: departmentId || null,
       });
 
       const savedSheet = await manager.save(sheet);

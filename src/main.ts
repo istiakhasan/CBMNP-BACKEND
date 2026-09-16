@@ -35,6 +35,7 @@ async function bootstrap() {
       'http://31.97.60.104:3000',
       'http://193.203.160.33:3002',
       'https://erp.tabaya.com',
+      'http://192.168.30.43:3000',
     ],
     methods: ['GET', 'HEAD', 'PUT', 'POST', 'DELETE', 'OPTIONS', 'PATCH'],
     credentials: true,

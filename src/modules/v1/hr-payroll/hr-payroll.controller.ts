@@ -617,9 +617,9 @@ export class HrPayrollController {
   }
 
   @Post('payroll/generate')
-  async generatePayroll(@Body() body: { year: number; month: number }, @Req() req: Request) {
+  async generatePayroll(@Body() body: { year: number; month: number; departmentId?: string }, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.generatePayroll(body.year, body.month, orgId);
+    const result = await this.hrPayrollService.generatePayroll(body.year, body.month, orgId, body.departmentId);
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Monthly payroll generated', data: result };
   }
 

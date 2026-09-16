@@ -973,6 +973,69 @@ export class OrderService {
   }
 
   // get order reports
+  async getMonthlySalesCourierReport(month: string, organizationId: string) {
+    if (!/^\d{4}-\d{2}$/.test(month)) {
+      throw new BadRequestException('month must use YYYY-MM format');
+    }
+
+    // The report follows Bangladesh calendar dates.  The upper bound is
+    // exclusive so records created at 23:59:59.999 are included safely.
+    const [year, monthNumber] = month.split('-').map(Number);
+    const startDate = new Date(Date.UTC(year, monthNumber - 1, 1, -6));
+    const endDate = new Date(Date.UTC(year, monthNumber, 1, -6));
+
+    const orderTotals = await this.orderRepository
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('orders.createdAt >= :startDate AND orders.createdAt < :endDate', {
+        startDate,
+        endDate,
+      })
+      .select('COUNT(orders.id)', 'totalOrders')
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalSales')
+      .addSelect('COALESCE(SUM(orders.totalPaidAmount), 0)', 'advanceCollected')
+      .addSelect('COALESCE(SUM(orders.totalReceiveAbleAmount), 0)', 'courierReceivable')
+      .addSelect('COALESCE(SUM(orders.deliveryCharge), 0)', 'courierDeliveryCharge')
+      .addSelect('COALESCE(SUM(orders.shippingCharge), 0)', 'customerDeliveryCharge')
+      .getRawOne();
+
+    // Returns are grouped by their actual return date, not the original order
+    // creation date.  The saved order-line price keeps historical values
+    // correct even if a product's current sale price later changes.
+    const returnTotals = await this.orderRepository.manager
+      .getRepository(OrderProductReturn)
+      .createQueryBuilder('returns')
+      .innerJoin('returns.order', 'orders')
+      .leftJoin(
+        Products,
+        'orderProduct',
+        'orderProduct.orderId = returns.orderId AND orderProduct.productId = returns.productId',
+      )
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('returns.returnDate >= :startDate AND returns.returnDate < :endDate', {
+        startDate,
+        endDate,
+      })
+      .select('COALESCE(SUM(returns.returnQuantity), 0)', 'returnQuantity')
+      .addSelect(
+        'COALESCE(SUM(returns.returnQuantity * COALESCE(orderProduct.productPrice, 0)), 0)',
+        'returnValue',
+      )
+      .getRawOne();
+
+    return {
+      month,
+      totalOrders: Number(orderTotals?.totalOrders) || 0,
+      totalSales: Number(orderTotals?.totalSales) || 0,
+      advanceCollected: Number(orderTotals?.advanceCollected) || 0,
+      courierReceivable: Number(orderTotals?.courierReceivable) || 0,
+      courierDeliveryCharge: Number(orderTotals?.courierDeliveryCharge) || 0,
+      customerDeliveryCharge: Number(orderTotals?.customerDeliveryCharge) || 0,
+      returnQuantity: Number(returnTotals?.returnQuantity) || 0,
+      returnValue: Number(returnTotals?.returnValue) || 0,
+    };
+  }
+
 async getOrdersReports(options, filterOptions, organizationId) {
   const { sortBy, sortOrder, limit, page, skip } =
     paginationHelpers(options);

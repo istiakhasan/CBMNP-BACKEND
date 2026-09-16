@@ -139,6 +139,20 @@ export class OrderController {
       },
     };
   }
+  @Get('/monthly-sales-courier-report')
+  async getMonthlySalesCourierReport(@Query('month') month: string, @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'] as string;
+    const data = await this.orderService.getMonthlySalesCourierReport(
+      month,
+      organizationId,
+    );
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: 'Monthly sales and courier report retrieved successfully',
+      data,
+    };
+  }
   @Get('/product-sales-report')
   async getProductWiseSalesReports(@Query() query, @Req() req: Request) {
     const organizationId = req.headers['x-organization-id'];

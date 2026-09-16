@@ -21,6 +21,8 @@ export enum PayrollStatus {
 @Entity({ name: 'payroll_sheets' })
 @Index(['organizationId', 'year', 'month'], { unique: true })
 export class PayrollSheet {
+  @Column({ type: 'uuid', nullable: true })
+  departmentId: string;
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
