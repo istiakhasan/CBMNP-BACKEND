@@ -629,18 +629,38 @@ export class HrPayrollService {
       if (!item.biometricUserId) continue;
 
       const punchDateObj = new Date(item.timestamp);
+      if (Number.isNaN(punchDateObj.getTime())) continue;
+      const biometricUserId = item.biometricUserId.trim();
+
+      // A device can be deleted/re-registered or resend its complete history.
+      // The old device ID may be gone, but a physical punch is still uniquely
+      // identified within an organization by the machine user ID and timestamp.
+      // Do not create another audit log or increase the device punch count.
+      const existingPunch = await this.punchLogRepo.findOne({
+        where: { organizationId, biometricUserId, punchTime: punchDateObj },
+      });
+      if (existingPunch) {
+        // A re-registered device has a new database ID. Relink the existing
+        // audit log to it so its "Punched today" and total counters remain
+        // correct without creating a second punch.
+        if (device && existingPunch.deviceId !== device.id) {
+          await this.punchLogRepo.update(existingPunch.id, { deviceId: device.id });
+        }
+        continue;
+      }
+
       const { date: attendanceDate, time: punchTimeStr } = this.getBangladeshDateTime(punchDateObj);
 
       const employee = await this.employeeRepo.findOne({
         where: [
-          { organizationId, biometricUserId: item.biometricUserId.trim() },
-          { organizationId, employeeCode: item.biometricUserId.trim() },
+          { organizationId, biometricUserId },
+          { organizationId, employeeCode: biometricUserId },
         ],
       });
 
       const punchLog = this.punchLogRepo.create({
         deviceId: device?.id || undefined,
-        biometricUserId: item.biometricUserId.trim(),
+        biometricUserId,
         punchTime: punchDateObj,
         punchType: (item.punchType as any) || PunchDirection.AUTO,
         verifyType: item.verifyType || 'Fingerprint',
@@ -715,7 +735,11 @@ export class HrPayrollService {
 
     if (device) {
       device.lastSyncAt = new Date();
-      device.totalPunchesRecorded = (device.totalPunchesRecorded || 0) + processedCount;
+      // Compute from stored unique logs. This avoids an inflated count when a
+      // device is removed and later registered again.
+      device.totalPunchesRecorded = await this.punchLogRepo.count({
+        where: { organizationId, deviceId: device.id },
+      });
       await this.biometricDeviceRepo.save(device);
     }
 

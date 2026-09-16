@@ -11,8 +11,6 @@
  * BIOMETRIC_DEVICE_API_KEY=<production device API key>
  * BIOMETRIC_CLOUD_API_URL=https://api.tabaya.com/api/v1
  */
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const ZKLib = require('node-zklib');
 
@@ -34,23 +32,8 @@ const config = {
   apiBaseUrl: process.env.BIOMETRIC_CLOUD_API_URL.replace(/\/$/, ''),
   intervalMs: Number(process.env.BIOMETRIC_SYNC_INTERVAL_MS || 60_000),
 };
-const stateFile = path.join(__dirname, '.biometric-lan-sync-state.json');
 const attendanceBatchSize = Number(process.env.BIOMETRIC_ATTENDANCE_BATCH_SIZE || 100);
 let syncing = false;
-
-function readState() {
-  try {
-    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  } catch {
-    return { lastRecordTime: 0 };
-  }
-}
-
-function saveState(state) {
-  const temporary = `${stateFile}.tmp`;
-  fs.writeFileSync(temporary, JSON.stringify(state));
-  fs.renameSync(temporary, stateFile);
-}
 
 function bangladeshDate(value) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -72,14 +55,15 @@ async function sync() {
     const { data: attendance = [] } = await device.getAttendances();
     const { data: enrolledUsers = [] } = await device.getUsers();
 
-    const state = readState();
     const todayInBangladesh = bangladeshDate(new Date());
+    // Re-send today's records on every run. The API de-duplicates by
+    // organization + device user + timestamp, and can therefore relink a
+    // record after an administrator re-registers the same physical device.
     const freshAttendance = attendance
       .filter(
         (row) =>
           row?.recordTime &&
-          bangladeshDate(row.recordTime) === todayInBangladesh &&
-          new Date(row.recordTime).getTime() > Number(state.lastRecordTime || 0),
+          bangladeshDate(row.recordTime) === todayInBangladesh,
       )
       .sort((a, b) => new Date(a.recordTime).getTime() - new Date(b.recordTime).getTime());
 
@@ -99,9 +83,6 @@ async function sync() {
           },
           { headers, timeout: 30_000 },
         );
-        // Persist after every successful batch. A restart resumes from the
-        // last confirmed batch instead of sending the whole historical set again.
-        saveState({ lastRecordTime: new Date(batch.at(-1).recordTime).getTime() });
       }
     }
 

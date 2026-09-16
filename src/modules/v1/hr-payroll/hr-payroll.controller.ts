@@ -205,6 +205,14 @@ export class HrPayrollController {
     };
   }
 
+  @Get('biometric/devices/:id/enrolled-users/cache')
+  @ApiOperation({ summary: 'Last enrolled-user roster cached by an office-LAN biometric sync' })
+  async getCachedEnrolledDeviceUsers(@Param('id') id: string, @Req() req: Request) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const data = await this.hrPayrollService.getCachedEnrolledDeviceUsers(id, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: { ...data, source: 'cache' } };
+  }
+
   // ================= WORK SHIFTS & HOLIDAYS =================
   @Get('shifts')
   async getShifts(@Req() req: Request) {
