@@ -18,7 +18,8 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "seed:permission": "ts-node -r tsconfig-paths/register src/database/seeds/permission.seed.ts"
+    "seed:permission": "ts-node -r tsconfig-paths/register src/database/seeds/permission.seed.ts",
+    "biometric:lan-sync": "node --env-file=.env scripts/biometric-lan-sync.js"
   },
   "dependencies": {
     "@nestjs/axios": "^4.0.0",

@@ -21,6 +21,9 @@ async function bootstrap() {
   SwaggerModule.setup('api-docs', app, document);
   app.use(
     express.json({
+      // Biometric devices can send a backlog after an outage. Keep this bounded
+      // while allowing a legitimate roster/attendance sync to reach the API.
+      limit: process.env.REQUEST_BODY_LIMIT || '10mb',
       verify: (req: any, res, buf) => {
         req.rawBody = buf.toString();
       },

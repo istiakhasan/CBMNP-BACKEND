@@ -13,6 +13,7 @@ import { CommissionRule } from './entities/commission-rule.entity';
 import { CommissionRecord } from './entities/commission-record.entity';
 import { SalesTarget } from './entities/sales-target.entity';
 import { BiometricDevice } from './entities/biometric-device.entity';
+import { BiometricEnrolledUser } from './entities/biometric-enrolled-user.entity';
 import { BiometricPunchLog } from './entities/biometric-punch-log.entity';
 import { WorkShift } from './entities/work-shift.entity';
 import { JobOpening } from './entities/job-opening.entity';
@@ -59,6 +60,7 @@ import { BiometricDevicePollerService } from './biometric-device-poller.service'
       CommissionRecord,
       SalesTarget,
       BiometricDevice,
+      BiometricEnrolledUser,
       BiometricPunchLog,
       WorkShift,
       JobOpening,

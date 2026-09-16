@@ -21,6 +21,7 @@ import { CommissionRule, CommissionType } from './entities/commission-rule.entit
 import { CommissionRecord, CommissionRecordStatus } from './entities/commission-record.entity';
 import { SalesTarget } from './entities/sales-target.entity';
 import { BiometricDevice } from './entities/biometric-device.entity';
+import { BiometricEnrolledUser } from './entities/biometric-enrolled-user.entity';
 import { BiometricPunchLog, PunchDirection } from './entities/biometric-punch-log.entity';
 import { WorkShift } from './entities/work-shift.entity';
 import { JobOpening } from './entities/job-opening.entity';
@@ -78,6 +79,8 @@ export class HrPayrollService {
     private readonly salesTargetRepo: Repository<SalesTarget>,
     @InjectRepository(BiometricDevice)
     private readonly biometricDeviceRepo: Repository<BiometricDevice>,
+    @InjectRepository(BiometricEnrolledUser)
+    private readonly biometricEnrolledUserRepo: Repository<BiometricEnrolledUser>,
     @InjectRepository(BiometricPunchLog)
     private readonly punchLogRepo: Repository<BiometricPunchLog>,
     @InjectRepository(WorkShift)
@@ -739,7 +742,7 @@ export class HrPayrollService {
   // Cross-references a device's raw enrolled-user roster (deviceUserId, name) against
   // our employees table so the UI can show which device users are mapped to real staff.
   async attachEmployeeMapping(
-    users: Array<{ deviceUserId: string; name: string; cardNumber?: number | null }>,
+    users: Array<{ deviceUserId: string; name: string; cardNumber?: string | number | null }>,
     organizationId: string,
   ) {
     if (users.length === 0) return [];
@@ -761,6 +764,85 @@ export class HrPayrollService {
       employee: byId.get(u.deviceUserId) || null,
       matched: byId.has(u.deviceUserId),
     }));
+  }
+
+  /** Store a complete device roster. Upsert prevents duplicate entries on repeat syncs. */
+  async cacheEnrolledDeviceUsers(
+    deviceId: string,
+    organizationId: string,
+    users: Array<{ deviceUserId: string; name?: string; cardNumber?: string | number | null }>,
+  ) {
+    const device = await this.biometricDeviceRepo.findOne({ where: { id: deviceId, organizationId } });
+    if (!device) throw new NotFoundException('Biometric device not found');
+
+    const uniqueUsers = Array.from(
+      new Map(
+        (users || [])
+          .filter((user) => user?.deviceUserId !== undefined && user?.deviceUserId !== null)
+          .map((user) => [String(user.deviceUserId), user]),
+      ).values(),
+    );
+    const syncedAt = new Date();
+
+    if (uniqueUsers.length) {
+      await this.biometricEnrolledUserRepo.upsert(
+        uniqueUsers.map((user) => ({
+          organizationId,
+          deviceId,
+          deviceUserId: String(user.deviceUserId),
+          name: user.name?.trim() || null,
+          cardNumber: user.cardNumber === undefined || user.cardNumber === null ? null : String(user.cardNumber),
+          lastSyncedAt: syncedAt,
+        })),
+        ['organizationId', 'deviceId', 'deviceUserId'],
+      );
+      await this.biometricEnrolledUserRepo
+        .createQueryBuilder()
+        .delete()
+        .where('organizationId = :organizationId AND deviceId = :deviceId', { organizationId, deviceId })
+        .andWhere('deviceUserId NOT IN (:...deviceUserIds)', {
+          deviceUserIds: uniqueUsers.map((user) => String(user.deviceUserId)),
+        })
+        .execute();
+    } else {
+      // An authenticated empty roster is also a valid device response.
+      await this.biometricEnrolledUserRepo.delete({ organizationId, deviceId });
+    }
+
+    return this.getCachedEnrolledDeviceUsers(deviceId, organizationId);
+  }
+
+  async getCachedEnrolledDeviceUsers(deviceId: string, organizationId: string) {
+    const rows = await this.biometricEnrolledUserRepo.find({
+      where: { organizationId, deviceId },
+      order: { deviceUserId: 'ASC' },
+    });
+    const users = await this.attachEmployeeMapping(
+      rows.map((row) => ({
+        deviceUserId: row.deviceUserId,
+        name: row.name || `User ${row.deviceUserId}`,
+        cardNumber: row.cardNumber || null,
+      })),
+      organizationId,
+    );
+    return {
+      users,
+      lastSyncedAt: rows.reduce<Date | null>(
+        (latest, row) => (!latest || row.lastSyncedAt > latest ? row.lastSyncedAt : latest),
+        null,
+      ),
+    };
+  }
+
+  /** API-key authenticated intake used by an office-LAN sync script. */
+  async receiveEnrolledDeviceUsers(
+    deviceId: string,
+    apiKey: string,
+    users: Array<{ deviceUserId: string; name?: string; cardNumber?: string | number | null }>,
+  ) {
+    const device = await this.biometricDeviceRepo.findOne({ where: { id: deviceId, apiKey } });
+    if (!device) throw new UnauthorizedException('Invalid biometric device credentials');
+    return this.cacheEnrolledDeviceUsers(device.id, device.organizationId, users);
   }
 
   // ================= 3. WORK SHIFTS & HOLIDAYS =================

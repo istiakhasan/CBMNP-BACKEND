@@ -1,4 +1,4 @@
-import { Controller, Post, Body, Headers, Req } from '@nestjs/common';
+import { Controller, Post, Body, Headers, Req, Param } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiHeader } from '@nestjs/swagger';
 import { HrPayrollService } from './hr-payroll.service';
 import { Request } from 'express';
@@ -24,5 +24,26 @@ export class BiometricWebhookController {
     const apiKey = headerApiKey || body?.apiKey;
     const result = await this.hrPayrollService.processBiometricSync(apiKey, body, orgId);
     return { success: true, statusCode: 200, ...result };
+  }
+
+  @Post('devices/:deviceId/enrolled-users/sync')
+  @ApiOperation({ summary: 'Save the enrolled-device roster sent by an office-LAN sync agent' })
+  @ApiHeader({ name: 'x-device-api-key', required: false, description: 'Biometric device API key' })
+  async syncEnrolledUsers(
+    @Param('deviceId') deviceId: string,
+    @Body() body: any,
+    @Headers('x-device-api-key') headerApiKey: string,
+  ) {
+    const result = await this.hrPayrollService.receiveEnrolledDeviceUsers(
+      deviceId,
+      headerApiKey || body?.apiKey,
+      Array.isArray(body?.users) ? body.users : [],
+    );
+    return {
+      success: true,
+      statusCode: 200,
+      message: `${result.users.length} enrolled user(s) saved`,
+      data: result,
+    };
   }
 }

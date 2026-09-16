@@ -183,8 +183,26 @@ export class HrPayrollController {
   async getEnrolledDeviceUsers(@Param('id') id: string, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
     const result = await this.biometricPollerService.getEnrolledUsers(id, orgId);
+    if (!result.success) {
+      const cached = await this.hrPayrollService.getCachedEnrolledDeviceUsers(id, orgId);
+      if (cached.users.length) {
+        return {
+          success: true,
+          statusCode: HttpStatus.OK,
+          message: `Showing ${cached.users.length} cached enrolled user(s); live device is unreachable.`,
+          data: { ...cached, source: 'cache' },
+        };
+      }
+      return { success: false, statusCode: HttpStatus.OK, message: result.message, data: { users: [] } };
+    }
+    const cached = await this.hrPayrollService.cacheEnrolledDeviceUsers(id, orgId, result.users);
     const users = await this.hrPayrollService.attachEmployeeMapping(result.users, orgId);
-    return { success: result.success, statusCode: HttpStatus.OK, message: result.message, data: { users } };
+    return {
+      success: true,
+      statusCode: HttpStatus.OK,
+      message: result.message,
+      data: { users, lastSyncedAt: cached.lastSyncedAt, source: 'live' },
+    };
   }
 
   // ================= WORK SHIFTS & HOLIDAYS =================
