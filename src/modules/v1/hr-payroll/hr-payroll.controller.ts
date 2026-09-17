@@ -292,10 +292,10 @@ export class HrPayrollController {
     const orgId = req.headers['x-organization-id'] as string;
     const userId = req.user?.userId || req.user?.id;
     const startedAt = Date.now();
-    this.logger.log(`[SelfServiceProfile] started for organization ${orgId || 'missing'}`);
     try {
       const result = await this.hrPayrollService.getSelfServiceProfile(userId, orgId);
-      this.logger.log(`[SelfServiceProfile] completed in ${Date.now() - startedAt}ms`);
+      const elapsed = Date.now() - startedAt;
+      if (elapsed > 1000) this.logger.warn(`[SelfServiceProfile] slow response: ${elapsed}ms`);
       return { success: true, statusCode: HttpStatus.OK, data: result };
     } catch (error: any) {
       this.logger.error(`[SelfServiceProfile] failed after ${Date.now() - startedAt}ms: ${error?.message || 'Unknown error'}`);
