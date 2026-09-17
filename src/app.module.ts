@@ -51,7 +51,9 @@ import { GarmentsModule } from './modules/v1/garments/garments.module';
 @Module({
   imports: [
     ServeStaticModule.forRoot({
-      rootPath: join(__dirname, '..', 'uploads'),
+      // Uploads are written to the project-level `uploads` directory. Using
+      // process.cwd() keeps this same directory in dev and compiled/PM2 builds.
+      rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/api/v1/images/',
     }),
     ConfigModule.forRoot({ isGlobal: true }),

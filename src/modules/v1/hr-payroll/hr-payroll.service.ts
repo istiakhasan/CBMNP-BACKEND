@@ -649,7 +649,7 @@ export class HrPayrollService {
         continue;
       }
 
-      const { date: attendanceDate, time: punchTimeStr } = this.getBangladeshDateTime(punchDateObj);
+      const { date: attendanceDate } = this.getBangladeshDateTime(punchDateObj);
 
       const employee = await this.employeeRepo.findOne({
         where: [
@@ -679,49 +679,62 @@ export class HrPayrollService {
         const graceMinutes = shift?.graceMinutes !== undefined ? shift.graceMinutes : 15;
         const standardHours = shift?.fullDayHours || 8;
 
-        let record = await this.attendanceRepo.findOne({
-          where: { organizationId, employeeId: employee.id, attendanceDate },
-        });
-
-        if (!record) {
-          const [sH, sM] = shiftStartTime.split(':').map(Number);
-          const [pH, pM] = punchTimeStr.split(':').map(Number);
-          const shiftMinutes = sH * 60 + sM + graceMinutes;
-          const punchMinutes = pH * 60 + pM;
-
-          let lateMins = 0;
-          let status = AttendanceStatus.PRESENT;
-          if (punchMinutes > shiftMinutes) {
-            lateMins = punchMinutes - (sH * 60 + sM);
-            status = AttendanceStatus.LATE;
-          }
-
-          record = this.attendanceRepo.create({
-            employeeId: employee.id,
-            attendanceDate,
-            clockInTime: punchTimeStr,
-            status,
-            lateMinutes: lateMins,
-            punchSource: PunchSource.BIOMETRIC,
-            deviceId: device?.id || undefined,
-            remarks: `Biometric Punch (${item.verifyType || 'Fingerprint'}) via ${device?.name || 'Device API'}`,
+        // All devices feed the same employee-day timeline.  Derive attendance
+        // from timestamps, rather than from the order devices happen to sync:
+        // earliest punch = check-in, latest punch = check-out.
+        const dayStart = new Date(`${attendanceDate}T00:00:00+06:00`);
+        const dayEnd = new Date(`${attendanceDate}T23:59:59.999+06:00`);
+        const dayPunches = await this.punchLogRepo.find({
+          where: {
             organizationId,
-          });
-        } else {
-          record.clockOutTime = punchTimeStr;
-          record.punchSource = PunchSource.BIOMETRIC;
+            matchedEmployeeId: employee.id,
+            punchTime: Between(dayStart, dayEnd),
+          },
+          order: { punchTime: 'ASC' },
+        });
+        const firstPunch = dayPunches[0];
+        const lastPunch = dayPunches.at(-1);
+        const firstPunchTime = this.getBangladeshDateTime(firstPunch.punchTime).time;
+        const lastPunchTime = this.getBangladeshDateTime(lastPunch.punchTime).time;
+        const [shiftHour, shiftMinute] = shiftStartTime.split(':').map(Number);
+        const [firstHour, firstMinute] = firstPunchTime.split(':').map(Number);
+        const lateMinutes = Math.max(0, firstHour * 60 + firstMinute - (shiftHour * 60 + shiftMinute + graceMinutes));
+        const hasCheckout = dayPunches.length > 1 && lastPunch.punchTime.getTime() > firstPunch.punchTime.getTime();
+        const workHours = hasCheckout
+          ? Math.max(0, Number(((lastPunch.punchTime.getTime() - firstPunch.punchTime.getTime()) / 3_600_000).toFixed(2)))
+          : 0;
 
-          if (record.clockInTime) {
-            const [inH, inM, inS] = record.clockInTime.split(':').map(Number);
-            const [outH, outM, outS] = punchTimeStr.split(':').map(Number);
-            const totalSecs = (outH * 3600 + outM * 60 + (outS || 0)) - (inH * 3600 + inM * 60 + (inS || 0));
-            const hours = Math.max(0, Number((totalSecs / 3600).toFixed(2)));
-            record.workHours = hours;
+        let record = await this.attendanceRepo.findOne({ where: { organizationId, employeeId: employee.id, attendanceDate } });
+        const isAppStartedDay = !!record?.clockInTime && [PunchSource.MOBILE, PunchSource.WEB_MANUAL].includes(record.punchSource);
 
-            if (hours > standardHours) {
-              record.overtimeMinutes = Math.round((hours - standardHours) * 60);
-            }
+        if (isAppStartedDay) {
+          // A mobile check-in is already the authoritative first event.  The
+          // first biometric punch AFTER it becomes checkout (and a later punch
+          // from another device moves that checkout forward).  Never replace
+          // the app's check-in with a device timestamp.
+          const appIn = new Date(`${attendanceDate}T${record!.clockInTime}+06:00`);
+          const checkoutPunch = [...dayPunches].reverse().find((punch) => punch.punchTime.getTime() > appIn.getTime());
+          if (checkoutPunch) {
+            const checkoutTime = this.getBangladeshDateTime(checkoutPunch.punchTime).time;
+            record!.clockOutTime = checkoutTime;
+            record!.workHours = Math.max(0, Number(((checkoutPunch.punchTime.getTime() - appIn.getTime()) / 3_600_000).toFixed(2)));
+            record!.overtimeMinutes = record!.workHours > standardHours ? Math.round((record!.workHours - standardHours) * 60) : 0;
+            record!.deviceId = checkoutPunch.deviceId || device?.id || null;
+            record!.remarks = [record!.remarks, `Biometric checkout from ${checkoutPunch.deviceId ? 'device' : 'sync'} at ${checkoutTime}`].filter(Boolean).join(' | ');
           }
+        } else {
+          if (!record) {
+            record = this.attendanceRepo.create({ employeeId: employee.id, attendanceDate, organizationId });
+          }
+          record.clockInTime = firstPunchTime;
+          record.clockOutTime = hasCheckout ? lastPunchTime : null;
+          record.status = lateMinutes > 0 ? AttendanceStatus.LATE : AttendanceStatus.PRESENT;
+          record.lateMinutes = lateMinutes;
+          record.workHours = workHours;
+          record.overtimeMinutes = workHours > standardHours ? Math.round((workHours - standardHours) * 60) : 0;
+          record.punchSource = PunchSource.BIOMETRIC;
+          record.deviceId = firstPunch.deviceId || device?.id || null;
+          record.remarks = `Biometric attendance from ${dayPunches.length} punch(es) across ${new Set(dayPunches.map((punch) => punch.deviceId).filter(Boolean)).size || 1} device(s)`;
         }
 
         const savedRecord = await this.attendanceRepo.save(record);
@@ -1199,7 +1212,19 @@ export class HrPayrollService {
         finalApprovedBy: leave.approvedById ? approverDetails.get(leave.approvedById) || { name: 'Final Approver', title: 'Final Approver' } : null,
       },
     }));
-    return { user: profile, employee, attendance, leaves: enhancedLeaves, holidays, leaveBalances };
+    // Keep a small, explicit office payload for web and mobile attendance clients.
+    // Returning it independently of the Employee relation prevents serializers or
+    // future employee-list projections from accidentally removing geofence data.
+    const attendanceOffice = employee.office ? {
+      id: employee.office.id,
+      name: employee.office.name,
+      address: employee.office.address,
+      latitude: Number(employee.office.latitude),
+      longitude: Number(employee.office.longitude),
+      radiusMeters: Number(employee.office.radiusMeters || 100),
+      isActive: employee.office.isActive,
+    } : null;
+    return { user: profile, employee, attendanceOffice, attendance, leaves: enhancedLeaves, holidays, leaveBalances };
   }
 
   async deleteEmployee(id: string, organizationId: string): Promise<{ success: boolean }> {
@@ -1235,7 +1260,7 @@ export class HrPayrollService {
   }
 
   // ================= 5. ATTENDANCE & ROSTER =================
-  async clockIn(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string): Promise<AttendanceRecord> {
+  async clockIn(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string, source: PunchSource = PunchSource.WEB_MANUAL): Promise<AttendanceRecord> {
     const now = new Date();
     const { date: today, time: timeStr } = this.getBangladeshDateTime(now);
 
@@ -1282,12 +1307,12 @@ export class HrPayrollService {
     }
 
     record = record
-      ? this.attendanceRepo.merge(record, { clockInTime: timeStr, clockOutTime: null, workHours: null, status, lateMinutes: lateMins, punchSource: PunchSource.WEB_MANUAL, remarks: remarks || record.remarks || null })
-      : this.attendanceRepo.create({ employeeId, attendanceDate: today, clockInTime: timeStr, status, lateMinutes: lateMins, punchSource: PunchSource.WEB_MANUAL, remarks: remarks || null, organizationId });
+      ? this.attendanceRepo.merge(record, { clockInTime: timeStr, clockOutTime: null, workHours: null, status, lateMinutes: lateMins, punchSource: source, remarks: remarks || record.remarks || null })
+      : this.attendanceRepo.create({ employeeId, attendanceDate: today, clockInTime: timeStr, status, lateMinutes: lateMins, punchSource: source, remarks: remarks || null, organizationId });
     return this.attendanceRepo.save(record);
   }
 
-  async clockOut(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string): Promise<AttendanceRecord> {
+  async clockOut(employeeId: string, organizationId: string, latitude?: number, longitude?: number, remarks?: string, source: PunchSource = PunchSource.WEB_MANUAL): Promise<AttendanceRecord> {
     const now = new Date();
     const { date: today, time: timeStr } = this.getBangladeshDateTime(now);
 
@@ -1299,6 +1324,7 @@ export class HrPayrollService {
     await this.validateOfficeRange(organizationId, employee?.officeId, latitude, longitude);
 
     record.clockOutTime = timeStr;
+    record.punchSource = source;
     if (remarks) record.remarks = record.remarks ? `${record.remarks} | Check-out: ${remarks}` : `Check-out: ${remarks}`;
     if (record.clockInTime) {
       const [inH, inM] = record.clockInTime.split(':').map(Number);
@@ -1519,11 +1545,22 @@ export class HrPayrollService {
   }
 
   async getLeaveBalances(employeeId: string, organizationId: string) {
+    // Leave types define an annual quota. Count only approved leave in the
+    // current calendar year; rejected and pending applications never consume
+    // an employee's balance.
+    const leaveYear = new Date().getFullYear();
+    const leaveYearStart = `${leaveYear}-01-01`;
+    const leaveYearEnd = `${leaveYear}-12-31`;
     const [employee, leaveTypes, approvedRequests] = await Promise.all([
       this.employeeRepo.findOne({ where: { id: employeeId, organizationId } }),
       this.leaveTypeRepo.find({ where: { organizationId, isActive: true } }),
       this.leaveRequestRepo.find({
-        where: { employeeId, organizationId, status: LeaveStatus.APPROVED },
+        where: {
+          employeeId,
+          organizationId,
+          status: LeaveStatus.APPROVED,
+          startDate: Between(leaveYearStart, leaveYearEnd),
+        },
       }),
     ]);
 
@@ -2313,6 +2350,30 @@ export class HrPayrollService {
     if (record) {
       if (correction.requestedClockIn) record.clockInTime = correction.requestedClockIn;
       if (correction.requestedClockOut) record.clockOutTime = correction.requestedClockOut;
+
+      // A reconciliation changes the source check-in time, therefore Late and
+      // lateMinutes must be derived again from the employee's assigned shift.
+      // Keeping the old values here caused an approved on-time correction to
+      // remain visible as Late in both ERP and the mobile app.
+      if (record.clockInTime) {
+        const employee = await this.employeeRepo.findOne({
+          where: { id: correction.employeeId, organizationId },
+        });
+        const shift = employee ? await this.resolveShiftForEmployee(employee, organizationId) : null;
+        const [shiftHour, shiftMinute] = (shift?.startTime || '09:00:00').split(':').map(Number);
+        const graceMinutes = shift?.graceMinutes ?? 15;
+        const [clockInHour, clockInMinute] = record.clockInTime.split(':').map(Number);
+        const scheduledMinutes = shiftHour * 60 + shiftMinute;
+        const clockInMinutes = clockInHour * 60 + clockInMinute;
+
+        if (clockInMinutes > scheduledMinutes + graceMinutes) {
+          record.status = AttendanceStatus.LATE;
+          record.lateMinutes = clockInMinutes - scheduledMinutes;
+        } else {
+          record.status = AttendanceStatus.PRESENT;
+          record.lateMinutes = 0;
+        }
+      }
       if (record.clockInTime && record.clockOutTime) {
         const [inH, inM] = record.clockInTime.split(':').map(Number);
         const [outH, outM] = record.clockOutTime.split(':').map(Number);

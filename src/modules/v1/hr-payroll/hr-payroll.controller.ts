@@ -10,14 +10,20 @@ import {
   Patch,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   ForbiddenException,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { HrPayrollService } from './hr-payroll.service';
 import { BiometricDevicePollerService } from './biometric-device-poller.service';
 import { AuthGuard } from '../../../middleware/auth.guard';
 import { Request } from 'express';
+import { PunchSource } from './entities/attendance-record.entity';
+import { uploadFiles } from '../../../util/file-upload.util';
 
 @ApiTags('HR & Payroll Enterprise')
 @Controller('v1/hr-payroll')
@@ -287,6 +293,27 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
+  @Post('self-service/profile-photo')
+  @UseInterceptors(FileInterceptor('photo', {
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: (_req, file, callback) => {
+      callback(null, /^image\/(jpeg|jpg|png|webp)$/.test(file.mimetype));
+    },
+  }))
+  @ApiOperation({ summary: 'Upload the current employee profile picture' })
+  async uploadSelfServiceProfilePhoto(@UploadedFile() photo: Express.Multer.File | undefined, @Req() req: any) {
+    if (!photo) throw new BadRequestException('Upload a JPG, PNG, or WEBP image up to 5 MB.');
+    const organizationId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, organizationId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+
+    const [fileName] = await uploadFiles([photo], './uploads/profile-photos');
+    const profilePhoto = `/api/v1/images/profile-photos/${fileName}`;
+    const updatedEmployee = await this.hrPayrollService.updateEmployee(employee.id, { profilePhoto }, organizationId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Profile picture updated', data: { profilePhoto, employee: updatedEmployee } };
+  }
+
   @Post('self-service/leaves')
   @ApiOperation({ summary: 'Apply for leave as the current employee' })
   async applySelfServiceLeave(@Body() data: any, @Req() req: any) {
@@ -296,6 +323,17 @@ export class HrPayrollController {
     if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
     const result = await this.hrPayrollService.applyLeave({ ...data, employeeId: employee.id }, orgId);
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Leave application submitted', data: result };
+  }
+
+  @Post('self-service/attendance-corrections')
+  @ApiOperation({ summary: 'Submit an attendance reconciliation request as the current employee' })
+  async submitSelfServiceAttendanceCorrection(@Body() data: any, @Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, orgId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    const result = await this.hrPayrollService.submitAttendanceCorrection({ ...data, employeeId: employee.id }, orgId);
+    return { success: true, statusCode: HttpStatus.CREATED, message: 'Attendance reconciliation submitted', data: result };
   }
 
   @Get('employees/:id')
@@ -339,16 +377,16 @@ export class HrPayrollController {
   }
 
   @Post('attendance/clock-in')
-  async clockIn(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string }, @Req() req: Request) {
+  async clockIn(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string; source?: 'Mobile' | 'WebManual' }, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.clockIn(body.employeeId, orgId, body.latitude, body.longitude, body.remarks);
+    const result = await this.hrPayrollService.clockIn(body.employeeId, orgId, body.latitude, body.longitude, body.remarks, body.source === 'Mobile' ? PunchSource.MOBILE : PunchSource.WEB_MANUAL);
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Clock-in recorded', data: result };
   }
 
   @Post('attendance/clock-out')
-  async clockOut(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string }, @Req() req: Request) {
+  async clockOut(@Body() body: { employeeId: string; latitude?: number; longitude?: number; remarks?: string; source?: 'Mobile' | 'WebManual' }, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.clockOut(body.employeeId, orgId, body.latitude, body.longitude, body.remarks);
+    const result = await this.hrPayrollService.clockOut(body.employeeId, orgId, body.latitude, body.longitude, body.remarks, body.source === 'Mobile' ? PunchSource.MOBILE : PunchSource.WEB_MANUAL);
     return { success: true, statusCode: HttpStatus.OK, message: 'Clock-out recorded', data: result };
   }
 

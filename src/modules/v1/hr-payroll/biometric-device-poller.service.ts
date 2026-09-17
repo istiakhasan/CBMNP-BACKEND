@@ -11,6 +11,15 @@ const ZKLib = require('node-zklib');
 const POLL_INTERVAL_MS = 60 * 1000; // check every registered LAN device once a minute
 const CONNECT_TIMEOUT_MS = 8000;
 
+function bangladeshDate(value: Date | string) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dhaka',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(value));
+}
+
 export interface DeviceSyncResult {
   success: boolean;
   message: string;
@@ -63,13 +72,17 @@ export class BiometricDevicePollerService {
       await zkInstance.createSocket();
 
       const { data: records } = await zkInstance.getAttendances();
-      const sinceMs = device.lastPolledRecordTime ? new Date(device.lastPolledRecordTime).getTime() : 0;
+      const today = bangladeshDate(new Date());
 
-      let maxRecordTime: Date | null = device.lastPolledRecordTime ? new Date(device.lastPolledRecordTime) : null;
+      // A device may retain years of history. Sync only Bangladesh's current
+      // calendar day; ingestPunchLogs makes this idempotent, so a retry cannot
+      // duplicate a punch.
+      let maxRecordTime: Date | null = null;
       const rawLogs = (records || [])
-        .filter((r: any) => r.recordTime && new Date(r.recordTime).getTime() > sinceMs)
+        .filter((r: any) => r.recordTime && bangladeshDate(r.recordTime) === today)
         .map((r: any) => {
-          if (!maxRecordTime || r.recordTime > maxRecordTime) maxRecordTime = r.recordTime;
+          const recordTime = new Date(r.recordTime);
+          if (!maxRecordTime || recordTime > maxRecordTime) maxRecordTime = recordTime;
           return {
             biometricUserId: String(r.deviceUserId),
             timestamp: r.recordTime,
