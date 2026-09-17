@@ -15,6 +15,7 @@ import {
   ForbiddenException,
   UnauthorizedException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -30,6 +31,7 @@ import { uploadFiles } from '../../../util/file-upload.util';
 @UseGuards(AuthGuard)
 export class HrPayrollController {
   private static readonly FULL_VISIBILITY_ROLES = ['admin', 'owner', 'super_admin', 'master_admin'];
+  private readonly logger = new Logger(HrPayrollController.name);
 
   // Strict: used for actually approving something — you must be a real Employee, since
   // approval authority is tied to being the specific Department Head / Final Approver.
@@ -289,8 +291,16 @@ export class HrPayrollController {
   async getSelfServiceProfile(@Req() req: any) {
     const orgId = req.headers['x-organization-id'] as string;
     const userId = req.user?.userId || req.user?.id;
-    const result = await this.hrPayrollService.getSelfServiceProfile(userId, orgId);
-    return { success: true, statusCode: HttpStatus.OK, data: result };
+    const startedAt = Date.now();
+    this.logger.log(`[SelfServiceProfile] started for organization ${orgId || 'missing'}`);
+    try {
+      const result = await this.hrPayrollService.getSelfServiceProfile(userId, orgId);
+      this.logger.log(`[SelfServiceProfile] completed in ${Date.now() - startedAt}ms`);
+      return { success: true, statusCode: HttpStatus.OK, data: result };
+    } catch (error: any) {
+      this.logger.error(`[SelfServiceProfile] failed after ${Date.now() - startedAt}ms: ${error?.message || 'Unknown error'}`);
+      throw error;
+    }
   }
 
   @Post('self-service/profile-photo')

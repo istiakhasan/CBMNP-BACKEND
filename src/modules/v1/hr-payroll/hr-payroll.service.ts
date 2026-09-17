@@ -1166,6 +1166,11 @@ export class HrPayrollService {
     const profile = user ? { name: user.name, email: user.email, phone: user.phone, address: user.address, role: user.role } : null;
     if (!employee) return { user: profile, employee: null, attendance: [], leaves: [], holidays: [], leaveBalances: [] };
 
+    const today = this.getBangladeshDateString(new Date());
+    const timelineStart = new Date(`${today}T00:00:00`);
+    timelineStart.setDate(timelineStart.getDate() - 30);
+    const timelineStartDate = this.getBangladeshDateString(timelineStart);
+
     const [attendance, leaves, leaveBalances, holidays] = await Promise.all([
       this.attendanceRepo.find({
         where: { organizationId, employeeId: employee.id },
@@ -1179,31 +1184,45 @@ export class HrPayrollService {
         take: 50,
       }),
       this.getLeaveBalances(employee.id, organizationId),
-      this.holidayRepo.find({ where: { organizationId, approvalStatus: HolidayApprovalStatus.APPROVED }, order: { fromDate: 'ASC' } }),
+      // The mobile timeline only renders the recent window. Loading every holiday
+      // from every past year becomes increasingly expensive in production.
+      this.holidayRepo.createQueryBuilder('holiday')
+        .where('holiday.organizationId = :organizationId', { organizationId })
+        .andWhere('holiday.approvalStatus = :approvalStatus', { approvalStatus: HolidayApprovalStatus.APPROVED })
+        .andWhere('holiday.fromDate <= :today', { today })
+        .andWhere('holiday.toDate >= :timelineStartDate', { timelineStartDate })
+        .orderBy('holiday.fromDate', 'ASC')
+        .getMany(),
     ]);
     const approverIds = Array.from(new Set(leaves.flatMap((leave) => [leave.deptHeadApprovedById, leave.approvedById]).filter(Boolean)));
     const approvers = approverIds.length
       ? await this.employeeRepo.find({ where: { organizationId, id: In(approverIds) }, relations: ['designation'] })
       : [];
     const approverDetails = new Map(approvers.map((approver) => [approver.id, { name: approver.fullName, title: approver.designation?.name || 'Approver' }]));
-    const department = employee.departmentId
-      ? await this.departmentRepo.findOne({ where: { id: employee.departmentId, organizationId }, relations: ['headEmployee', 'headEmployee.designation'] })
-      : null;
+    const needsDepartmentHead = leaves.some((leave) => leave.status === LeaveStatus.PENDING && leave.approvalStage === ApprovalStage.PENDING_DEPT_HEAD);
+    const needsFinalApprover = leaves.some((leave) => leave.status === LeaveStatus.PENDING && leave.approvalStage !== ApprovalStage.PENDING_DEPT_HEAD);
     // The final approver can be set either on the Employee profile or by assigning the
     // linked ERP user the CEO/CCO role. Resolve the name here so self-service users see
     // a person, not just the generic "Final Approver" label.
     // Do not load every employee in a production organization just to find one
     // final approver. That made the self-service refresh progressively slower as
     // the organization grew, and could exceed the mobile request timeout.
-    const finalApprover = await this.employeeRepo.createQueryBuilder('candidate')
-      .leftJoinAndSelect('candidate.user', 'candidateUser')
-      .leftJoinAndSelect('candidate.designation', 'candidateDesignation')
-      .where('candidate.organizationId = :organizationId', { organizationId })
-      .andWhere('(candidate.isFinalApprover = :isFinalApprover OR candidateUser.role IN (:...roles))', {
-        isFinalApprover: true,
-        roles: HrPayrollService.FINAL_APPROVER_ROLES,
-      })
-      .getOne();
+    const [department, finalApprover] = await Promise.all([
+      needsDepartmentHead && employee.departmentId
+        ? this.departmentRepo.findOne({ where: { id: employee.departmentId, organizationId }, relations: ['headEmployee', 'headEmployee.designation'] })
+        : Promise.resolve(null),
+      needsFinalApprover
+        ? this.employeeRepo.createQueryBuilder('candidate')
+          .leftJoinAndSelect('candidate.user', 'candidateUser')
+          .leftJoinAndSelect('candidate.designation', 'candidateDesignation')
+          .where('candidate.organizationId = :organizationId', { organizationId })
+          .andWhere('(candidate.isFinalApprover = :isFinalApprover OR candidateUser.role IN (:...roles))', {
+            isFinalApprover: true,
+            roles: HrPayrollService.FINAL_APPROVER_ROLES,
+          })
+          .getOne()
+        : Promise.resolve(null),
+    ]);
     const enhancedLeaves = leaves.map((leave) => ({
       ...leave,
       approvalInfo: {
@@ -1233,16 +1252,13 @@ export class HrPayrollService {
     // a calendar-like feed too, otherwise a missed day silently disappears between
     // two punches. Generate the last 31 completed/current calendar days server-side
     // so Holiday, Weekly off, approved Leave and Absent remain authoritative.
-    const today = this.getBangladeshDateString(new Date());
-    const start = new Date(`${today}T00:00:00`);
-    start.setDate(start.getDate() - 30);
     const attendanceByDate = new Map(attendance.map((row) => [row.attendanceDate, row]));
     const approvedLeaves = leaves.filter((leave) => leave.status === LeaveStatus.APPROVED);
     const weeklyOffDays = Array.isArray(department?.weeklyOffDays) && department.weeklyOffDays.length
       ? department.weeklyOffDays
       : [5]; // Bangladesh default: Friday, when the department has no explicit setting.
     const attendanceTimeline: any[] = [];
-    for (let cursor = new Date(start); cursor <= new Date(`${today}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) {
+    for (let cursor = new Date(timelineStart); cursor <= new Date(`${today}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) {
       const date = this.getBangladeshDateString(cursor);
       const existing = attendanceByDate.get(date);
       if (existing) {
