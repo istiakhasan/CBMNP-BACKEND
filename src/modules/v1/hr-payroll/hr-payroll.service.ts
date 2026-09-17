@@ -1192,14 +1192,18 @@ export class HrPayrollService {
     // The final approver can be set either on the Employee profile or by assigning the
     // linked ERP user the CEO/CCO role. Resolve the name here so self-service users see
     // a person, not just the generic "Final Approver" label.
-    const organizationEmployees = await this.employeeRepo.find({
-      where: { organizationId },
-      relations: ['user', 'designation'],
-    });
-    const finalApprover = organizationEmployees.find((candidate) =>
-      candidate.isFinalApprover ||
-      (candidate.user && HrPayrollService.FINAL_APPROVER_ROLES.includes(candidate.user.role)),
-    );
+    // Do not load every employee in a production organization just to find one
+    // final approver. That made the self-service refresh progressively slower as
+    // the organization grew, and could exceed the mobile request timeout.
+    const finalApprover = await this.employeeRepo.createQueryBuilder('candidate')
+      .leftJoinAndSelect('candidate.user', 'candidateUser')
+      .leftJoinAndSelect('candidate.designation', 'candidateDesignation')
+      .where('candidate.organizationId = :organizationId', { organizationId })
+      .andWhere('(candidate.isFinalApprover = :isFinalApprover OR candidateUser.role IN (:...roles))', {
+        isFinalApprover: true,
+        roles: HrPayrollService.FINAL_APPROVER_ROLES,
+      })
+      .getOne();
     const enhancedLeaves = leaves.map((leave) => ({
       ...leave,
       approvalInfo: {
@@ -1224,7 +1228,53 @@ export class HrPayrollService {
       radiusMeters: Number(employee.office.radiusMeters || 100),
       isActive: employee.office.isActive,
     } : null;
-    return { user: profile, employee, attendanceOffice, attendance, leaves: enhancedLeaves, holidays, leaveBalances };
+
+    // An attendance table only has rows for a real punch.  Self-service clients need
+    // a calendar-like feed too, otherwise a missed day silently disappears between
+    // two punches. Generate the last 31 completed/current calendar days server-side
+    // so Holiday, Weekly off, approved Leave and Absent remain authoritative.
+    const today = this.getBangladeshDateString(new Date());
+    const start = new Date(`${today}T00:00:00`);
+    start.setDate(start.getDate() - 30);
+    const attendanceByDate = new Map(attendance.map((row) => [row.attendanceDate, row]));
+    const approvedLeaves = leaves.filter((leave) => leave.status === LeaveStatus.APPROVED);
+    const weeklyOffDays = Array.isArray(department?.weeklyOffDays) && department.weeklyOffDays.length
+      ? department.weeklyOffDays
+      : [5]; // Bangladesh default: Friday, when the department has no explicit setting.
+    const attendanceTimeline: any[] = [];
+    for (let cursor = new Date(start); cursor <= new Date(`${today}T00:00:00`); cursor.setDate(cursor.getDate() + 1)) {
+      const date = this.getBangladeshDateString(cursor);
+      const existing = attendanceByDate.get(date);
+      if (existing) {
+        attendanceTimeline.push(existing);
+        continue;
+      }
+      const holiday = holidays.find((item) => item.fromDate <= date && item.toDate >= date);
+      const leave = approvedLeaves.find((item) => item.startDate <= date && item.endDate >= date);
+      const weeklyOff = weeklyOffDays.includes(cursor.getDay());
+      const status = holiday ? 'Holiday' : leave ? AttendanceStatus.ON_LEAVE : weeklyOff ? 'Weekly Off' : AttendanceStatus.ABSENT;
+      attendanceTimeline.push({
+        id: `calendar-${employee.id}-${date}`,
+        employeeId: employee.id,
+        organizationId,
+        attendanceDate: date,
+        clockInTime: null,
+        clockOutTime: null,
+        status,
+        lateMinutes: 0,
+        earlyLeavingMinutes: 0,
+        workHours: 0,
+        overtimeMinutes: 0,
+        punchSource: null,
+        remarks: holiday ? holiday.name : leave ? `Approved ${leave.leaveType?.name || 'leave'}` : weeklyOff ? 'Weekly off day' : 'No attendance punch recorded',
+        isSynthesized: true,
+        isHoliday: Boolean(holiday),
+        holidayName: holiday?.name || null,
+        isWeeklyOff: weeklyOff,
+      });
+    }
+    attendanceTimeline.sort((a, b) => b.attendanceDate.localeCompare(a.attendanceDate));
+    return { user: profile, employee, attendanceOffice, attendance, attendanceTimeline, leaves: enhancedLeaves, holidays, leaveBalances };
   }
 
   async deleteEmployee(id: string, organizationId: string): Promise<{ success: boolean }> {
