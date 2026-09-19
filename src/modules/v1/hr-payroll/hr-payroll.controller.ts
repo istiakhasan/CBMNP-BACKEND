@@ -346,6 +346,39 @@ export class HrPayrollController {
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Attendance reconciliation submitted', data: result };
   }
 
+  @Post('self-service/loans')
+  async requestSelfServiceLoan(@Body() data: any, @Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string; const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, orgId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    return { success: true, statusCode: HttpStatus.CREATED, data: await this.hrPayrollService.requestLoan({ ...data, employeeId: employee.id }, orgId) };
+  }
+
+  @Post('self-service/expenses')
+  async requestSelfServiceExpense(@Body() data: any, @Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string; const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, orgId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    return { success: true, statusCode: HttpStatus.CREATED, data: await this.hrPayrollService.submitExpenseClaim({ ...data, employeeId: employee.id }, orgId) };
+  }
+
+  @Post('self-service/overtime')
+  async requestSelfServiceOvertime(@Body() data: any, @Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string; const userId = req.user?.userId || req.user?.id;
+    const employee = await this.hrPayrollService.getEmployeeByUserId(userId, orgId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    return { success: true, statusCode: HttpStatus.CREATED, data: await this.hrPayrollService.submitOvertimeRequest({ ...data, employeeId: employee.id }, orgId) };
+  }
+
+  @Get('self-service/workspace')
+  @ApiOperation({ summary: 'Get the current employee\'s private self-service workspace records' })
+  async getSelfServiceWorkspace(@Req() req: any) {
+    const orgId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const result = await this.hrPayrollService.getSelfServiceWorkspace(userId, orgId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
   @Get('employees/:id')
   async getEmployeeById(@Param('id') id: string, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
@@ -513,6 +546,16 @@ export class HrPayrollController {
     const orgId = req.headers['x-organization-id'] as string;
     const userId = (req as any).user?.userId || (req as any).user?.id;
     const result = await this.hrPayrollService.updateLoanStatus(id, body.status, orgId, userId);
+    return { success: true, statusCode: HttpStatus.OK, data: result };
+  }
+
+  @Post('loans/:id/signed-document')
+  @UseInterceptors(FileInterceptor('document', { limits: { fileSize: 10 * 1024 * 1024 } }))
+  async uploadSignedLoanDocument(@Param('id') id: string, @UploadedFile() document: Express.Multer.File | undefined, @Req() req: Request) {
+    if (!document) throw new BadRequestException('Attach the signed loan document (PDF or image).');
+    const orgId = req.headers['x-organization-id'] as string;
+    const [fileName] = await uploadFiles([document], './uploads/loan-documents');
+    const result = await this.hrPayrollService.attachSignedLoanDocument(id, `/api/v1/images/loan-documents/${fileName}`, orgId);
     return { success: true, statusCode: HttpStatus.OK, data: result };
   }
 
@@ -691,9 +734,9 @@ export class HrPayrollController {
   }
 
   @Post('payroll/generate')
-  async generatePayroll(@Body() body: { year: number; month: number; departmentId?: string }, @Req() req: Request) {
+  async generatePayroll(@Body() body: { year: number; month: number; departmentId?: string; regenerate?: boolean }, @Req() req: Request) {
     const orgId = req.headers['x-organization-id'] as string;
-    const result = await this.hrPayrollService.generatePayroll(body.year, body.month, orgId, body.departmentId);
+    const result = await this.hrPayrollService.generatePayroll(body.year, body.month, orgId, body.departmentId, !!body.regenerate);
     return { success: true, statusCode: HttpStatus.CREATED, message: 'Monthly payroll generated', data: result };
   }
 

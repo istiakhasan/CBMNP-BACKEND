@@ -73,6 +73,10 @@ export class EmployeeLoan {
   @Column({ type: 'varchar', length: 100, nullable: true })
   approvedById: string;
 
+  // HR uploads the signed printed approval sheet before approving a request.
+  @Column({ type: 'text', nullable: true })
+  signedDocumentUrl: string;
+
   @Column({ type: 'uuid', nullable: false })
   @Index()
   organizationId: string;

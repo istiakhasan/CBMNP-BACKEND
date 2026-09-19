@@ -980,6 +980,7 @@ export class HrPayrollService {
       .leftJoinAndSelect('emp.designation', 'desig')
       .leftJoinAndSelect('emp.reportingManager', 'mgr')
       .leftJoinAndSelect('emp.user', 'usr')
+      .leftJoinAndMapOne('emp.salaryStructure', SalaryStructure, 'salary', 'salary.employeeId = emp.id AND salary.organizationId = emp.organizationId')
       .where('emp.organizationId = :organizationId', { organizationId });
 
     if (departmentId) query.andWhere('emp.departmentId = :departmentId', { departmentId });
@@ -1199,8 +1200,11 @@ export class HrPayrollService {
       ? await this.employeeRepo.find({ where: { organizationId, id: In(approverIds) }, relations: ['designation'] })
       : [];
     const approverDetails = new Map(approvers.map((approver) => [approver.id, { name: approver.fullName, title: approver.designation?.name || 'Approver' }]));
-    const needsDepartmentHead = leaves.some((leave) => leave.status === LeaveStatus.PENDING && leave.approvalStage === ApprovalStage.PENDING_DEPT_HEAD);
-    const needsFinalApprover = leaves.some((leave) => leave.status === LeaveStatus.PENDING && leave.approvalStage !== ApprovalStage.PENDING_DEPT_HEAD);
+    // Include both expected approvers for every pending leave so the employee
+    // can see the complete approval chain before either person acts.
+    const hasPendingLeave = leaves.some((leave) => leave.status === LeaveStatus.PENDING);
+    const needsDepartmentHead = hasPendingLeave;
+    const needsFinalApprover = hasPendingLeave;
     // The final approver can be set either on the Employee profile or by assigning the
     // linked ERP user the CEO/CCO role. Resolve the name here so self-service users see
     // a person, not just the generic "Final Approver" label.
@@ -1233,6 +1237,8 @@ export class HrPayrollService {
           : null,
         departmentHeadApprovedBy: leave.deptHeadApprovedById ? approverDetails.get(leave.deptHeadApprovedById) || { name: 'Department Head', title: 'Department Head' } : null,
         finalApprovedBy: leave.approvedById ? approverDetails.get(leave.approvedById) || { name: 'Final Approver', title: 'Final Approver' } : null,
+        departmentHead: department?.headEmployee ? { name: department.headEmployee.fullName, title: department.headEmployee.designation?.name || 'Department Head' } : null,
+        finalApprover: finalApprover ? { name: finalApprover.fullName, title: finalApprover.designation?.name || 'Final Approver' } : null,
       },
     }));
     // Keep a small, explicit office payload for web and mobile attendance clients.
@@ -1291,6 +1297,48 @@ export class HrPayrollService {
     }
     attendanceTimeline.sort((a, b) => b.attendanceDate.localeCompare(a.attendanceDate));
     return { user: profile, employee, attendanceOffice, attendance, attendanceTimeline, leaves: enhancedLeaves, holidays, leaveBalances };
+  }
+
+  /**
+   * Employee-facing records only.  Keeping this query here (rather than taking
+   * an employeeId from the phone) prevents an employee from changing an ID in
+   * a request and viewing a colleague's payroll or HR records.
+   */
+  async getSelfServiceWorkspace(userId: string, organizationId: string) {
+    const employee = await this.getEmployeeByUserId(userId, organizationId);
+    if (!employee) throw new ForbiddenException('Your login is not linked to an Employee profile.');
+    const employeeId = employee.id;
+    const [loans, expenses, assets, documents, corrections, overtime, transfers, reviews, training, disciplinary, announcements, payroll] = await Promise.all([
+      this.getLoans(organizationId, employeeId),
+      this.getExpenseClaims(organizationId, employeeId, employeeId),
+      this.getAssets(organizationId, employeeId),
+      this.getEmployeeDocuments(employeeId, organizationId),
+      this.correctionRepo.find({ where: { organizationId, employeeId }, order: { attendanceDate: 'DESC' }, take: 12 }),
+      this.getOvertimeRequests(organizationId, employeeId, employeeId),
+      this.getTransfers(organizationId, employeeId),
+      this.getPerformanceReviews(organizationId, employeeId),
+      this.getEnrollmentsByEmployee(employeeId, organizationId),
+      this.getDisciplinaryActions(organizationId, employeeId),
+      this.getAnnouncements(organizationId, true),
+      this.payrollItemRepo.find({ where: { organizationId, employeeId }, relations: ['payrollSheet'], order: { createdAt: 'DESC' }, take: 12 }),
+    ]);
+    const approverIds = Array.from(new Set(corrections.flatMap((item) => [item.deptHeadApprovedById, item.approvedById]).filter(Boolean)));
+    const approvers = approverIds.length ? await this.employeeRepo.find({ where: { id: In(approverIds), organizationId }, relations: ['designation'] }) : [];
+    const approverMap = new Map(approvers.map((item) => [item.id, { name: item.fullName, title: item.designation?.name || 'Approver' }]));
+    const enhancedCorrections = corrections.map((item) => ({ ...item, approvalInfo: {
+      departmentHead: item.deptHeadApprovedById ? approverMap.get(item.deptHeadApprovedById) : null,
+      finalApprover: item.approvedById ? approverMap.get(item.approvedById) : null,
+      currentWith: item.status === CorrectionStatus.PENDING ? (item.approvalStage === ApprovalStage.PENDING_DEPT_HEAD ? { name: 'Department Head', title: 'Department Head' } : { name: 'Final Approver', title: 'Final Approver' }) : null,
+    }}));
+    // A disbursed sheet is the source of truth.  This also protects the
+    // employee dashboard from legacy items created before item-level payment
+    // status was updated during disbursement.
+    const normalizedPayroll = payroll.map((item) =>
+      item.payrollSheet?.status === PayrollStatus.DISBURSED
+        ? { ...item, paymentStatus: 'Paid' }
+        : item,
+    );
+    return { loans, expenses, assets, documents, corrections: enhancedCorrections, overtime, transfers, reviews, training, disciplinary, announcements, payroll: normalizedPayroll };
   }
 
   async deleteEmployee(id: string, organizationId: string): Promise<{ success: boolean }> {
@@ -1687,6 +1735,13 @@ export class HrPayrollService {
     return this.loanRepo.save(loan);
   }
 
+  async attachSignedLoanDocument(id: string, signedDocumentUrl: string, organizationId: string): Promise<EmployeeLoan> {
+    const loan = await this.loanRepo.findOne({ where: { id, organizationId } });
+    if (!loan) throw new NotFoundException('Loan record not found');
+    loan.signedDocumentUrl = signedDocumentUrl;
+    return this.loanRepo.save(loan);
+  }
+
   // ================= 8. EXPENSE CLAIMS & REIMBURSEMENTS =================
   async submitExpenseClaim(data: Partial<ExpenseClaim>, organizationId: string): Promise<ExpenseClaim> {
     const { stage } = await this.resolveApprovalChain(data.employeeId, organizationId);
@@ -1916,6 +1971,14 @@ export class HrPayrollService {
     } else {
       struct = this.salaryStructureRepo.create({ ...data, organizationId });
     }
+    // Employee Directory is the sole editor for the new dynamic earnings
+    // model. Clear legacy fixed allowances so the same component can never be
+    // counted once as a legacy column and again as a custom earning.
+    if (data.customEarnings !== undefined) {
+      struct.houseRentAllowance = 0;
+      struct.medicalAllowance = 0;
+      struct.conveyanceAllowance = 0;
+    }
     return this.salaryStructureRepo.save(struct);
   }
 
@@ -1932,18 +1995,18 @@ export class HrPayrollService {
    * - Tax & PF Deductions
    * - Active Loan / Salary Advance Monthly EMI Installments (and updates totalPaidAmount on the Loan)
    */
-  async generatePayroll(year: number, month: number, organizationId: string, departmentId?: string): Promise<PayrollSheet> {
+  async generatePayroll(year: number, month: number, organizationId: string, departmentId?: string, regenerate = false): Promise<PayrollSheet> {
     const monthNames = [
       'January', 'February', 'March', 'April', 'May', 'June',
       'July', 'August', 'September', 'October', 'November', 'December'
     ];
     const sheetName = `Payroll - ${monthNames[month - 1]} ${year}`;
 
-    const existing = await this.payrollSheetRepo.findOne({
-      where: { organizationId, year, month, departmentId: departmentId || null },
-    });
+    const existing = await this.payrollSheetRepo.findOne({ where: { organizationId, year, month } });
     if (existing) {
-      throw new BadRequestException(`Payroll sheet for ${monthNames[month - 1]} ${year} already generated`);
+      if (!regenerate) throw new BadRequestException(`Payroll sheet for ${monthNames[month - 1]} ${year} already generated. Use Regenerate for a Draft sheet.`);
+      if (existing.status === PayrollStatus.DISBURSED) throw new BadRequestException('A disbursed payroll cannot be regenerated. Create an adjustment instead.');
+      await this.payrollSheetRepo.remove(existing);
     }
 
     const employees = await this.employeeRepo.find({
@@ -2011,20 +2074,26 @@ export class HrPayrollService {
       for (const emp of employees) {
         const s = structMap.get(emp.id);
         const basic = Number(s?.basicSalary || emp.basicSalary || 0);
-        const allowances =
-          Number(s?.houseRentAllowance || 0) +
-          Number(s?.medicalAllowance || 0) +
-          Number(s?.conveyanceAllowance || 0);
+        const customEarnings = Array.isArray(s?.customEarnings) ? s.customEarnings : [];
+        const customDeductions = Array.isArray(s?.customDeductions) ? s.customDeductions : [];
+        // Dynamic components supersede the three legacy allowance columns.
+        // Never add both, even if an older salary-structure row still carries
+        // legacy values from before the dynamic UI was introduced.
+        const allowances = customEarnings.length
+          ? 0
+          : Number(s?.houseRentAllowance || 0) + Number(s?.medicalAllowance || 0) + Number(s?.conveyanceAllowance || 0);
+        const customEarningTotal = customEarnings.reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
+        const customDeductionTotal = customDeductions.reduce((sum: number, item: any) => sum + Number(item.amount || 0), 0);
         const taxDeductions = Number(s?.taxDeduction || 0) + Number(s?.providentFundDeduction || 0);
         const comm = commMap.get(emp.id) || 0;
         const reimbursedExp = expenseMap.get(emp.id) || 0;
         const loanInfo = loanMap.get(emp.id);
         const loanEmi = loanInfo ? loanInfo.emi : 0;
 
-        const totalDeductionsForEmp = taxDeductions + loanEmi;
-        const net = basic + allowances + comm + reimbursedExp - totalDeductionsForEmp;
+        const totalDeductionsForEmp = taxDeductions + loanEmi + customDeductionTotal;
+        const net = basic + allowances + customEarningTotal + comm + reimbursedExp - totalDeductionsForEmp;
 
-        totalGross += basic + allowances;
+        totalGross += basic + allowances + customEarningTotal;
         totalDed += totalDeductionsForEmp;
         totalComm += comm;
         totalNet += net;
@@ -2032,11 +2101,15 @@ export class HrPayrollService {
         const item = manager.create(PayrollItem, {
           payrollSheetId: savedSheet.id,
           employeeId: emp.id,
+          loanId: loanInfo?.loanId || null,
           basicSalary: basic,
-          totalAllowances: allowances + reimbursedExp,
+          totalAllowances: allowances + customEarningTotal + reimbursedExp,
           commissionsEarned: comm,
           bonus: 0,
-          unpaidLeaveDeductions: loanEmi,
+          unpaidLeaveDeductions: 0,
+          loanDeductions: loanEmi,
+          earningsBreakdown: customEarnings,
+          deductionsBreakdown: customDeductions,
           taxDeductions: taxDeductions,
           netSalary: net,
           paymentStatus: 'Unpaid',
@@ -2069,21 +2142,54 @@ export class HrPayrollService {
 
     await this.payrollItemRepo.update({ payrollSheetId: sheetId }, { paymentStatus: 'Paid' });
 
+    // A payroll deduction becomes a real repayment only when that payroll is
+    // disbursed. Post it once here, then reduce the loan balance/status.
+    for (const item of sheet.items) {
+      const emi = Number(item.loanDeductions || 0);
+      if (!item.loanId || emi <= 0) continue;
+      const alreadyPosted = await this.loanRepaymentRepo.findOne({ where: { loanId: item.loanId, remarks: `Payroll sheet ${sheetId}` } });
+      if (alreadyPosted) continue;
+      const repaymentCount = await this.loanRepaymentRepo.count({ where: { loanId: item.loanId, organizationId } });
+      await this.recordLoanRepayment({ loanId: item.loanId, employeeId: item.employeeId, installmentNumber: repaymentCount + 1, amount: emi, paymentDate: sheet.disbursedDate, paymentMethod: 'Payroll Deduction', remarks: `Payroll sheet ${sheetId}`, recordedByUserId: userId }, organizationId);
+    }
+
     // Mark approved expense claims as reimbursed
     await this.expenseClaimRepo.update(
       { organizationId, status: ExpenseClaimStatus.APPROVED },
       { status: ExpenseClaimStatus.REIMBURSED },
     );
 
-    return this.payrollSheetRepo.save(sheet);
+    await this.payrollSheetRepo.save(sheet);
+    // Reload after the bulk item update so the API response itself never
+    // contains the old Unpaid relation values from before disbursement.
+    return this.payrollSheetRepo.findOneOrFail({ where: { id: sheetId, organizationId }, relations: ['items', 'items.employee'] });
   }
 
   async getPayrollSheets(organizationId: string) {
-    return this.payrollSheetRepo.find({
+    const sheets = await this.payrollSheetRepo.find({
       where: { organizationId },
       order: { year: 'DESC', month: 'DESC' },
       relations: ['items', 'items.employee', 'items.employee.department'],
     });
+
+    // Backfill sheets disbursed before the item-level status update existed.
+    // This keeps stored data, the HR sheet, payslips, and employee dashboard
+    // consistent after the next refresh.
+    const legacyDisbursedSheetIds = sheets
+      .filter((sheet) => sheet.status === PayrollStatus.DISBURSED)
+      .filter((sheet) => sheet.items.some((item) => item.paymentStatus !== 'Paid'))
+      .map((sheet) => sheet.id);
+    if (legacyDisbursedSheetIds.length) {
+      await this.payrollItemRepo.update(
+        { payrollSheetId: In(legacyDisbursedSheetIds), paymentStatus: 'Unpaid' },
+        { paymentStatus: 'Paid' },
+      );
+      for (const sheet of sheets) {
+        if (!legacyDisbursedSheetIds.includes(sheet.id)) continue;
+        for (const item of sheet.items) item.paymentStatus = 'Paid';
+      }
+    }
+    return sheets;
   }
 
   async getPayslip(payrollItemId: string, organizationId: string) {
@@ -2996,7 +3102,7 @@ export class HrPayrollService {
         const summary = {
           employeeCount: new Set(rows.map((r) => r.employeeId)).size,
           totalGross: Number(rows.reduce((sum, r) => sum + Number(r.basicSalary || 0) + Number(r.totalAllowances || 0) + Number(r.commissionsEarned || 0) + Number(r.bonus || 0), 0).toFixed(2)),
-          totalDeductions: Number(rows.reduce((sum, r) => sum + Number(r.unpaidLeaveDeductions || 0) + Number(r.taxDeductions || 0), 0).toFixed(2)),
+          totalDeductions: Number(rows.reduce((sum, r) => sum + Number(r.unpaidLeaveDeductions || 0) + Number(r.loanDeductions || 0) + Number(r.taxDeductions || 0), 0).toFixed(2)),
           totalNetSalary: Number(rows.reduce((sum, r) => sum + Number(r.netSalary || 0), 0).toFixed(2)),
         };
         return { summary, rows };

@@ -28,6 +28,10 @@ export class PayrollItem {
   @Column({ type: 'uuid', nullable: false })
   employeeId: string;
 
+  @Column({ type: 'uuid', nullable: true })
+  @Index()
+  loanId: string;
+
   @ManyToOne(() => Employee, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'employeeId' })
   employee: Employee;
@@ -71,6 +75,15 @@ export class PayrollItem {
     default: 0,
   })
   unpaidLeaveDeductions: number;
+
+  @Column({ type: 'numeric', precision: 18, scale: 2, default: 0 })
+  loanDeductions: number;
+
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  earningsBreakdown: Array<{ name: string; amount: number }>;
+
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  deductionsBreakdown: Array<{ name: string; amount: number }>;
 
   @Column({
     type: 'numeric',

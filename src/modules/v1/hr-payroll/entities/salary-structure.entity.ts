@@ -72,6 +72,12 @@ export class SalaryStructure {
   })
   providentFundDeduction: number;
 
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  customEarnings: Array<{ name: string; amount: number }>;
+
+  @Column({ type: 'jsonb', default: () => "'[]'" })
+  customDeductions: Array<{ name: string; amount: number }>;
+
   @Column({ type: 'uuid', nullable: false })
   @Index()
   organizationId: string;
