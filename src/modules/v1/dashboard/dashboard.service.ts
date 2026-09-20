@@ -193,58 +193,24 @@ export class DashboardService {
       }
     };
 
-    // 1. Core Orders Query (All in Range)
-    const allOrdersQb = this.orderRepository
+    // Core order KPIs in one scan. Previously the dashboard ran six separate
+    // aggregates over the same (potentially very large) filtered order set.
+    const orderSummaryQb = this.orderRepository
       .createQueryBuilder('orders')
       .where('orders.organizationId = :organizationId', { organizationId })
       .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(allOrdersQb, 'orders');
-
-    // 2. Pending Orders (status 1)
-    const pendingQb = this.orderRepository
-      .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: 1 })
-      .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(pendingQb, 'orders');
-
-    // 3. Delivered Orders (status 8)
-    const deliveredQb = this.orderRepository
-      .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: 8 })
-      .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(deliveredQb, 'orders');
-
-    // 4. In-Transit / Processing Orders (statuses: 2=Approved, 3=Processing, 6=InTransit, 7=OutForDelivery)
-    const inTransitQb = this.orderRepository
-      .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId IN (:...statuses)', { statuses: [2, 3, 6, 7] })
-      .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(inTransitQb, 'orders');
-
-    // 5. Cancelled Orders (status 4)
-    const cancelledQb = this.orderRepository
-      .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: 4 })
-      .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(cancelledQb, 'orders');
-
-    // 6. Returned / Damaged Orders (status 5)
-    const returnedQb = this.orderRepository
-      .createQueryBuilder('orders')
-      .where('orders.organizationId = :organizationId', { organizationId })
-      .andWhere('orders.statusId = :statusId', { statusId: 5 })
-      .select('COUNT(orders.id)', 'count')
-      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice');
-    applyDateFilter(returnedQb, 'orders');
+      .addSelect('COALESCE(SUM(orders.totalPrice), 0)', 'totalPrice')
+      .addSelect('COUNT(orders.id) FILTER (WHERE orders.statusId = 1)', 'pendingCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice) FILTER (WHERE orders.statusId = 1), 0)', 'pendingAmount')
+      .addSelect('COUNT(orders.id) FILTER (WHERE orders.statusId = 8)', 'deliveredCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice) FILTER (WHERE orders.statusId = 8), 0)', 'deliveredAmount')
+      .addSelect('COUNT(orders.id) FILTER (WHERE orders.statusId IN (2, 3, 6, 7))', 'inTransitCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice) FILTER (WHERE orders.statusId IN (2, 3, 6, 7)), 0)', 'inTransitAmount')
+      .addSelect('COUNT(orders.id) FILTER (WHERE orders.statusId = 4)', 'cancelledCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice) FILTER (WHERE orders.statusId = 4), 0)', 'cancelledAmount')
+      .addSelect('COUNT(orders.id) FILTER (WHERE orders.statusId = 5)', 'returnedCount')
+      .addSelect('COALESCE(SUM(orders.totalPrice) FILTER (WHERE orders.statusId = 5), 0)', 'returnedAmount');
+    applyDateFilter(orderSummaryQb, 'orders');
 
     // 7. Operating Expenses
     const expenseQb = this.expenseRepository
@@ -361,12 +327,7 @@ export class DashboardService {
 
     // Execute All in Parallel
     const [
-      allOrders,
-      pendingOrders,
-      deliveredOrders,
-      inTransitOrders,
-      cancelledOrders,
-      returnedOrders,
+      orderSummary,
       expenses,
       apData,
       valuationData,
@@ -376,12 +337,7 @@ export class DashboardService {
       topProducts,
       timeSeriesData,
     ] = await Promise.all([
-      allOrdersQb.getRawOne(),
-      pendingQb.getRawOne(),
-      deliveredQb.getRawOne(),
-      inTransitQb.getRawOne(),
-      cancelledQb.getRawOne(),
-      returnedQb.getRawOne(),
+      orderSummaryQb.getRawOne(),
       expenseQb.getRawOne(),
       apQb.getRawOne(),
       valuationQb.getRawOne(),
@@ -391,6 +347,13 @@ export class DashboardService {
       topProductsQb.getRawMany(),
       timeSeriesQb.getRawMany(),
     ]);
+
+    const allOrders = orderSummary;
+    const pendingOrders = { count: orderSummary?.pendingCount, totalPrice: orderSummary?.pendingAmount };
+    const deliveredOrders = { count: orderSummary?.deliveredCount, totalPrice: orderSummary?.deliveredAmount };
+    const inTransitOrders = { count: orderSummary?.inTransitCount, totalPrice: orderSummary?.inTransitAmount };
+    const cancelledOrders = { count: orderSummary?.cancelledCount, totalPrice: orderSummary?.cancelledAmount };
+    const returnedOrders = { count: orderSummary?.returnedCount, totalPrice: orderSummary?.returnedAmount };
 
     const totalOrdersCount = Number(allOrders?.count || 0);
     const grossSalesAmount = Number(allOrders?.totalPrice || 0);

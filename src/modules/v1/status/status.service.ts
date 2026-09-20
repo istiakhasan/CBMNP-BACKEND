@@ -3,6 +3,7 @@ import { In, Like, Not, Repository } from 'typeorm';
 import { Injectable } from '@nestjs/common';
 import { OrderStatus } from './entities/status.entity';
 import { Products } from '../order/entities/products.entity';
+import { Order } from '../order/entities/order.entity';
 
 @Injectable()
 export class StatusService {
@@ -260,7 +261,65 @@ async getAllOrdersCountByStatus(
 
 
 
-  
+  async getFastOrdersCountByStatus(
+    organizationId: string,
+    filterOptions: any,
+  ) {
+    // Start from orders, not status. This makes the common no-search request a
+    // single GROUP BY over the orders index instead of two joined full scans.
+    const queryBuilder = this.statusRepository.manager
+      .getRepository(Order)
+      .createQueryBuilder('orders')
+      .where('orders.organizationId = :organizationId', { organizationId });
+    const values = (value: any) => Array.isArray(value) ? value : [value];
+
+    if (filterOptions.statusId?.length) queryBuilder.andWhere('orders.statusId IN (:...statusIds)', { statusIds: values(filterOptions.statusId) });
+    if (filterOptions.currier?.length) queryBuilder.andWhere('orders.currier IN (:...curriers)', { curriers: values(filterOptions.currier) });
+    if (filterOptions.locationId?.length) queryBuilder.andWhere('orders.locationId IN (:...locationIds)', { locationIds: values(filterOptions.locationId) });
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      queryBuilder.andWhere('orders.intransitTime BETWEEN :startDate AND :endDate', {
+        startDate: new Date(filterOptions.startDate), endDate: new Date(filterOptions.endDate),
+      });
+    }
+    if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
+      queryBuilder.andWhere('orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd', {
+        createdAtStart: new Date(filterOptions.createdAtStart), createdAtEnd: new Date(filterOptions.createdAtEnd),
+      });
+    }
+    if (filterOptions.searchTerm?.trim()) {
+      queryBuilder.leftJoin('orders.customer', 'customer').andWhere(`(
+        orders.invoiceNumber ILIKE :searchTerm
+        OR orders.receiverPhoneNumber ILIKE :searchTerm
+        OR customer.customerPhoneNumber ILIKE :searchTerm
+      )`, { searchTerm: `%${filterOptions.searchTerm.trim()}%` });
+    }
+    if (filterOptions.productIds?.length) {
+      queryBuilder.andWhere(`EXISTS (
+        SELECT 1 FROM products p
+        WHERE p."orderId" = orders.id AND p."productId" IN (:...productIds)
+      )`, { productIds: values(filterOptions.productIds) });
+    }
+
+    const rawCounts = await queryBuilder
+      .select('orders.statusId', 'id')
+      .addSelect('COUNT(orders.id)', 'count')
+      .groupBy('orders.statusId')
+      .getRawMany();
+    const statuses = rawCounts.length
+      ? await this.statusRepository.findBy({ value: In(rawCounts.map((row) => Number(row.id))) })
+      : [];
+    const labels = new Map(statuses.map((status) => [status.value, status.label]));
+    const statusCounts = rawCounts.map((row) => ({
+      id: row.id,
+      label: labels.get(Number(row.id)) || 'Unknown',
+      count: row.count,
+    }));
+
+    return [...statusCounts, {
+      label: 'All',
+      count: rawCounts.reduce((total, row) => total + Number(row.count || 0), 0).toString(),
+    }];
+  }
 }
 
 

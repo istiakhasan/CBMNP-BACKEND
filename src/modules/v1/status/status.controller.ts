@@ -68,7 +68,7 @@ export class StatusController {
       }
     }
 
-    const result = await this.statusService.getAllOrdersCountByStatus(
+    const result = await this.statusService.getFastOrdersCountByStatus(
       organizationId as string,
       searchFilterOptions,
     );

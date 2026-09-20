@@ -785,7 +785,11 @@ export class OrderService {
     organizationId,
     includeProducts = false,
   ) {
-    const { page, limit, sortBy, sortOrder, skip } = paginationHelpers(options);
+    const { page, limit, sortBy: requestedSortBy, sortOrder, skip } = paginationHelpers(options);
+    // Only sortable order columns are allowed. Besides avoiding dynamic SQL,
+    // this keeps the list query aligned with the production indexes below.
+    const sortableColumns = new Set(['createdAt', 'id', 'invoiceNumber', 'statusId', 'totalPrice']);
+    const sortBy = sortableColumns.has(requestedSortBy) ? requestedSortBy : 'createdAt';
     const queryBuilder = this.orderRepository
       .createQueryBuilder('orders')
       .where('orders.organizationId = :organizationId', { organizationId });
@@ -903,43 +907,47 @@ export class OrderService {
       }
     }
 
-    queryBuilder.orderBy(`orders.${sortBy}`, sortOrder).skip(skip).take(limit);
+    queryBuilder.orderBy(`orders.${sortBy}`, sortOrder);
+    // `createdAt` is not unique. A stable second key prevents duplicates or
+    // missing rows while a user moves between pages as new orders are created.
+    if (sortBy !== 'id') queryBuilder.addOrderBy('orders.id', sortOrder);
+    queryBuilder.skip(skip).take(limit);
 
-    const [orders, total] = await queryBuilder.getManyAndCount();
-    const statusIds = [...new Set(orders.map((order) => order.statusId))];
-    const statuses = await this.statusRepository.findBy({
-      value: In(statusIds),
-    });
+    // TypeORM's getManyAndCount executes these sequentially. They are
+    // independent read-only queries, so running them together lowers response
+    // latency without changing any order data or the response contract.
+    const [orders, total] = await Promise.all([
+      queryBuilder.getMany(),
+      queryBuilder.clone().getCount(),
+    ]);
+    const statusIds = [...new Set(orders.map((order) => order.statusId).filter((id) => id != null))];
     const deliveryPartnerIds = [
       ...new Set(orders.map((order) => order.currier)),
     ];
-    const deliveryPartner = await this.deliveryPartnerRepository.findBy({
-      id: In(deliveryPartnerIds),
-    });
+    const customerIds = [...new Set(orders.map((order) => order.customerId))];
+    const agentIds = [...new Set(orders.map((order) => order.agentId))];
+    const orderIds = orders.map((order) => order.id);
+    // These independent lookup queries used to run one after another. Running
+    // them together removes several database round-trips from every list load.
+    const [statuses, deliveryPartner, customers, agents, ordersWithReturns] = await Promise.all([
+      statusIds.length ? this.statusRepository.findBy({ value: In(statusIds) }) : Promise.resolve([]),
+      deliveryPartnerIds.length ? this.deliveryPartnerRepository.findBy({ id: In(deliveryPartnerIds) }) : Promise.resolve([]),
+      customerIds.length ? this.customerRepository.findBy({ customer_Id: In(customerIds) }) : Promise.resolve([]),
+      agentIds.length ? this.usersRepository.findBy({ userId: In(agentIds) }) : Promise.resolve([]),
+      orderIds.length
+        ? this.orderProductReturnRepository
+            .createQueryBuilder('opr')
+            .select('DISTINCT opr.orderId', 'orderId')
+            .where('opr.orderId IN (:...orderIds)', { orderIds })
+            .getRawMany()
+        : Promise.resolve([]),
+    ]);
     const currierMap = new Map(
       deliveryPartner.map(({ secret_key, api_key, ...partner }) => [
         partner.id,
         partner,
       ]),
     );
-    const customerIds = [...new Set(orders.map((order) => order.customerId))];
-    const customers = await this.customerRepository.findBy({
-      customer_Id: In(customerIds),
-    });
-
-    const agentIds = [...new Set(orders.map((order) => order.agentId))];
-    const agents = await this.usersRepository.findBy({
-      userId: In(agentIds),
-    });
-
-    const orderIds = orders.map((order) => order.id);
-    const ordersWithReturns = orderIds.length
-      ? await this.orderProductReturnRepository
-          .createQueryBuilder('opr')
-          .select('DISTINCT opr.orderId', 'orderId')
-          .where('opr.orderId IN (:...orderIds)', { orderIds })
-          .getRawMany()
-      : [];
     const returnedOrderIdSet = new Set(
       ordersWithReturns.map((row) => row.orderId),
     );
@@ -990,7 +998,7 @@ export class OrderService {
     const startDate = new Date(Date.UTC(year, monthNumber - 1, 1, -6));
     const endDate = new Date(Date.UTC(year, monthNumber, 1, -6));
 
-    const orderTotals = await this.orderRepository
+    const orderTotalsQb = this.orderRepository
       .createQueryBuilder('orders')
       .where('orders.organizationId = :organizationId', { organizationId })
       .andWhere('orders.createdAt >= :startDate AND orders.createdAt < :endDate', {
@@ -1002,13 +1010,12 @@ export class OrderService {
       .addSelect('COALESCE(SUM(orders.totalPaidAmount), 0)', 'advanceCollected')
       .addSelect('COALESCE(SUM(orders.totalReceiveAbleAmount), 0)', 'courierReceivable')
       .addSelect('COALESCE(SUM(orders.deliveryCharge), 0)', 'courierDeliveryCharge')
-      .addSelect('COALESCE(SUM(orders.shippingCharge), 0)', 'customerDeliveryCharge')
-      .getRawOne();
+      .addSelect('COALESCE(SUM(orders.shippingCharge), 0)', 'customerDeliveryCharge');
 
     // Returns are grouped by their actual return date, not the original order
     // creation date.  The saved order-line price keeps historical values
     // correct even if a product's current sale price later changes.
-    const returnTotals = await this.orderRepository.manager
+    const returnTotalsQb = this.orderRepository.manager
       .getRepository(OrderProductReturn)
       .createQueryBuilder('returns')
       .innerJoin('returns.order', 'orders')
@@ -1026,8 +1033,42 @@ export class OrderService {
       .addSelect(
         'COALESCE(SUM(returns.returnQuantity * COALESCE(orderProduct.productPrice, 0)), 0)',
         'returnValue',
-      )
-      .getRawOne();
+      );
+
+    // Payment history is the source of truth for cash actually recorded in
+    // this month. It deliberately does not use the current order balance.
+    const paymentTotalsQb = this.paymentHistoryRepository
+      .createQueryBuilder('payment')
+      .innerJoin('payment.order', 'orders')
+      .where('orders.organizationId = :organizationId', { organizationId })
+      .andWhere('payment.createdAt >= :startDate AND payment.createdAt < :endDate', { startDate, endDate })
+      .andWhere("COALESCE(payment.paymentStatus, '') = 'Paid'")
+      .select('COALESCE(SUM(payment.paidAmount), 0)', 'cashCollected')
+      .addSelect("COALESCE(SUM(payment.paidAmount) FILTER (WHERE payment.paymentMethod = 'COD'), 0)", 'codSettled');
+
+    // Settlement rows preserve the confirmed expected COD, received COD and
+    // approved discount. These values remain auditable even after an order is
+    // later edited, so they are used for courier reconciliation reporting.
+    const settlementTotalsQb = this.courierSettlementItemRepository
+      .createQueryBuilder('settlementItem')
+      .where('settlementItem.organizationId = :organizationId', { organizationId })
+      .andWhere('settlementItem.createdAt >= :startDate AND settlementItem.createdAt < :endDate', { startDate, endDate })
+      .select('COUNT(settlementItem.id)', 'settledOrderCount')
+      .addSelect('COALESCE(SUM(settlementItem.expectedCod), 0)', 'expectedCod')
+      .addSelect('COALESCE(SUM(settlementItem.receivedCod), 0)', 'receivedCod')
+      .addSelect('COALESCE(SUM(settlementItem.adjustmentAmount), 0)', 'settlementDiscount')
+      .addSelect('COALESCE(SUM(settlementItem.shippingCharge), 0)', 'settlementCourierCharge');
+
+    const [orderTotals, returnTotals, paymentTotals, settlementTotals] = await Promise.all([
+      orderTotalsQb.getRawOne(),
+      returnTotalsQb.getRawOne(),
+      paymentTotalsQb.getRawOne(),
+      settlementTotalsQb.getRawOne(),
+    ]);
+
+    const expectedCod = Number(settlementTotals?.expectedCod) || 0;
+    const receivedCod = Number(settlementTotals?.receivedCod) || 0;
+    const settlementDiscount = Number(settlementTotals?.settlementDiscount) || 0;
 
     return {
       month,
@@ -1039,6 +1080,15 @@ export class OrderService {
       customerDeliveryCharge: Number(orderTotals?.customerDeliveryCharge) || 0,
       returnQuantity: Number(returnTotals?.returnQuantity) || 0,
       returnValue: Number(returnTotals?.returnValue) || 0,
+      cashCollected: Number(paymentTotals?.cashCollected) || 0,
+      codSettled: Number(paymentTotals?.codSettled) || 0,
+      settledOrderCount: Number(settlementTotals?.settledOrderCount) || 0,
+      expectedCod,
+      receivedCod,
+      settlementDiscount,
+      settlementCourierCharge: Number(settlementTotals?.settlementCourierCharge) || 0,
+      settlementNetAmount: receivedCod - (Number(settlementTotals?.settlementCourierCharge) || 0),
+      settlementVariance: Number((expectedCod - receivedCod - settlementDiscount).toFixed(2)),
     };
   }
 
