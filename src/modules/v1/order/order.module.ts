@@ -20,6 +20,8 @@ import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { OrderExchange } from './entities/orderExchannge.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
 import { Comments } from '../Comments/entities/orderComment.entity';
+import { CourierSettlement } from '../logistics-operations/entities/courier-settlement.entity';
+import { CourierCodSettlementItem } from '../logistics-operations/entities/courier-cod-settlement-item.entity';
 
 @Module({
   imports: [
@@ -41,6 +43,8 @@ import { Comments } from '../Comments/entities/orderComment.entity';
       OrderExchange,
       Transaction,
       Comments
+      ,CourierSettlement
+      ,CourierCodSettlementItem
     ]),
     RequsitionModule,
   ],

@@ -36,6 +36,8 @@ import { OrderExchange } from './entities/orderExchannge.entity';
 import { DeleteOrdersByPhoneDto } from './dto/delete-orders-by-phone.dto';
 import { Comments } from '../Comments/entities/orderComment.entity';
 import { Requisition } from '../requsition/entities/requsition.entity';
+import { CourierSettlement, SettlementStatus } from '../logistics-operations/entities/courier-settlement.entity';
+import { CourierCodAdjustmentType, CourierCodSettlementItem, CourierCodSettlementItemStatus } from '../logistics-operations/entities/courier-cod-settlement-item.entity';
 
 /**
  * ============================================================================
@@ -222,6 +224,10 @@ export class OrderService {
     private readonly warehouseRepository: Repository<Warehouse>,
     @InjectRepository(OrderExchange)
     private readonly orderExchangeRepository: Repository<OrderExchange>,
+    @InjectRepository(CourierSettlement)
+    private readonly courierSettlementRepository: Repository<CourierSettlement>,
+    @InjectRepository(CourierCodSettlementItem)
+    private readonly courierSettlementItemRepository: Repository<CourierCodSettlementItem>,
 
     private readonly requisitionService: RequisitionService,
   ) {}
@@ -1628,6 +1634,8 @@ async getOrderById(orderId: number): Promise<Order & { partner: any }> {
       'productReturns',
       'productReturns.product',
       'warehouse',
+      'courierCodSettlementItems',
+      'courierCodSettlementItems.settlement',
     ],
   });
 
@@ -2028,6 +2036,194 @@ async update(orderId: number, data: Order) {
         HttpStatus.INTERNAL_SERVER_ERROR,
         error.message || 'Failed to add payment',
       );
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Reconcile a courier settlement file without mutating orders. The client
+   * only supplies rows parsed from Excel; all amounts are compared against
+   * the organization-scoped order records here.
+   */
+  async previewCourierCodSettlement(rows: any[], organizationId: string) {
+    if (!Array.isArray(rows) || rows.length === 0) {
+      throw new BadRequestException('At least one courier settlement row is required');
+    }
+    if (rows.length > 1000) {
+      throw new BadRequestException('A settlement file may contain at most 1000 rows');
+    }
+
+    const invoices = [...new Set(rows.map((row) => String(row.invoice || '').trim()).filter(Boolean))];
+    const orders = invoices.length
+      ? await this.orderRepository.find({
+          where: { organizationId, invoiceNumber: In(invoices) },
+          select: ['id', 'invoiceNumber', 'trackingCode', 'totalPrice', 'totalPaidAmount', 'deliveryCharge', 'statusId', 'paymentStatus', 'currier'],
+        })
+      : [];
+    const orderByInvoice = new Map(orders.map((order) => [order.invoiceNumber, order]));
+
+    const invoiceOccurrences = new Map<string, number>();
+    rows.forEach((row) => {
+      const invoice = String(row.invoice || '').trim();
+      if (invoice) invoiceOccurrences.set(invoice, (invoiceOccurrences.get(invoice) || 0) + 1);
+    });
+    return Promise.all(rows.map(async (rawRow, index) => {
+      const invoice = String(rawRow.invoice || '').trim();
+      const trackingCode = String(rawRow.trackingCode || '').trim();
+      const codAmount = Number(rawRow.codAmount);
+      const adjustmentType = rawRow.adjustmentType === CourierCodAdjustmentType.NEGOTIATED_DISCOUNT ? CourierCodAdjustmentType.NEGOTIATED_DISCOUNT : null;
+      const adjustmentReason = String(rawRow.adjustmentReason || '').trim();
+      const shippingCharge = rawRow.shippingCharge === '' || rawRow.shippingCharge === null || rawRow.shippingCharge === undefined
+        ? null
+        : Number(rawRow.shippingCharge);
+      const order = orderByInvoice.get(invoice);
+      const reasons: string[] = [];
+
+      if (!invoice) reasons.push('Excel invoice is missing');
+      if (invoice && (invoiceOccurrences.get(invoice) || 0) > 1) reasons.push('This invoice appears more than once in the uploaded file');
+      if (!Number.isFinite(codAmount) || codAmount < 0) reasons.push('Excel COD amount is invalid');
+      if (shippingCharge !== null && (!Number.isFinite(shippingCharge) || shippingCharge < 0)) reasons.push('Excel shipping charge is invalid');
+      if (!order) reasons.push('No order was found for this invoice');
+
+      const expectedCod = order ? Number((Number(order.totalPrice || 0) - Number(order.totalPaidAmount || 0)).toFixed(2)) : null;
+      const difference = order ? Number(((expectedCod || 0) - codAmount).toFixed(2)) : null;
+      const validNegotiatedDiscount = difference !== null && difference > 0 && adjustmentType === CourierCodAdjustmentType.NEGOTIATED_DISCOUNT && adjustmentReason.length >= 5;
+      if (order && Math.abs((expectedCod || 0) - codAmount) > 0.01 && !validNegotiatedDiscount) reasons.push('COD does not match the unpaid order balance');
+      if (adjustmentType && !validNegotiatedDiscount) reasons.push('Negotiated discount requires a positive shortfall and a reason');
+      if (order && order.statusId !== OrderStatusId.Delivered) reasons.push('Order is not in Delivered status');
+      if (order?.trackingCode && trackingCode && order.trackingCode !== trackingCode) reasons.push('Tracking code does not match the order');
+      if (order && shippingCharge !== null && order.deliveryCharge !== null && order.deliveryCharge !== undefined && Math.abs(Number(order.deliveryCharge) - shippingCharge) > 0.01) {
+        reasons.push('Excel shipping charge differs from the courier delivery charge already stored on this order');
+      }
+
+      // A courier file can legitimately omit the tracking code. Confirmation
+      // stores the invoice as its transaction reference in that case, so use
+      // the identical fallback here or re-uploaded settled rows look like a
+      // fresh COD mismatch.
+      const transactionReference = trackingCode || invoice;
+      const duplicate = order && transactionReference
+        ? await this.paymentHistoryRepository.exist({ where: { orderId: order.id, transactionId: transactionReference, paymentMethod: 'COD' } })
+        : false;
+      if (duplicate) reasons.push('This COD tracking code was already reconciled');
+
+      return {
+        rowIndex: index,
+        invoice,
+        trackingCode,
+        codAmount,
+        shippingCharge,
+        deliveryStatus: String(rawRow.deliveryStatus || ''),
+        matched: reasons.length === 0,
+        alreadyReconciled: Boolean(duplicate),
+        difference,
+        adjustmentType,
+        adjustmentReason,
+        adjustmentAmount: validNegotiatedDiscount ? difference : 0,
+        reasons,
+        order: order ? {
+          id: order.id,
+          invoiceNumber: order.invoiceNumber,
+          trackingCode: order.trackingCode,
+          totalPrice: Number(order.totalPrice || 0),
+          totalPaidAmount: Number(order.totalPaidAmount || 0),
+          expectedCod,
+          webhookDeliveryCharge: Number(order.deliveryCharge || 0),
+          paymentStatus: order.paymentStatus,
+          courierPartnerId: order.currier,
+        } : null,
+      };
+    }));
+  }
+
+  /** Confirm selected preview rows atomically. Any changed/mismatched row rolls back the whole batch. */
+  async confirmCourierCodSettlement(rows: any[], organizationId: string, userId?: string) {
+    const preview = await this.previewCourierCodSettlement(rows, organizationId);
+    if (preview.some((row) => !row.matched)) {
+      throw new BadRequestException('Settlement contains mismatched, missing, duplicate, or non-delivered orders');
+    }
+
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      const courierPartnerId = preview[0]?.order?.courierPartnerId;
+      if (!courierPartnerId || preview.some((row) => row.order?.courierPartnerId !== courierPartnerId)) {
+        throw new BadRequestException('Selected rows must belong to one assigned courier partner');
+      }
+      const settlement = await queryRunner.manager.save(CourierSettlement, {
+        settlementNumber: `COD-${new Date().getFullYear()}-${Date.now().toString().slice(-8)}`,
+        settlementDate: new Date().toISOString().slice(0, 10),
+        courierPartnerId,
+        totalCodCollected: preview.reduce((sum, row) => sum + row.codAmount, 0),
+        totalDeliveryCharges: preview.reduce((sum, row) => sum + Number(row.shippingCharge || 0), 0),
+        netDisbursedAmount: preview.reduce((sum, row) => sum + row.codAmount, 0),
+        systemExpectedAmount: preview.reduce((sum, row) => sum + Number(row.order.expectedCod || 0), 0),
+        variance: 0,
+        status: SettlementStatus.RECONCILED,
+        notes: 'Imported and confirmed from courier COD Excel',
+        organizationId,
+      });
+      for (const row of preview) {
+        const order = await queryRunner.manager.createQueryBuilder(Order, 'order')
+          .setLock('pessimistic_write')
+          .where('order.id = :id AND order.organizationId = :organizationId', { id: row.order.id, organizationId })
+          .getOne();
+        if (!order) throw new BadRequestException(`Order ${row.invoice} is no longer available`);
+
+        const expectedCod = Number((Number(order.totalPrice || 0) - Number(order.totalPaidAmount || 0)).toFixed(2));
+        const adjustmentAmount = Number(row.adjustmentAmount || 0);
+        const hasApprovedDiscount = row.adjustmentType === CourierCodAdjustmentType.NEGOTIATED_DISCOUNT && adjustmentAmount > 0 && String(row.adjustmentReason || '').trim().length >= 5;
+        if (order.statusId !== OrderStatusId.Delivered || Math.abs(expectedCod - adjustmentAmount - row.codAmount) > 0.01) {
+          throw new BadRequestException(`Order ${row.invoice} changed after preview; upload and review it again`);
+        }
+        if (row.shippingCharge !== null && order.deliveryCharge !== null && order.deliveryCharge !== undefined && Math.abs(Number(order.deliveryCharge) - row.shippingCharge) > 0.01) {
+          throw new BadRequestException(`Courier delivery charge changed for ${row.invoice}; upload and review it again`);
+        }
+        if (order.trackingCode && row.trackingCode && order.trackingCode !== row.trackingCode) {
+          throw new BadRequestException(`Tracking code changed for ${row.invoice}; upload and review it again`);
+        }
+        const duplicate = await queryRunner.manager.exists(PaymentHistory, {
+          where: { orderId: order.id, transactionId: row.trackingCode || row.invoice, paymentMethod: 'COD' },
+        });
+        if (duplicate) throw new BadRequestException(`COD for ${row.invoice} was already reconciled`);
+
+        await queryRunner.manager.save(PaymentHistory, {
+          orderId: order.id,
+          userId,
+          paymentMethod: 'COD',
+          paidAmount: row.codAmount,
+          transactionId: row.trackingCode || row.invoice,
+          paymentStatus: 'Paid',
+        });
+        await queryRunner.manager.update(Order, { id: order.id }, {
+          totalPaidAmount: Number((Number(order.totalPaidAmount || 0) + row.codAmount).toFixed(2)),
+          totalReceiveAbleAmount: 0,
+          paymentStatus: 'Paid',
+          ...(hasApprovedDiscount ? { discount: Number(order.discount || 0) + adjustmentAmount, totalPrice: Number(order.totalPrice || 0) - adjustmentAmount } : {}),
+          ...(row.shippingCharge !== null && (order.deliveryCharge === null || order.deliveryCharge === undefined) ? { deliveryCharge: row.shippingCharge } : {}),
+        });
+        await queryRunner.manager.save(OrdersLog, {
+          orderId: order.id,
+          agentId: userId,
+          changedField: 'courier COD settlement',
+          action: `COD settlement confirmed from courier Excel. Tracking code: ${row.trackingCode || 'not supplied'}.`,
+          previousValue: JSON.stringify({ totalPaidAmount: order.totalPaidAmount, paymentStatus: order.paymentStatus, deliveryCharge: order.deliveryCharge }),
+          newValue: JSON.stringify({ codAmount: row.codAmount, shippingCharge: row.shippingCharge, paymentMethod: 'COD', paymentStatus: 'Paid' }),
+        });
+        await queryRunner.manager.save(CourierCodSettlementItem, {
+          settlementId: settlement.id, orderId: order.id, organizationId, invoiceNumber: row.invoice,
+          trackingCode: row.trackingCode || row.invoice, expectedCod, receivedCod: row.codAmount,
+          shippingCharge: row.shippingCharge, status: hasApprovedDiscount ? CourierCodSettlementItemStatus.ADJUSTED_SETTLED : CourierCodSettlementItemStatus.MATCHED,
+          adjustmentType: hasApprovedDiscount ? CourierCodAdjustmentType.NEGOTIATED_DISCOUNT : null,
+          adjustmentAmount, adjustmentReason: hasApprovedDiscount ? row.adjustmentReason : null, confirmedBy: userId,
+        });
+      }
+      await queryRunner.commitTransaction();
+      return { reconciledCount: preview.length, reconciledCodAmount: preview.reduce((sum, row) => sum + row.codAmount, 0) };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      throw error;
     } finally {
       await queryRunner.release();
     }

@@ -338,6 +338,20 @@ export class OrderController {
       };
     });
   }
+  @Post('/courier-cod/preview')
+  async previewCourierCodSettlement(@Body('rows') rows: any[], @Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'] as string;
+    const data = await this.orderService.previewCourierCodSettlement(rows, organizationId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Courier COD file preview generated', data };
+  }
+
+  @Post('/courier-cod/confirm')
+  async confirmCourierCodSettlement(@Body('rows') rows: any[], @Req() req: any) {
+    const organizationId = req.headers['x-organization-id'] as string;
+    const userId = req.user?.userId || req.user?.id;
+    const data = await this.orderService.confirmCourierCodSettlement(rows, organizationId, userId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Courier COD settlement reconciled', data };
+  }
   @Patch('/direct-deliver')
   async directDeliverOrders(@Body() data: any, @Req() req: Request) {
     return catchAsync(async (): Promise<IResponse<any>> => {

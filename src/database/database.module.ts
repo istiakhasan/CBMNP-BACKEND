@@ -23,7 +23,8 @@ import { join } from 'path';
         autoLoadEntities: true,
         // dont use synchronize: ture in real projects
         // ssl: { rejectUnauthorized: false },
-        synchronize: true,
+        // Production schema changes must be applied by an explicit migration.
+        synchronize: configService.get('NODE_ENV') !== 'production',
         // synchronize: true,
       }),
     }),

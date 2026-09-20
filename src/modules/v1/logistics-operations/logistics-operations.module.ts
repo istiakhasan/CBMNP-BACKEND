@@ -5,6 +5,7 @@ import { ShippingRateMatrix } from './entities/shipping-rate-matrix.entity';
 import { WarehousePickList } from './entities/warehouse-pick-list.entity';
 import { PickListItem } from './entities/pick-list-item.entity';
 import { CourierSettlement } from './entities/courier-settlement.entity';
+import { CourierCodSettlementItem } from './entities/courier-cod-settlement-item.entity';
 import { Order } from '../order/entities/order.entity';
 import { Products as OrderProduct } from '../order/entities/products.entity';
 import { DeliveryPartner } from '../delivery-partner/entities/delivery-partner.entity';
@@ -19,6 +20,7 @@ import { LogisticsOperationsController } from './logistics-operations.controller
       WarehousePickList,
       PickListItem,
       CourierSettlement,
+      CourierCodSettlementItem,
       Order,
       OrderProduct,
       DeliveryPartner,

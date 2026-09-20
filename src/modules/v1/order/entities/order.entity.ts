@@ -23,6 +23,7 @@ import { OrderProductReturn } from './return_damage.entity';
 import { AddressBook } from '../../customers/entities/addressbook.entity';
 import { Warehouse } from '../../warehouse/entities/warehouse.entity';
 import { OrderExchange } from './orderExchannge.entity';
+import { CourierCodSettlementItem } from '../../logistics-operations/entities/courier-cod-settlement-item.entity';
 
 @Entity({ name: 'orders' })
 @Unique(['organizationId', 'orderNumber'])
@@ -134,6 +135,8 @@ export class Order {
   orderLogs: OrdersLog[];
   @OneToMany(() => OrderProductReturn, (returns) => returns.order)
   productReturns: OrderProductReturn[];
+  @OneToMany(() => CourierCodSettlementItem, (settlementItem) => settlementItem.order)
+  courierCodSettlementItems: CourierCodSettlementItem[];
 
   @ManyToOne(() => DeliveryPartner, (partner) => partner.orders, {
     eager: true,
