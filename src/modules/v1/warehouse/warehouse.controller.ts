@@ -83,6 +83,12 @@ export class WarehouseController {
       },
     );
   }
+  @Get('/overview')
+  async overview(@Req() req: Request) {
+    const organizationId = req.headers['x-organization-id'] as string;
+    const data = await this.warehouseService.getOverview(organizationId);
+    return { success: true, statusCode: HttpStatus.OK, message: 'Warehouse overview retrieved successfully', data };
+  }
   @Patch('/set-default/:id')
   setDefault(
     @Param('id') id: string,

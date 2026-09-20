@@ -278,6 +278,13 @@ export class DashboardService {
       .select('op.productId', 'productId')
       .addSelect('p.name', 'productName')
       .addSelect('p.sku', 'sku')
+      .addSelect(
+        (subQuery) => subQuery
+          .select('MIN(productImage.url)')
+          .from('product_images', 'productImage')
+          .where('productImage.productId = op.productId'),
+        'imageUrl',
+      )
       .addSelect('COALESCE(SUM(op.productQuantity), 0)', 'quantitySold')
       .addSelect('COALESCE(SUM(op.subtotal), 0)', 'totalSales')
       .groupBy('op.productId')
@@ -439,6 +446,7 @@ export class DashboardService {
         productId: p.productId,
         productName: p.productName || 'Product',
         sku: p.sku || '',
+        imageUrl: p.imageUrl || '',
         quantitySold: Number(p.quantitySold || 0),
         totalSales: Number(p.totalSales || 0),
       })),
