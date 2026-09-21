@@ -47,6 +47,7 @@ import { NotificationsModule } from './modules/v1/notifications/notifications.mo
 import { GovernanceModule } from './modules/v1/governance/governance.module';
 import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module';
 import { GarmentsModule } from './modules/v1/garments/garments.module';
+import { SfaDmsModule } from './modules/v1/sfa-dms/sfa-dms.module';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { GarmentsModule } from './modules/v1/garments/garments.module';
     GovernanceModule,
     ActivityLogModule,
     GarmentsModule,
+    SfaDmsModule,
   ],
   controllers: [AppController],
   providers: [
