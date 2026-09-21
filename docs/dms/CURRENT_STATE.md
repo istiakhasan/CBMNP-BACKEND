@@ -65,7 +65,7 @@ Command: `npm test -- --runInBand` in `cbmnp-backend`.
 
 Initial result: failed — 23 suites failed, 1 passed; 18 tests failed, 1 passed. No SFA/DMS tests exist. Primary existing-suite blockers are unresolved `src/helpers/paginationHelpers` aliases, test modules missing TypeORM repository/DataSource providers, and a v2 order test importing `OrderService` instead of `OrderServiceV2`.
 
-Phase 0.5 baseline (after Jest `moduleNameMapper` resolves `src/*`): pending rerun. The new `npm run test:dms` target isolates new DMS tests from legacy failures.
+Phase 0.5 baseline (after Jest `moduleNameMapper` resolves `src/*`): 1 passing / 23 failing suites; 1 passing / 22 failing tests. The two unresolved-alias suites now execute and fail only for their pre-existing missing repository mocks. The remaining failures are missing TypeORM repository/DataSource mocks and the v2 order test's stale `OrderService` import. The new `npm run test:dms` target isolates new DMS tests from legacy failures.
 
 ## Risks / technical debt
 
