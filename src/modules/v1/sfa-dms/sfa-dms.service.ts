@@ -1,13 +1,15 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { DmsDistributor, DmsRetailer, DmsSalesOrder, DmsSalesOrderItem, SfaCollection, SfaFieldVisit, SfaRoute, SfaSalesTarget, SfaTerritory } from './entities/sfa-dms.entity';
+import { DmsArea, DmsDistributor, DmsRegion, DmsRetailer, DmsSalesOrder, DmsSalesOrderItem, SfaCollection, SfaFieldVisit, SfaRoute, SfaSalesTarget, SfaTerritory } from './entities/sfa-dms.entity';
 import { GovernanceService } from '../governance/governance.service';
 
 @Injectable()
 export class SfaDmsService {
   private readonly resources: Record<string, Repository<any>>;
   constructor(
+    @InjectRepository(DmsRegion) private readonly regions: Repository<DmsRegion>,
+    @InjectRepository(DmsArea) private readonly areas: Repository<DmsArea>,
     @InjectRepository(SfaTerritory) private readonly territories: Repository<SfaTerritory>,
     @InjectRepository(DmsDistributor) private readonly distributors: Repository<DmsDistributor>,
     @InjectRepository(DmsRetailer) private readonly retailers: Repository<DmsRetailer>,
@@ -19,11 +21,11 @@ export class SfaDmsService {
     @InjectRepository(SfaSalesTarget) private readonly targets: Repository<SfaSalesTarget>,
     private readonly governanceService: GovernanceService,
   ) {
-    this.resources = { territories, distributors, retailers, routes, visits, orders, collections, targets };
+    this.resources = { regions, areas, territories, distributors, retailers, routes, visits, orders, collections, targets };
   }
   private validate(resource: string, data: any) {
     const required: Record<string, string[]> = {
-      territories: ['code', 'name'], distributors: ['code', 'name'], retailers: ['code', 'name'], routes: ['code', 'name'],
+      regions: ['code', 'name'], areas: ['code', 'name', 'regionId'], territories: ['code', 'name'], distributors: ['code', 'name'], retailers: ['code', 'name'], routes: ['code', 'name'],
       visits: ['retailerId', 'visitDate'], orders: ['orderNumber', 'retailerId', 'orderDate'],
       collections: ['retailerId', 'collectionDate', 'amount', 'paymentMethod'], targets: ['salesRepId', 'period', 'salesTarget'],
     };

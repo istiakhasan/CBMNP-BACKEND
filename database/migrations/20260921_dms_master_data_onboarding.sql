@@ -1,0 +1,7 @@
+-- Additive DMS master-data/onboarding extension; compatible with TypeORM auto-sync.
+CREATE TABLE IF NOT EXISTS dms_regions (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "organizationId" uuid NOT NULL, code varchar NOT NULL, name varchar NOT NULL, active boolean NOT NULL DEFAULT true, "createdAt" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE ("organizationId", code));
+CREATE TABLE IF NOT EXISTS dms_areas (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), "organizationId" uuid NOT NULL, code varchar NOT NULL, name varchar NOT NULL, "regionId" uuid NOT NULL, active boolean NOT NULL DEFAULT true, "createdAt" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, "updatedAt" timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE ("organizationId", code));
+ALTER TABLE sfa_territories ADD COLUMN IF NOT EXISTS "areaId" uuid;
+ALTER TABLE dms_distributors ADD COLUMN IF NOT EXISTS "securityDeposit" numeric(14,2) NOT NULL DEFAULT 0;
+ALTER TABLE dms_distributors ADD COLUMN IF NOT EXISTS "tradeLicenseNumber" varchar, ADD COLUMN IF NOT EXISTS "tinNumber" varchar, ADD COLUMN IF NOT EXISTS "nidNumber" varchar, ADD COLUMN IF NOT EXISTS "agreementStartDate" date, ADD COLUMN IF NOT EXISTS "agreementEndDate" date, ADD COLUMN IF NOT EXISTS "onboardingStatus" varchar NOT NULL DEFAULT 'Draft', ADD COLUMN IF NOT EXISTS "blockedReason" varchar;
+CREATE INDEX IF NOT EXISTS idx_dms_areas_region ON dms_areas ("organizationId", "regionId");

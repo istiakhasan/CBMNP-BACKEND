@@ -7,6 +7,23 @@ abstract class SfaBaseEntity {
   @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP(6)', onUpdate: 'CURRENT_TIMESTAMP(6)' }) updatedAt: Date;
 }
 
+@Entity('dms_regions')
+@Index(['organizationId', 'code'], { unique: true })
+export class DmsRegion extends SfaBaseEntity {
+  @Column() code: string;
+  @Column() name: string;
+  @Column({ default: true }) active: boolean;
+}
+
+@Entity('dms_areas')
+@Index(['organizationId', 'code'], { unique: true })
+export class DmsArea extends SfaBaseEntity {
+  @Column() code: string;
+  @Column() name: string;
+  @Index() @Column({ type: 'uuid' }) regionId: string;
+  @Column({ default: true }) active: boolean;
+}
+
 @Entity('sfa_territories')
 @Index(['organizationId', 'code'], { unique: true })
 export class SfaTerritory extends SfaBaseEntity {
@@ -14,6 +31,7 @@ export class SfaTerritory extends SfaBaseEntity {
   @Column() name: string;
   @Column({ nullable: true }) division: string;
   @Column({ nullable: true }) district: string;
+  @Index() @Column({ type: 'uuid', nullable: true }) areaId: string;
   @Column({ default: true }) active: boolean;
 }
 
@@ -27,6 +45,14 @@ export class DmsDistributor extends SfaBaseEntity {
   @Column({ nullable: true }) contactName: string;
   @Column({ nullable: true }) phone: string;
   @Column({ type: 'numeric', precision: 14, scale: 2, default: 0 }) creditLimit: number;
+  @Column({ type: 'numeric', precision: 14, scale: 2, default: 0 }) securityDeposit: number;
+  @Column({ nullable: true }) tradeLicenseNumber: string;
+  @Column({ nullable: true }) tinNumber: string;
+  @Column({ nullable: true }) nidNumber: string;
+  @Column({ type: 'date', nullable: true }) agreementStartDate: string;
+  @Column({ type: 'date', nullable: true }) agreementEndDate: string;
+  @Column({ default: 'Draft' }) onboardingStatus: string;
+  @Column({ nullable: true }) blockedReason: string;
   @Column({ default: true }) active: boolean;
 }
 

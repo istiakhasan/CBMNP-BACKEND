@@ -3,12 +3,13 @@ import { SfaDmsService } from './sfa-dms.service';
 import { createDmsRepositoryMock } from '../../../test/helpers/dms-repository.mock';
 
 describe('SfaDmsService', () => {
-  const repositories = Array.from({ length: 9 }, createDmsRepositoryMock);
+  const repositories = Array.from({ length: 11 }, createDmsRepositoryMock);
   const governance = { logAction: jest.fn() };
   const service = new SfaDmsService(
     repositories[0] as any, repositories[1] as any, repositories[2] as any,
     repositories[3] as any, repositories[4] as any, repositories[5] as any,
     repositories[6] as any, repositories[7] as any, repositories[8] as any,
+    repositories[9] as any, repositories[10] as any,
     governance as any,
   );
 
@@ -22,6 +23,10 @@ describe('SfaDmsService', () => {
 
   it('rejects incomplete master data', async () => {
     await expect(service.create('distributors', 'org-id', { code: 'D-001' })).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('requires a parent region when creating an area', async () => {
+    await expect(service.create('areas', 'org-id', { code: 'A-001', name: 'Dhaka North' })).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('does not expose order items as a generic resource', async () => {
