@@ -45,9 +45,10 @@ import { HrPayrollModule } from './modules/v1/hr-payroll/hr-payroll.module';
 import { LogisticsOperationsModule } from './modules/v1/logistics-operations/logistics-operations.module';
 import { NotificationsModule } from './modules/v1/notifications/notifications.module';
 import { GovernanceModule } from './modules/v1/governance/governance.module';
-import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module';
 import { GarmentsModule } from './modules/v1/garments/garments.module';
 import { SfaDmsModule } from './modules/v1/sfa-dms/sfa-dms.module';
+import { EcommerceModule } from './modules/v1/ecommerce/ecommerce.module';
+import { ActivityLogModule } from './modules/v1/activity-log/activity-log.module';
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { SfaDmsModule } from './modules/v1/sfa-dms/sfa-dms.module';
     ActivityLogModule,
     GarmentsModule,
     SfaDmsModule,
+    EcommerceModule,
   ],
   controllers: [AppController],
   providers: [

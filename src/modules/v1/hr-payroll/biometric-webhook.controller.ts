@@ -1,5 +1,5 @@
 import { Controller, Post, Body, Headers, Req, Param } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiHeader } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiHeader, ApiBody, ApiParam } from '@nestjs/swagger';
 import { HrPayrollService } from './hr-payroll.service';
 import { Request } from 'express';
 
@@ -15,6 +15,8 @@ export class BiometricWebhookController {
   @Post('sync')
   @ApiOperation({ summary: 'Biometric device push webhook — authenticated via device API key, not user login' })
   @ApiHeader({ name: 'x-device-api-key', required: false, description: 'Biometric device API key' })
+  @ApiHeader({ name: 'x-organization-id', required: true, description: 'Organization UUID that owns the device' })
+  @ApiBody({ schema: { example: { deviceId: '<biometric-device-uuid>', apiKey: '<device-api-key-if-not-header>', logs: [{ employeeCode: 'EMP-001', timestamp: '2026-09-23T09:00:00+06:00', type: 'check-in' }] } } })
   async syncBiometricPunches(
     @Body() body: any,
     @Headers('x-device-api-key') headerApiKey: string,
@@ -29,6 +31,8 @@ export class BiometricWebhookController {
   @Post('devices/:deviceId/enrolled-users/sync')
   @ApiOperation({ summary: 'Save the enrolled-device roster sent by an office-LAN sync agent' })
   @ApiHeader({ name: 'x-device-api-key', required: false, description: 'Biometric device API key' })
+  @ApiParam({ name: 'deviceId', example: '<biometric-device-uuid>' })
+  @ApiBody({ schema: { example: { apiKey: '<device-api-key-if-not-header>', users: [{ deviceUserId: '101', employeeCode: 'EMP-001', name: 'Rahim Uddin' }] } } })
   async syncEnrolledUsers(
     @Param('deviceId') deviceId: string,
     @Body() body: any,

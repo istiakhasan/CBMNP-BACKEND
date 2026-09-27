@@ -17,10 +17,15 @@ import { Request, Response } from 'express';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { Roles } from '../../../middleware/roles.decorator';
 import { AuthGuard } from '../../../middleware/auth.guard';
+import { ApiBody, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+@ApiTags('Authentication')
 @Controller('/v1/auth')
 export class AuthenTicationController {
   constructor(private readonly authenTicationService: AuthenTicationService) {}
   @Post('/log-in')
+  @ApiOperation({ summary: 'Sign in and receive access and refresh tokens' })
+  @ApiBody({ schema: { example: { email: 'admin@example.com', password: 'StrongPassword123!' } } })
+  @ApiResponse({ status: 200, description: 'Use data.accessToken as the raw Authorization header value.' })
   async login(@Body(new ZodPipe(loginSchema)) data, @Res() res: Response) {
     const result = await this.authenTicationService.login(data);
     res.status(HttpStatus.OK).json({
@@ -31,6 +36,8 @@ export class AuthenTicationController {
     });
   }
   @Post('/super/log-in')
+  @ApiOperation({ summary: 'Sign in as a super administrator' })
+  @ApiBody({ schema: { example: { email: 'superadmin@example.com', password: 'StrongPassword123!' } } })
   async adminLogin(@Body(new ZodPipe(loginSchema)) data, @Res() res: Response) {
     const result = await this.authenTicationService.adminLogin(data);
     res.status(HttpStatus.OK).json({
@@ -42,6 +49,8 @@ export class AuthenTicationController {
   }
 
   @Post('/refresh-token')
+  @ApiOperation({ summary: 'Exchange a refresh token for a new access token' })
+  @ApiBody({ schema: { example: { refreshToken: '<refresh-token-from-login>' } } })
   async refreshToken(@Res() res: Response, @Req() req: Request) {
     const result = await this.authenTicationService.refreshToken(
       req.body.refreshToken,
@@ -55,6 +64,7 @@ export class AuthenTicationController {
   }
 
   @Get('/profile')
+  @ApiOperation({ summary: 'Get the signed-in user profile' })
   @UseGuards(AuthGuard)
   @Roles(
     'admin',
@@ -83,6 +93,8 @@ export class AuthenTicationController {
   }
 
   @Post('employee-change-password')
+  @ApiOperation({ summary: 'Change the signed-in employee password' })
+  @ApiBody({ schema: { example: { currentPassword: 'OldPassword123!', newPassword: 'NewPassword123!' } } })
   @UseGuards(AuthGuard)
   async changePassword(
     @Req() req,

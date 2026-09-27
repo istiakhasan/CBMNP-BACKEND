@@ -156,8 +156,9 @@ export class GarmentsService {
     let nextSeq = 1;
     if (lastLot && lastLot.lotNumber) {
       const parts = lastLot.lotNumber.split('-');
-      if (parts.length >= 3) {
-        const seqStr = parts[2];
+      if (parts.length >= 4) {
+        // SMP-LOT-YYYY-NNNNNN: the final segment is the running serial.
+        const seqStr = parts[parts.length - 1];
         const parsed = parseInt(seqStr, 10);
         if (!isNaN(parsed)) {
           nextSeq = parsed + 1;

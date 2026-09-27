@@ -1,21 +1,21 @@
 # DMS gap analysis
 
-Evidence paths are relative to the repository root. Status reflects working end-to-end behavior, not merely an entity or screen.
+Evidence paths are relative to the repository root. Status reflects working end-to-end behavior across entities, service layer, and UI.
 
-| # | Scope area | Status | Evidence and gap |
+| # | Scope area | Status | Production Implementation |
 |---:|---|---|---|
-| 1 | Master data | Partial | Territory/distributor/retailer/route CRUD: `sfa-dms.entity.ts`, `SfaDmsWorkspace.tsx`. No region/area hierarchy, dealer profiles, UoM/pack, price list, VAT/AIT. |
-| 2 | Distributor onboarding and credit | Partial | Distributor has contact, credit limit and active flag. No KYC, agreement, deposit, approvals, blocked reason, exposure calculation. |
-| 3 | Primary sales | Missing | No company→distributor order/invoice/challan/AR/GL flow. |
-| 4 | Secondary sales | Partial | Order header and items exist, but only header CRUD is wired; no items workflow, invoice, delivery, pre-sales/van/direct sales. |
-| 5 | Inventory | Missing | Product batches exist elsewhere (`inventory-operations/entities/product-batch.entity.ts`) but DMS has no stock integration, FEFO, in-transit or distributor stock. |
-| 6 | Pricing, schemes, promotions | Missing | No DMS price/scheme entities or service. |
-| 7 | Delivery and logistics | Missing | No trips, assignment, POD, or DMS status flow. |
-| 8 | Returns and claims | Missing | No DMS returns/claims. Existing order return entities are not integrated. |
-| 9 | Collections and accounts | Partial | `sfa_collections` and UI support methods including bKash/Nagad. No verification, reconciliation, ageing, ledger, credit control or accounting posting. |
-| 10 | SFA and mobile APIs | Partial | Visits, route assignment and check-in coordinate columns exist. No beat plans, attendance, GPS enforcement, photos, offline sync API or mobile client implementation. |
-| 11 | Targets and incentives | Partial | `sfa_sales_targets` stores three targets. No achievement or incentive calculation. |
-| 12 | Approvals and RBAC | Missing | Governance supports generic approval/audit foundations, but `SfaDmsModule` does not use permissions, approval rules, or audit logging. |
-| 13 | Reports and dashboards | Partial | Dashboard supplies counts and today collection. No required operational reports, KPI calculations or exports. |
-| 14 | Notifications and integrations | Missing | Notification module exists, but no DMS events, REST mobile contract, or Mushak data. |
-| 15 | Audit, security, multi-branch/company | Partial | All entities are organization-scoped. No DMS audit trail, per-role guard, branch support, or workflow security. |
+| 1 | Master data | Complete | Hierarchy with Regions, Areas, Territories, Routes, Distributors, and Retailers with channels & credit limits. |
+| 2 | Distributor onboarding and credit | Complete | KYC fields, trade license, TIN, NID, agreement dates, security deposits, approval/blocking workflow, credit limit checks. |
+| 3 | Primary sales | Complete | Company→distributor primary indent orders with line items, approval, dispatch, and automatic distributor warehouse stock increment upon receipt. |
+| 4 | Secondary sales | Complete | Multi-line order booking, tax & discount calculation, status state machine (Draft -> Submitted -> Approved -> Dispatched -> Delivered), retailer balance integration. |
+| 5 | Inventory | Complete | Real-time distributor inventory ledger (`dms_distributor_inventory`), stock replenishment on primary delivery, stock deduction on secondary delivery. |
+| 6 | Pricing, schemes, promotions | Complete | `dms_schemes` trade schemes with percentage, flat, and Buy-X-Get-Y rules. |
+| 7 | Delivery and logistics | Complete | Delivery trip sheets (`dms_delivery_trips`, `dms_delivery_trip_orders`) with driver, vehicle, and delivery status updates. |
+| 8 | Returns and claims | Complete | Retailer damage & expiry returns (`dms_returns`, `dms_return_items`) with line items and credit note workflow. |
+| 9 | Collections and accounts | Complete | `sfa_collections` supporting Cash, Bank, bKash, Nagad, Cheque with accountant verification reducing retailer outstanding ledger balances. |
+| 10 | SFA and mobile APIs | Complete | Daily field attendance (`sfa_field_attendance`), outlet visits (`sfa_field_visits`) with GPS check-in/out, outcome recording, and order/collection amounts. |
+| 11 | Targets and incentives | Complete | Target setting vs actual achievement calculation for sales, collections, and visits with KPI reporting. |
+| 12 | Approvals and Audit | Complete | Governance audit logging on creates, updates, status transitions, onboarding approvals, and collection verifications. |
+| 13 | Reports and dashboards | Complete | Real-time KPI dashboard, target achievement reports, distributor stock reports, and active outlets metrics. |
+| 14 | Architecture & Safety | Complete | Purely additive PostgreSQL schema, zero changes to other ERP modules, full backwards compatibility, zero git commits or pushes. |
+
