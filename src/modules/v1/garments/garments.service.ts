@@ -393,9 +393,33 @@ export class GarmentsService {
   // =========================================================================
   // 3. PURCHASE ORDERS (PO) & APPROVALS
   // =========================================================================
+  private removeDuplicatePoItems(items: any[]) {
+    const seen = new Set<string>();
+
+    return (items || []).filter((item) => {
+      // Exact duplicate rows are never meaningful in a PO. Include the commercial
+      // values in the key so separately-priced lines remain valid.
+      const key = [
+        item.itemCategory,
+        item.itemName,
+        item.itemDetails ?? item.specification,
+        item.itemColor,
+        item.unit,
+        Number(item.qty ?? item.quantity ?? 0),
+        Number(item.unitCost ?? item.unitPrice ?? item.price ?? 0),
+      ]
+        .map((value) => String(value ?? '').trim().toLowerCase())
+        .join('|');
+
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   async createPo(dto: any, userName: string, organizationId: string) {
     const supplierPoNo = dto.supplierPoNo || (await this.generatePoNo());
-    const items = dto.items || [];
+    const items = this.removeDuplicatePoItems(dto.items || []);
 
     let subtotal = 0;
     const poItemsToCreate = items.map((item: any) => {
@@ -418,8 +442,12 @@ export class GarmentsService {
     const tax = subtotal * (taxRatePercent / 100);
     const totalAmount = subtotal + tax + shippingCost + otherCharges;
 
+    // Items are persisted below after quantities and costs are normalized.
+    // Do not pass raw dto.items to this cascading relation, otherwise TypeORM
+    // saves every line here and then saves it a second time via poItemRepo.
+    const { items: _items, ...poData } = dto;
     const po = this.poRepo.create({
-      ...dto,
+      ...poData,
       supplierPoNo,
       subtotal,
       totalAmount,
@@ -475,7 +503,7 @@ export class GarmentsService {
 
   async updatePo(id: string, dto: any) {
     const po = await this.getPoById(id);
-    const items = dto.items;
+    const items = Array.isArray(dto.items) ? this.removeDuplicatePoItems(dto.items) : dto.items;
 
     if (Array.isArray(items)) {
       await this.poItemRepo.delete({ poId: id });
