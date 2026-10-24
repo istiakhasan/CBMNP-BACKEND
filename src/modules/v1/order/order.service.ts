@@ -4349,7 +4349,7 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .clone()
       .select(`DATE(orders.${dateField})`, 'date')
       .addSelect('orders.id', 'orderId')
-      .addSelect('orders.orderNumber', 'orderNumber')
+      .addSelect('orders.invoiceNumber', 'invoiceNumber')
       .addSelect('prod.productId', 'productId')
       .addSelect('p.name', 'productName')
       .addSelect('p.sku', 'sku')
@@ -4357,12 +4357,12 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'saleAmount')
       .groupBy(`DATE(orders.${dateField})`)
       .addGroupBy('orders.id')
-      .addGroupBy('orders.orderNumber')
+      .addGroupBy('orders.invoiceNumber')
       .addGroupBy('prod.productId')
       .addGroupBy('p.name')
       .addGroupBy('p.sku')
       .orderBy(`DATE(orders.${dateField})`, 'ASC')
-      .addOrderBy('orders.orderNumber', 'ASC')
+      .addOrderBy('orders.invoiceNumber', 'ASC')
       .addOrderBy('quantity', 'DESC')
       .getRawMany();
 
@@ -4385,7 +4385,7 @@ async getProductSalesReport(options, filterOptions, organizationId) {
       }
       productsByDate.get(key)!.push({
         orderId: row.orderId,
-        orderNumber: row.orderNumber,
+        invoiceNumber: row.invoiceNumber,
         productId: row.productId,
         productName: row.productName,
         sku: row.sku,
