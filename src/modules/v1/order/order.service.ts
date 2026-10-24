@@ -4348,16 +4348,21 @@ async getProductSalesReport(options, filterOptions, organizationId) {
     const dateProductRaw = await baseQuery
       .clone()
       .select(`DATE(orders.${dateField})`, 'date')
+      .addSelect('orders.id', 'orderId')
+      .addSelect('orders.orderNumber', 'orderNumber')
       .addSelect('prod.productId', 'productId')
       .addSelect('p.name', 'productName')
       .addSelect('p.sku', 'sku')
       .addSelect('COALESCE(SUM(prod.productQuantity), 0)', 'quantity')
       .addSelect('COALESCE(SUM(prod.subtotal), 0)', 'saleAmount')
       .groupBy(`DATE(orders.${dateField})`)
+      .addGroupBy('orders.id')
+      .addGroupBy('orders.orderNumber')
       .addGroupBy('prod.productId')
       .addGroupBy('p.name')
       .addGroupBy('p.sku')
       .orderBy(`DATE(orders.${dateField})`, 'ASC')
+      .addOrderBy('orders.orderNumber', 'ASC')
       .addOrderBy('quantity', 'DESC')
       .getRawMany();
 
@@ -4379,6 +4384,8 @@ async getProductSalesReport(options, filterOptions, organizationId) {
         productsByDate.set(key, []);
       }
       productsByDate.get(key)!.push({
+        orderId: row.orderId,
+        orderNumber: row.orderNumber,
         productId: row.productId,
         productName: row.productName,
         sku: row.sku,
@@ -4389,12 +4396,14 @@ async getProductSalesReport(options, filterOptions, organizationId) {
 
     const dateBreakdown = dateBreakdownRaw.map((item) => {
       const key = normalizeDateKey(item.date);
+      const products = productsByDate.get(key) || [];
       return {
         date: key, // clean 'YYYY-MM-DD' string, not a Date object
         orderCount: Number(item.orderCount) || 0,
         productQuantity: Number(item.productQuantity) || 0,
         saleAmount: Number(item.saleAmount) || 0,
-        products: productsByDate.get(key) || [],
+        productCount: new Set(products.map((product) => product.productId)).size,
+        products,
       };
     });
     
