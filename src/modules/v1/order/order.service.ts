@@ -798,22 +798,26 @@ export class OrderService {
       queryBuilder.leftJoinAndSelect('orders.products', 'products');
       queryBuilder.leftJoinAndSelect('products.product', 'product');
     }
-   if (filterOptions?.searchTerm) {
-  const searchTerm = `%${filterOptions.searchTerm.toString().trim()}%`;
+    if (filterOptions?.searchTerm?.trim()) {
+      const rawSearchTerm = filterOptions.searchTerm.toString().trim();
+      const isInvoiceSearch = rawSearchTerm.startsWith('invoice:');
+      const isOrderNumberSearch = rawSearchTerm.startsWith('order:');
+      const searchTerm = `%${rawSearchTerm.replace(/^(invoice|order):/, '').trim()}%`;
 
-  queryBuilder.leftJoin('orders.customer', 'customer');
-
-  queryBuilder.andWhere(
-    `(
-      orders.invoiceNumber LIKE :searchTerm
-      OR orders.receiverPhoneNumber LIKE :searchTerm
-      OR customer.customerPhoneNumber LIKE :searchTerm
-    )`,
-    {
-      searchTerm,
-    },
-  );
-}
+      if (isInvoiceSearch) {
+        queryBuilder.andWhere('orders.invoiceNumber LIKE :searchTerm', { searchTerm });
+      } else if (isOrderNumberSearch) {
+        queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', { searchTerm });
+      } else {
+        queryBuilder.leftJoin('orders.customer', 'customer');
+        queryBuilder.andWhere(
+          `(orders.invoiceNumber LIKE :searchTerm
+            OR orders.receiverPhoneNumber LIKE :searchTerm
+            OR customer.customerPhoneNumber LIKE :searchTerm)`,
+          { searchTerm },
+        );
+      }
+    }
 
     if (filterOptions?.startDate && filterOptions?.endDate) {
       queryBuilder.andWhere(
@@ -1478,6 +1482,20 @@ async getOrdersReports(options, filterOptions, organizationId) {
   const [orders, total] =
     await queryBuilder.getManyAndCount();
 
+  const orderIds = orders.map((order) => order.id);
+  const paymentHistories = orderIds.length
+    ? await this.paymentHistoryRepository.find({
+        where: { orderId: In(orderIds) },
+        order: { createdAt: 'ASC' },
+      })
+    : [];
+  const paymentHistoryMap = new Map<number, PaymentHistory[]>();
+  for (const payment of paymentHistories) {
+    const history = paymentHistoryMap.get(payment.orderId) || [];
+    history.push(payment);
+    paymentHistoryMap.set(payment.orderId, history);
+  }
+
   // ============================================
   // STATUS IDS
   // ============================================
@@ -1632,6 +1650,7 @@ async getOrdersReports(options, filterOptions, organizationId) {
 
   const modifiedData = orders.map((order) => ({
     ...order,
+    paymentHistory: paymentHistoryMap.get(order.id) || [],
 
     status: statusMap.get(
       order.statusId,
@@ -4030,13 +4049,16 @@ async update(orderId: number, data: Order) {
 
     worksheet.columns = [
       { header: 'Order ID', key: 'id', width: 20 },
+      { header: 'Invoice Number', key: 'invoiceNumber', width: 20 },
       { header: 'Order Number', key: 'orderNumber', width: 20 },
       { header: 'Customer ID', key: 'customerId', width: 20 },
       { header: 'Status', key: 'statusId', width: 15 },
       { header: 'Total Price', key: 'totalPrice', width: 15 },
       { header: 'Payment Method', key: 'paymentMethod', width: 20 },
+      { header: 'Payment Status', key: 'paymentStatus', width: 18 },
       { header: 'Transaction ID', key: 'transactionId', width: 28 },
       { header: 'Transaction History', key: 'transactionHistory', width: 70 },
+      { header: 'Due Amount', key: 'dueAmount', width: 18 },
       { header: 'Agent ID', key: 'agentId', width: 15 },
       { header: 'Created At', key: 'createdAt', width: 25 },
     ];
@@ -4133,13 +4155,16 @@ async update(orderId: number, data: Order) {
         worksheet
           .addRow({
             id: order.id,
+            invoiceNumber: order.invoiceNumber,
             orderNumber: order.orderNumber,
             customerId: order.customerId,
             statusId: order.statusId,
             totalPrice: order.totalPrice,
             paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
             transactionId,
             transactionHistory,
+            dueAmount: order.totalReceiveAbleAmount,
             agentId: order.agentId,
             createdAt: order.createdAt,
           })

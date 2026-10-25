@@ -287,11 +287,19 @@ async getAllOrdersCountByStatus(
       });
     }
     if (filterOptions.searchTerm?.trim()) {
-      queryBuilder.leftJoin('orders.customer', 'customer').andWhere(`(
-        orders.invoiceNumber ILIKE :searchTerm
-        OR orders.receiverPhoneNumber ILIKE :searchTerm
-        OR customer.customerPhoneNumber ILIKE :searchTerm
-      )`, { searchTerm: `%${filterOptions.searchTerm.trim()}%` });
+      const rawSearchTerm = filterOptions.searchTerm.trim();
+      const searchTerm = `%${rawSearchTerm.replace(/^(invoice|order):/, '').trim()}%`;
+      if (rawSearchTerm.startsWith('invoice:')) {
+        queryBuilder.andWhere('orders.invoiceNumber ILIKE :searchTerm', { searchTerm });
+      } else if (rawSearchTerm.startsWith('order:')) {
+        queryBuilder.andWhere('orders.orderNumber ILIKE :searchTerm', { searchTerm });
+      } else {
+        queryBuilder.leftJoin('orders.customer', 'customer').andWhere(`(
+          orders.invoiceNumber ILIKE :searchTerm
+          OR orders.receiverPhoneNumber ILIKE :searchTerm
+          OR customer.customerPhoneNumber ILIKE :searchTerm
+        )`, { searchTerm });
+      }
     }
     if (filterOptions.productIds?.length) {
       queryBuilder.andWhere(`EXISTS (
