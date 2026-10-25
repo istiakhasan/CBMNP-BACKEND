@@ -3982,16 +3982,39 @@ async update(orderId: number, data: Order) {
       .createQueryBuilder('orders')
       .where('orders.organizationId = :organizationId', { organizationId });
 
+    const allowedDateFields = ['createdAt', 'intransitTime', 'storeTime', 'packingTime', 'approvedTime'];
+    const dateField = allowedDateFields.includes(filterOptions?.dateField)
+      ? filterOptions.dateField
+      : 'createdAt';
+    let reportStartDate: Date | undefined;
+    let reportEndDate: Date | undefined;
+    if (filterOptions?.startDate && filterOptions?.endDate) {
+      const start = new Date(String(filterOptions.startDate));
+      const end = new Date(String(filterOptions.endDate));
+      if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        throw new BadRequestException('Invalid report date range');
+      }
+      const bdOffset = 6 * 60 * 60 * 1000;
+      const bdStart = new Date(start.getTime() + bdOffset);
+      const bdEnd = new Date(end.getTime() + bdOffset);
+      reportStartDate = new Date(Date.UTC(
+        bdStart.getUTCFullYear(), bdStart.getUTCMonth(), bdStart.getUTCDate(), 0, 0, 0, 0,
+      ) - bdOffset);
+      reportEndDate = new Date(Date.UTC(
+        bdEnd.getUTCFullYear(), bdEnd.getUTCMonth(), bdEnd.getUTCDate(), 23, 59, 59, 999,
+      ) - bdOffset);
+    }
+
     if (filterOptions?.searchTerm) {
       countQb.andWhere('orders.orderNumber LIKE :searchTerm', {
         searchTerm: `%${filterOptions.searchTerm}%`,
       });
     }
 
-    if (filterOptions?.startDate && filterOptions?.endDate) {
-      countQb.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
-        startDate: new Date(filterOptions.startDate),
-        endDate: new Date(filterOptions.endDate),
+    if (reportStartDate && reportEndDate) {
+      countQb.andWhere(`orders.${dateField} BETWEEN :startDate AND :endDate`, {
+        startDate: reportStartDate,
+        endDate: reportEndDate,
       });
     }
 
@@ -4013,6 +4036,19 @@ async update(orderId: number, data: Order) {
       countQb.andWhere('orders.currier IN (:...curierIds)', {
         curierIds,
       });
+    }
+
+    const exportLocationIds = Array.isArray(filterOptions?.locationId)
+      ? filterOptions.locationId
+      : filterOptions?.locationId ? [filterOptions.locationId] : [];
+    if (exportLocationIds.length) {
+      countQb.andWhere('orders.locationId IN (:...exportLocationIds)', { exportLocationIds });
+    }
+    const exportAgentIds = Array.isArray(filterOptions?.agentIds)
+      ? filterOptions.agentIds
+      : filterOptions?.agentIds ? [filterOptions.agentIds] : [];
+    if (exportAgentIds.length) {
+      countQb.andWhere('orders.agentId IN (:...exportAgentIds)', { exportAgentIds });
     }
 
     let statusIdss = filterOptions?.statusId;
@@ -4053,6 +4089,7 @@ async update(orderId: number, data: Order) {
       { header: 'Order Number', key: 'orderNumber', width: 20 },
       { header: 'Customer ID', key: 'customerId', width: 20 },
       { header: 'Status', key: 'statusId', width: 15 },
+      { header: 'Products', key: 'products', width: 60 },
       { header: 'Total Price', key: 'totalPrice', width: 15 },
       { header: 'Paid Amount', key: 'paidAmount', width: 15 },
       { header: 'Payment Method', key: 'paymentMethod', width: 20 },
@@ -4079,10 +4116,10 @@ async update(orderId: number, data: Order) {
         });
       }
 
-      if (filterOptions?.startDate && filterOptions?.endDate) {
-        qb.andWhere('orders.createdAt BETWEEN :startDate AND :endDate', {
-          startDate: new Date(filterOptions.startDate),
-          endDate: new Date(filterOptions.endDate),
+      if (reportStartDate && reportEndDate) {
+        qb.andWhere(`orders.${dateField} BETWEEN :startDate AND :endDate`, {
+          startDate: reportStartDate,
+          endDate: reportEndDate,
         });
       }
 
@@ -4124,6 +4161,13 @@ async update(orderId: number, data: Order) {
         });
       }
 
+      if (exportLocationIds.length) {
+        qb.andWhere('orders.locationId IN (:...exportLocationIds)', { exportLocationIds });
+      }
+      if (exportAgentIds.length) {
+        qb.andWhere('orders.agentId IN (:...exportAgentIds)', { exportAgentIds });
+      }
+
       if (lastId > 0) {
         qb.andWhere('orders.id > :lastId', { lastId });
       }
@@ -4135,6 +4179,17 @@ async update(orderId: number, data: Order) {
       if (!orders.length) {
         hasMore = false;
         break;
+      }
+
+      const orderProducts = await this.productsRepository.find({
+        where: { orderId: In(orders.map((order) => order.id)) },
+        relations: ['product'],
+      });
+      const productsByOrder = new Map<number, Products[]>();
+      for (const product of orderProducts) {
+        const products = productsByOrder.get(product.orderId) || [];
+        products.push(product);
+        productsByOrder.set(product.orderId, products);
       }
 
       for (const order of orders) {
@@ -4153,6 +4208,9 @@ async update(orderId: number, data: Order) {
             return `${date} | ${payment.paymentMethod || '-'} | ${payment.paidAmount || 0} | ${payment.transactionId || '-'} | ${payment.paymentStatus || '-'}`;
           })
           .join('\n');
+        const products = (productsByOrder.get(order.id) || [])
+          .map((product) => `${product.product?.name || product.productId} × ${product.productQuantity}`)
+          .join('\n');
         worksheet
           .addRow({
             id: order.id,
@@ -4160,6 +4218,7 @@ async update(orderId: number, data: Order) {
             orderNumber: order.orderNumber,
             customerId: order.customerId,
             statusId: order.statusId,
+            products,
             totalPrice: order.totalPrice,
             paidAmount: order.totalPaidAmount,
             paymentMethod: order.paymentMethod,
