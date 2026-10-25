@@ -4088,7 +4088,7 @@ async update(orderId: number, data: Order) {
       { header: 'Invoice Number', key: 'invoiceNumber', width: 20 },
       { header: 'Order Number', key: 'orderNumber', width: 20 },
       { header: 'Customer ID', key: 'customerId', width: 20 },
-      { header: 'Status', key: 'statusId', width: 15 },
+      { header: 'Status', key: 'status', width: 18 },
       { header: 'Products', key: 'products', width: 60 },
       { header: 'Total Price', key: 'totalPrice', width: 15 },
       { header: 'Paid Amount', key: 'paidAmount', width: 15 },
@@ -4175,6 +4175,7 @@ async update(orderId: number, data: Order) {
       qb.orderBy('orders.id', 'ASC').limit(BATCH_SIZE);
 
       qb.leftJoinAndSelect('orders.paymentHistory', 'paymentHistory');
+      qb.leftJoinAndSelect('orders.status', 'status');
       const orders = await qb.getMany();
       if (!orders.length) {
         hasMore = false;
@@ -4217,7 +4218,7 @@ async update(orderId: number, data: Order) {
             invoiceNumber: order.invoiceNumber,
             orderNumber: order.orderNumber,
             customerId: order.customerId,
-            statusId: order.statusId,
+            status: order.status?.label || '-',
             products,
             totalPrice: order.totalPrice,
             paidAmount: order.totalPaidAmount,
