@@ -224,6 +224,9 @@ export class OrderController {
       'agentIds',
       'orderSources',
       'paymentMethodIds',
+      'dateField',
+      'orderSources',
+      'paymentMethodIds',
     ];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {
@@ -273,6 +276,9 @@ export class OrderController {
       'currier',
       'productId',
       'agentIds',
+      'orderSources',
+      'paymentMethodIds',
+      'dateField',
     ];
     for (const key of filterKeys) {
       if (query && Object.hasOwnProperty.call(query, key)) {

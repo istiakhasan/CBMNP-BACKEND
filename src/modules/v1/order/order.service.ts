@@ -824,6 +824,7 @@ export class OrderService {
         },
       );
     }
+
     if (filterOptions?.createdAtStart && filterOptions?.createdAtEnd) {
       queryBuilder.andWhere(
         'orders.createdAt BETWEEN :createdAtStart AND :createdAtEnd',
@@ -3974,6 +3975,19 @@ async update(orderId: number, data: Order) {
         endDate: new Date(filterOptions.endDate),
       });
     }
+
+    let paymentMethodIds = filterOptions?.paymentMethodIds;
+    if (paymentMethodIds) {
+      paymentMethodIds = Array.isArray(paymentMethodIds)
+        ? paymentMethodIds
+        : [paymentMethodIds];
+      paymentMethodIds = paymentMethodIds.filter((method) => method && method !== 'all');
+      if (paymentMethodIds.length) {
+        countQb.andWhere('orders.paymentMethod IN (:...paymentMethodIds)', {
+          paymentMethodIds,
+        });
+      }
+    }
     let curierIds = filterOptions?.currier;
     if (curierIds) {
       curierIds = Array.isArray(curierIds) ? curierIds : [curierIds];
@@ -4020,6 +4034,9 @@ async update(orderId: number, data: Order) {
       { header: 'Customer ID', key: 'customerId', width: 20 },
       { header: 'Status', key: 'statusId', width: 15 },
       { header: 'Total Price', key: 'totalPrice', width: 15 },
+      { header: 'Payment Method', key: 'paymentMethod', width: 20 },
+      { header: 'Transaction ID', key: 'transactionId', width: 28 },
+      { header: 'Transaction History', key: 'transactionHistory', width: 70 },
       { header: 'Agent ID', key: 'agentId', width: 15 },
       { header: 'Created At', key: 'createdAt', width: 25 },
     ];
@@ -4054,6 +4071,21 @@ async update(orderId: number, data: Order) {
         qb.andWhere('orders.statusId IN (:...statusIds)', { statusIds });
       }
 
+      let exportPaymentMethodIds = filterOptions?.paymentMethodIds;
+      if (exportPaymentMethodIds) {
+        exportPaymentMethodIds = Array.isArray(exportPaymentMethodIds)
+          ? exportPaymentMethodIds
+          : [exportPaymentMethodIds];
+        exportPaymentMethodIds = exportPaymentMethodIds.filter(
+          (method) => method && method !== 'all',
+        );
+        if (exportPaymentMethodIds.length) {
+          qb.andWhere('orders.paymentMethod IN (:...exportPaymentMethodIds)', {
+            exportPaymentMethodIds,
+          });
+        }
+      }
+
       // FIX(D): the courier filter was applied to countQb (used for the
       // "too many records" guard above) but was missing here, so the
       // exported rows could silently include orders from couriers the
@@ -4075,6 +4107,7 @@ async update(orderId: number, data: Order) {
 
       qb.orderBy('orders.id', 'ASC').limit(BATCH_SIZE);
 
+      qb.leftJoinAndSelect('orders.paymentHistory', 'paymentHistory');
       const orders = await qb.getMany();
       if (!orders.length) {
         hasMore = false;
@@ -4082,6 +4115,21 @@ async update(orderId: number, data: Order) {
       }
 
       for (const order of orders) {
+        const paymentHistory = [...(order.paymentHistory || [])].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+        );
+        const transactionId = paymentHistory
+          .map((payment) => payment.transactionId)
+          .filter(Boolean)
+          .join(', ');
+        const transactionHistory = paymentHistory
+          .map((payment) => {
+            const date = payment.createdAt
+              ? new Date(payment.createdAt).toISOString().slice(0, 19).replace('T', ' ')
+              : '-';
+            return `${date} | ${payment.paymentMethod || '-'} | ${payment.paidAmount || 0} | ${payment.transactionId || '-'} | ${payment.paymentStatus || '-'}`;
+          })
+          .join('\n');
         worksheet
           .addRow({
             id: order.id,
@@ -4089,6 +4137,9 @@ async update(orderId: number, data: Order) {
             customerId: order.customerId,
             statusId: order.statusId,
             totalPrice: order.totalPrice,
+            paymentMethod: order.paymentMethod,
+            transactionId,
+            transactionHistory,
             agentId: order.agentId,
             createdAt: order.createdAt,
           })
