@@ -296,8 +296,12 @@ async getAllOrdersCountByStatus(
       } else {
         queryBuilder.leftJoin('orders.customer', 'customer').andWhere(`(
           orders.invoiceNumber ILIKE :searchTerm
+          OR orders.orderNumber ILIKE :searchTerm
           OR orders.receiverPhoneNumber ILIKE :searchTerm
+          OR orders.receiverName ILIKE :searchTerm
           OR customer.customerPhoneNumber ILIKE :searchTerm
+          OR customer.customerAdditionalPhoneNumber ILIKE :searchTerm
+          OR customer.customerName ILIKE :searchTerm
         )`, { searchTerm });
       }
     }
