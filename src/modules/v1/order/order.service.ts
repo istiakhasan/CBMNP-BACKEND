@@ -805,15 +805,19 @@ export class OrderService {
       const searchTerm = `%${rawSearchTerm.replace(/^(invoice|order):/, '').trim()}%`;
 
       if (isInvoiceSearch) {
-        queryBuilder.andWhere('orders.invoiceNumber LIKE :searchTerm', { searchTerm });
+        queryBuilder.andWhere('orders.invoiceNumber ILIKE :searchTerm', { searchTerm });
       } else if (isOrderNumberSearch) {
-        queryBuilder.andWhere('orders.orderNumber LIKE :searchTerm', { searchTerm });
+        queryBuilder.andWhere('orders.orderNumber ILIKE :searchTerm', { searchTerm });
       } else {
         queryBuilder.leftJoin('orders.customer', 'customer');
         queryBuilder.andWhere(
-          `(orders.invoiceNumber LIKE :searchTerm
-            OR orders.receiverPhoneNumber LIKE :searchTerm
-            OR customer.customerPhoneNumber LIKE :searchTerm)`,
+          `(orders.invoiceNumber ILIKE :searchTerm
+            OR orders.orderNumber ILIKE :searchTerm
+            OR orders.receiverPhoneNumber ILIKE :searchTerm
+            OR orders.receiverName ILIKE :searchTerm
+            OR customer.customerPhoneNumber ILIKE :searchTerm
+            OR customer.customerAdditionalPhoneNumber ILIKE :searchTerm
+            OR customer.customerName ILIKE :searchTerm)`,
           { searchTerm },
         );
       }
