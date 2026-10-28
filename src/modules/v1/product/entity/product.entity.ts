@@ -110,6 +110,9 @@ export class Product {
 
   @Column({ nullable: true })
   shopifyVariantId: string;
+  // Cached from Shopify's product variant. Required by inventorySetQuantities.
+  @Column({ nullable: true })
+  shopifyInventoryItemId: string;
   @OneToMany(() => Transaction, (transaction) => transaction.product)
   @JoinColumn({name:"productId",referencedColumnName:"productId"})
   transactions: Transaction[];

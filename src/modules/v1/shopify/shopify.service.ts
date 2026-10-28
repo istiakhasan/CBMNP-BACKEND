@@ -584,6 +584,9 @@ private normalizeBangladeshPhone(phone?: string | null): string {
         purchasePrice: 0,
         shopifyProductId,
         shopifyVariantId,
+        shopifyInventoryItemId: variant.inventory_item_id
+          ? String(variant.inventory_item_id)
+          : existing?.shopifyInventoryItemId || null,
       });
     } catch (err: any) {
       if (isUniqueViolation(err)) {

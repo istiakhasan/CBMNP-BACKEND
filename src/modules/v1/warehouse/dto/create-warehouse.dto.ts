@@ -1,5 +1,5 @@
 
-import { IsString, IsUUID, IsPhoneNumber, IsNotEmpty } from 'class-validator';
+import { IsString, IsUUID, IsPhoneNumber, IsNotEmpty, IsOptional } from 'class-validator';
 
 export class CreateWarehouseDto {
   @IsNotEmpty()
@@ -17,6 +17,10 @@ export class CreateWarehouseDto {
   @IsNotEmpty()
   @IsPhoneNumber('BD', { message: 'Phone number must be valid for Bangladesh.' }) // Replace 'BD' with appropriate locale if needed
   readonly phone: string;
+
+  @IsOptional()
+  @IsString()
+  readonly shopifyLocationId?: string;
 }
 
 

@@ -68,6 +68,7 @@ export class WarehouseService {
       .addSelect('warehouse.isDefault', 'isDefault')
       .addSelect('COUNT(stock.productId)', 'skuCount')
       .addSelect('COALESCE(SUM(stock.quantity), 0)', 'availableQuantity')
+      .addSelect('COALESCE(SUM(stock."pendingReservedQuantity"), 0)', 'pendingReservedQuantity')
       .addSelect('COALESCE(SUM(stock.orderQue + stock.processing + stock.hoildQue), 0)', 'allocatedQuantity')
       .addSelect('COALESCE(SUM(stock.hoildQue), 0)', 'holdQuantity')
       .addSelect('COALESCE(SUM(stock.expiredQuantity), 0)', 'expiredQuantity')
@@ -80,6 +81,7 @@ export class WarehouseService {
       isDefault: row.isDefault === true || row.isDefault === 'true',
       skuCount: Number(row.skuCount || 0),
       availableQuantity: Number(row.availableQuantity || 0),
+      pendingReservedQuantity: Number(row.pendingReservedQuantity || 0),
       allocatedQuantity: Number(row.allocatedQuantity || 0),
       holdQuantity: Number(row.holdQuantity || 0),
       expiredQuantity: Number(row.expiredQuantity || 0),
@@ -88,6 +90,7 @@ export class WarehouseService {
       totalWarehouses: warehouses.length,
       totalSkus: warehouses.reduce((sum, item) => sum + item.skuCount, 0),
       availableQuantity: warehouses.reduce((sum, item) => sum + item.availableQuantity, 0),
+      pendingReservedQuantity: warehouses.reduce((sum, item) => sum + item.pendingReservedQuantity, 0),
       allocatedQuantity: warehouses.reduce((sum, item) => sum + item.allocatedQuantity, 0),
       holdQuantity: warehouses.reduce((sum, item) => sum + item.holdQuantity, 0),
       expiredQuantity: warehouses.reduce((sum, item) => sum + item.expiredQuantity, 0),

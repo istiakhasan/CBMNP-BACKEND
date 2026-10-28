@@ -43,6 +43,11 @@ export class InventoryItem {
   @Column({ type: 'int', default: 0 })
   hoildQue: number;
 
+  // Reservation for Pending orders. Do not merge this into orderQue: the
+  // latter starts only when an order is Approved in the current workflow.
+  @Column({ type: 'int', default: 0 })
+  pendingReservedQuantity: number;
+
   @Column({ type: 'int', default: 0 })
   wastageQuantity: number;
 

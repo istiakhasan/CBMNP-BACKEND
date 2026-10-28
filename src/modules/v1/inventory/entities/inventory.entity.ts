@@ -33,6 +33,12 @@ export class Inventory {
   @Column({ type: 'int', default: 0 })
   processing: number;
 
+  // Orders which have been accepted but have not entered the operational
+  // queue yet.  Keeping this separate preserves the existing Queue / Hold /
+  // Processing dashboard semantics while still preventing overselling.
+  @Column({ type: 'int', default: 0 })
+  pendingReservedQuantity: number;
+
   @Column({ nullable: true })
   organizationId: string;
 

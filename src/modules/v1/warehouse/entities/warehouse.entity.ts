@@ -22,6 +22,10 @@ export class Warehouse {
   phone: string;
   @Column({ nullable: true })
   organizationId: string;
+  // Shopify Location GID assigned to this ERP warehouse. A null value means
+  // this warehouse is deliberately not published to Shopify.
+  @Column({ nullable: true })
+  shopifyLocationId: string;
   @OneToMany(() => Order, (order) => order.warehouse)
   orders: Order[];
 @Column({ type: 'boolean', default: false })
