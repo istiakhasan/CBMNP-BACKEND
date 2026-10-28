@@ -24,6 +24,34 @@ export class WebhookController {
     return { status: 'success', data: result };
   }
 
+  @Post('/shopify/order/cancelled')
+  @HttpCode(HttpStatus.OK)
+  async handleCancelled(@Req() req, @Headers('X-Shopify-Hmac-Sha256') hmac: string, @Headers('x-shopify-shop-domain') domain: string) {
+    return { status: 'success', data: await this.shopifyWebhookService.handleShopifyOrderCancelledWebhook(req.rawBody, hmac, domain) };
+  }
+
+  @Post('/shopify/order/updated')
+  @HttpCode(HttpStatus.OK)
+  async handleUpdated(@Req() req, @Headers('X-Shopify-Hmac-Sha256') hmac: string, @Headers('x-shopify-shop-domain') domain: string) {
+    // Order changes are intentionally acknowledged until the ERP operator
+    // accepts the change; this prevents Shopify edits from silently changing
+    // a picked/packed ERP order.
+    await this.shopifyWebhookService.acknowledgeShopifyInventoryWebhook(req.rawBody, hmac, domain);
+    return { status: 'accepted' };
+  }
+
+  @Post('/shopify/refund')
+  @HttpCode(HttpStatus.OK)
+  async handleRefund(@Req() req, @Headers('X-Shopify-Hmac-Sha256') hmac: string, @Headers('x-shopify-shop-domain') domain: string) {
+    return { status: 'success', data: await this.shopifyWebhookService.handleShopifyRefundWebhook(req.rawBody, hmac, domain) };
+  }
+
+  @Post('/shopify/inventory-level')
+  @HttpCode(HttpStatus.OK)
+  async handleInventoryLevel(@Req() req, @Headers('X-Shopify-Hmac-Sha256') hmac: string, @Headers('x-shopify-shop-domain') domain: string) {
+    return { status: 'success', data: await this.shopifyWebhookService.acknowledgeShopifyInventoryWebhook(req.rawBody, hmac, domain) };
+  }
+
   @Post('/shopify/product')
   @HttpCode(HttpStatus.OK)
   async handleProductWebhook(

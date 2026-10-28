@@ -19,6 +19,8 @@ import {
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { OrderService } from '../order/order.service';
 import { ProductPriceHistory } from '../product/entity/productPriceHistory.entity';
+import { Inventory } from '../inventory/entities/inventory.entity';
+import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 
 // Postgres unique_violation error code — used everywhere we need to detect
 // a duplicate-key race instead of pattern-matching error.message (locale/driver safe).
@@ -54,6 +56,10 @@ export class ShopifyWebhookService {
     // constructor এ add করুন
     @InjectRepository(ProductPriceHistory)
     private readonly priceHistoryRepository: Repository<ProductPriceHistory>,
+    @InjectRepository(Inventory)
+    private readonly inventoryRepository: Repository<Inventory>,
+    @InjectRepository(InventoryItem)
+    private readonly inventoryItemRepository: Repository<InventoryItem>,
   ) {}
   private async logPriceChangeIfAny(
     existing: Product,
@@ -255,6 +261,42 @@ private normalizeBangladeshPhone(phone?: string | null): string {
     }
   }
 
+  /** Shopify cancellation releases only a still-Pending reservation. */
+  async handleShopifyOrderCancelledWebhook(body: string, hmac: string, domain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, hmac, domain);
+    if (!valid || !shop) throw new BadRequestException('Invalid Shopify webhook');
+    const payload = JSON.parse(body);
+    const order = await this.orderRepository.findOne({ where: { shopifyOrderId: String(payload.id), organizationId: shop.organizationId }, relations: ['products'] });
+    if (!order) return { skipped: true, reason: 'order-not-found' };
+    // Only Pending is safe to release here. Later stages are owned by ERP and
+    // must be cancelled through its operational workflow.
+    if (Number(order.statusId) !== 1) return { skipped: true, reason: 'erp-order-already-processing' };
+    for (const line of order.products || []) {
+      const qty = Number(line.productQuantity || 0);
+      await this.inventoryRepository.decrement({ productId: line.productId }, 'pendingReservedQuantity', qty);
+      if (order.locationId) await this.inventoryItemRepository.decrement({ productId: line.productId, locationId: order.locationId }, 'pendingReservedQuantity', qty);
+    }
+    await this.orderRepository.update(order.id, { statusId: 4, onCancelReason: payload.cancel_reason || 'Cancelled in Shopify' });
+    return { cancelled: true, orderId: order.id };
+  }
+
+  /** A refund is not a physical return; stock must not be restored until ERP receives it. */
+  async handleShopifyRefundWebhook(body: string, hmac: string, domain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, hmac, domain);
+    if (!valid || !shop) throw new BadRequestException('Invalid Shopify webhook');
+    const payload = JSON.parse(body);
+    this.logger.log(`Shopify refund received for order ${payload.order_id}; awaiting ERP physical-return workflow`);
+    return { accepted: true, orderId: String(payload.order_id) };
+  }
+
+  async acknowledgeShopifyInventoryWebhook(body: string, hmac: string, domain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, hmac, domain);
+    if (!valid || !shop) throw new BadRequestException('Invalid Shopify webhook');
+    // ERP is source of truth; this webhook is recorded/acknowledged and a
+    // reconciliation job will set Shopify back to ERP's calculated quantity.
+    return { accepted: true };
+  }
+
   // ---- Core processing, transient error hole automatic retry (max 3 bar, backoff shoho) ----
   private async processOrderWithRetry(
     webhookData: any,
@@ -368,6 +410,19 @@ private normalizeBangladeshPhone(phone?: string | null): string {
       onCancelReason: webhookData.cancel_reason,
       shopifyOrderId: String(webhookData.id),
     });
+
+    // Shopify has already reduced its available stock. Mirror that commitment
+    // in ERP immediately, while keeping it distinct from Approved queue.
+    for (const line of products) {
+      const qty = Number(line.productQuantity || 0);
+      if (!qty) continue;
+      await this.inventoryRepository.increment({ productId: line.productId }, 'pendingReservedQuantity', qty);
+      await this.inventoryItemRepository.increment(
+        { productId: line.productId, locationId: warehouseId },
+        'pendingReservedQuantity',
+        qty,
+      );
+    }
 
     return { orderId: String(result.id), orderNumber: result.orderNumber };
   }
@@ -584,9 +639,9 @@ private normalizeBangladeshPhone(phone?: string | null): string {
         purchasePrice: 0,
         shopifyProductId,
         shopifyVariantId,
-        shopifyInventoryItemId: variant.inventory_item_id
-          ? String(variant.inventory_item_id)
-          : existing?.shopifyInventoryItemId || null,
+        shopifyInventoryItemId: lineItem.inventory_item_id
+          ? String(lineItem.inventory_item_id)
+          : null,
       });
     } catch (err: any) {
       if (isUniqueViolation(err)) {
@@ -692,6 +747,9 @@ private normalizeBangladeshPhone(phone?: string | null): string {
         purchasePrice: 0,
         shopifyProductId,
         shopifyVariantId,
+        shopifyInventoryItemId: variant.inventory_item_id
+          ? String(variant.inventory_item_id)
+          : existing?.shopifyInventoryItemId || null,
       };
 
       try {

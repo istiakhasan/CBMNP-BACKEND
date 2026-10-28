@@ -250,6 +250,28 @@ export class OrderService {
       .getOne();
   }
 
+  /** Reserve a Pending order without changing the established Queue bucket. */
+  private async reservePending(
+    manager: EntityManager,
+    products: Array<{ productId: string; productQuantity: number }>,
+    locationId?: string,
+    delta = 1,
+  ) {
+    for (const row of products) {
+      const qty = Number(row.productQuantity || 0) * delta;
+      if (!qty) continue;
+      await manager.increment(Inventory, { productId: row.productId }, 'pendingReservedQuantity', qty);
+      if (locationId) {
+        await manager.increment(
+          InventoryItem,
+          { productId: row.productId, locationId },
+          'pendingReservedQuantity',
+          qty,
+        );
+      }
+    }
+  }
+
   /** Row-locks (or returns null if missing) an InventoryItem row for safe read-modify-write. */
   private async lockInventoryItem(
     manager: EntityManager,
@@ -544,6 +566,12 @@ export class OrderService {
         action: 'The Order created',
         previousValue: null,
       });
+
+      // Pending is sellable-stock reserved, but intentionally remains
+      // separate from the established Approved order queue.
+      if (payload?.statusId === OrderStatusId.Pending && rest.locationId) {
+        await this.reservePending(manager, products, rest.locationId);
+      }
 
       // ---- statusId 2: PROCESS -> bump orderQue ----
       if (payload?.statusId === OrderStatusId.Approved) {
