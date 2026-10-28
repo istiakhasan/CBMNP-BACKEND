@@ -12,6 +12,7 @@ import { Transaction } from '../transaction/entities/transaction.entity';
 import { Supplier } from '../supplier/entities/supplier.entity';
 import { PurchaseReturnsService } from './purchase-returns.service';
 import { PurchaseReturnsController } from './purchase-returns.controller';
+import { ShopifyModule } from '../shopify/shopify.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { PurchaseReturnsController } from './purchase-returns.controller';
       Transaction,
       Supplier,
     ]),
+    ShopifyModule,
   ],
   controllers: [PurchaseReturnsController],
   providers: [PurchaseReturnsService],

@@ -13,12 +13,14 @@ import { Transaction } from '../transaction/entities/transaction.entity';
 import paginationHelpers from '../../../helpers/paginationHelpers';
 import { plainToInstance } from 'class-transformer';
 import { InventoryService } from '../inventory/inventory.service';
+import { ShopifyInventorySyncService } from '../shopify/shopify-inventory-sync.service';
 
 @Injectable()
 export class ProcurementService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly inventoryService: InventoryService,
+    private readonly shopifyInventorySync: ShopifyInventorySyncService,
     @InjectRepository(Procurement)
     private procurementRepo: Repository<Procurement>,
     @InjectRepository(ProcurementItem)
@@ -332,6 +334,10 @@ export class ProcurementService {
       await queryRunner.manager.save(Procurement, procurement);
 
       await queryRunner.commitTransaction();
+      for (const item of procurement.items || []) {
+        const locationId = locationMap[item.productId];
+        if (locationId) void this.shopifyInventorySync.sync(item.productId, locationId, organizationId).catch(() => undefined);
+      }
       return procurement;
     } catch (error) {
       await queryRunner.rollbackTransaction();

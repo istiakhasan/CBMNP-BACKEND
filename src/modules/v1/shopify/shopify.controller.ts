@@ -36,8 +36,7 @@ export class WebhookController {
     // Order changes are intentionally acknowledged until the ERP operator
     // accepts the change; this prevents Shopify edits from silently changing
     // a picked/packed ERP order.
-    await this.shopifyWebhookService.acknowledgeShopifyInventoryWebhook(req.rawBody, hmac, domain);
-    return { status: 'accepted' };
+    return { status: 'success', data: await this.shopifyWebhookService.handleShopifyOrderUpdatedWebhook(req.rawBody, hmac, domain) };
   }
 
   @Post('/shopify/refund')

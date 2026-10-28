@@ -1,4 +1,5 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
+import { ShopifyModule } from '../shopify/shopify.module';
 import { OrderService } from './order.service';
 import { OrderController } from './order.controller';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -47,6 +48,7 @@ import { CourierCodSettlementItem } from '../logistics-operations/entities/couri
       ,CourierCodSettlementItem
     ]),
     RequsitionModule,
+    forwardRef(() => ShopifyModule),
   ],
   controllers: [OrderController],
   providers: [OrderService],

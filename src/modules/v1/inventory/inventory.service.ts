@@ -4,6 +4,7 @@ import { Product } from '../product/entity/product.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory } from './entities/inventory.entity';
 import { InventoryItem } from './entities/inventoryitem.entity';
+import { ShopifyInventorySyncService } from '../shopify/shopify-inventory-sync.service';
 
 @Injectable()
 export class InventoryService {
@@ -15,6 +16,7 @@ export class InventoryService {
     @InjectRepository(InventoryItem)
     private readonly inventoryItemRepository: Repository<InventoryItem>,
     private readonly dataSource: DataSource,
+    private readonly shopifyInventorySync: ShopifyInventorySyncService,
   ) {}
 
   async addProductToInventory(
@@ -178,6 +180,9 @@ export class InventoryService {
 
       const result = await queryRunner.manager.save(inventory);
       await queryRunner.commitTransaction();
+      for (const item of inventoryItems || []) {
+        if (item?.locationId) void this.shopifyInventorySync.sync(productId, item.locationId, organizationId).catch(() => undefined);
+      }
       return result;
     } catch (error) {
       await queryRunner.rollbackTransaction();

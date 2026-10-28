@@ -292,9 +292,29 @@ private normalizeBangladeshPhone(phone?: string | null): string {
   async acknowledgeShopifyInventoryWebhook(body: string, hmac: string, domain: string) {
     const { valid, shop } = await this.verifyShopifyWebhookSignature(body, hmac, domain);
     if (!valid || !shop) throw new BadRequestException('Invalid Shopify webhook');
-    // ERP is source of truth; this webhook is recorded/acknowledged and a
-    // reconciliation job will set Shopify back to ERP's calculated quantity.
-    return { accepted: true };
+    const payload = JSON.parse(body);
+    // ERP remains source of truth. This audit line preserves the external
+    // change for operations; the 15-minute reconciliation resets Shopify to
+    // the calculated ERP sellable quantity.
+    this.logger.warn(`Shopify inventory-level update detected: inventoryItem=${payload.inventory_item_id || 'unknown'} location=${payload.location_id || 'unknown'} available=${payload.available ?? 'unknown'} shop=${shop.domain}`);
+    return { accepted: true, inventoryItemId: payload.inventory_item_id, locationId: payload.location_id };
+  }
+
+  async handleShopifyOrderUpdatedWebhook(body: string, hmac: string, domain: string) {
+    const { valid, shop } = await this.verifyShopifyWebhookSignature(body, hmac, domain);
+    if (!valid || !shop) throw new BadRequestException('Invalid Shopify webhook');
+    const payload = JSON.parse(body);
+    const order = await this.orderRepository.findOne({ where: { shopifyOrderId: String(payload.id), organizationId: shop.organizationId }, relations: ['products'] });
+    if (!order) return { skipped: true, reason: 'order-not-found' };
+    if (Number(order.statusId) !== 1) return { skipped: true, reason: 'erp-order-already-processing' };
+    const products: any[] = [];
+    for (const line of payload.line_items || []) {
+      const product = await this.productCatalogRepository.findOne({ where: { shopifyVariantId: String(line.variant_id), organizationId: shop.organizationId } });
+      if (!product) return { skipped: true, reason: `unmapped-variant:${line.variant_id}` };
+      products.push({ productId: product.id, productQuantity: Number(line.quantity || 0) });
+    }
+    await this.orderService.update(order.id, { ...order, products } as any);
+    return { updated: true, orderId: order.id };
   }
 
   // ---- Core processing, transient error hole automatic retry (max 3 bar, backoff shoho) ----

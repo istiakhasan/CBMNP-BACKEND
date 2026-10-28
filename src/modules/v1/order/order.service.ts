@@ -37,6 +37,7 @@ import { DeleteOrdersByPhoneDto } from './dto/delete-orders-by-phone.dto';
 import { Comments } from '../Comments/entities/orderComment.entity';
 import { Requisition } from '../requsition/entities/requsition.entity';
 import { CourierSettlement, SettlementStatus } from '../logistics-operations/entities/courier-settlement.entity';
+import { ShopifyInventorySyncService } from '../shopify/shopify-inventory-sync.service';
 import { CourierCodAdjustmentType, CourierCodSettlementItem, CourierCodSettlementItemStatus } from '../logistics-operations/entities/courier-cod-settlement-item.entity';
 
 /**
@@ -230,6 +231,7 @@ export class OrderService {
     private readonly courierSettlementItemRepository: Repository<CourierCodSettlementItem>,
 
     private readonly requisitionService: RequisitionService,
+    private readonly shopifyInventorySync: ShopifyInventorySyncService,
   ) {}
 
   // =========================================================================
@@ -634,6 +636,15 @@ export class OrderService {
       }
 
       await queryRunner.commitTransaction();
+      // Never let an external Shopify outage undo a committed ERP order.
+      // The sync uses the final calculated quantity, so repeating it is safe.
+      if (rest.locationId) {
+        for (const item of products) {
+          void this.shopifyInventorySync.sync(item.productId, rest.locationId, organizationId).catch((error) =>
+            this.logger.error(`Shopify stock sync failed after order create: ${error.message}`),
+          );
+        }
+      }
       return result;
     } catch (error: any) {
       await queryRunner.rollbackTransaction();
@@ -1917,6 +1928,11 @@ async update(orderId: number, data: Order) {
             )
           : null;
 
+        if (existingOrder.statusId === OrderStatusId.Pending && quantityDiff !== 0) {
+          if (inventory) await manager.increment(Inventory, { productId }, 'pendingReservedQuantity', quantityDiff);
+          if (inventoryItem) await manager.increment(InventoryItem, { productId, locationId: existingOrder.locationId }, 'pendingReservedQuantity', quantityDiff);
+        }
+
         if (newStatusId === OrderStatusId.Approved) {
           const wasApproved = existingOrder.statusId === OrderStatusId.Approved;
           const queDelta = wasApproved ? quantityDiff : newQuantity;
@@ -2049,6 +2065,14 @@ async update(orderId: number, data: Order) {
     });
 
     await queryRunner.commitTransaction();
+    const syncWarehouseId = rest.locationId || existingOrder.locationId;
+    if (syncWarehouseId) {
+      for (const productId of allProductIds) {
+        void this.shopifyInventorySync.sync(productId, syncWarehouseId, existingOrder.organizationId).catch((error) =>
+          this.logger.error(`Shopify stock sync failed after order update: ${error.message}`),
+        );
+      }
+    }
     return updated;
   } catch (error: any) {
     await queryRunner.rollbackTransaction();
@@ -2530,6 +2554,14 @@ async update(orderId: number, data: Order) {
 
       if (
         nextStatusId === OrderStatusId.Cancel &&
+        currentStatusId === OrderStatusId.Pending
+      ) {
+        if (inventory) await manager.decrement(Inventory, { productId }, 'pendingReservedQuantity', qty);
+        if (inventoryItem) await manager.decrement(InventoryItem, { productId, locationId: order.locationId }, 'pendingReservedQuantity', qty);
+      }
+
+      if (
+        nextStatusId === OrderStatusId.Cancel &&
         currentStatusId === OrderStatusId.Approved
       ) {
         if (inventory) {
@@ -2711,6 +2743,9 @@ async update(orderId: number, data: Order) {
         )
       ) {
         if (inventory) {
+          if (currentStatusId === OrderStatusId.Pending) {
+            await manager.decrement(Inventory, { productId }, 'pendingReservedQuantity', qty);
+          }
           await manager.increment(
             Inventory,
             { productId },
@@ -2720,6 +2755,9 @@ async update(orderId: number, data: Order) {
         }
 
         if (inventoryItem) {
+          if (currentStatusId === OrderStatusId.Pending) {
+            await manager.decrement(InventoryItem, { productId, locationId: order.locationId }, 'pendingReservedQuantity', qty);
+          }
           await manager.increment(
             InventoryItem,
             {
@@ -2763,6 +2801,7 @@ async update(orderId: number, data: Order) {
         currentStatusId === OrderStatusId.Pending
       ) {
         if (inventory) {
+          await manager.decrement(Inventory, { productId }, 'pendingReservedQuantity', qty);
           await manager.increment(
             Inventory,
             { productId },
@@ -2772,6 +2811,7 @@ async update(orderId: number, data: Order) {
         }
 
         if (inventoryItem) {
+          await manager.decrement(InventoryItem, { productId, locationId: order.locationId }, 'pendingReservedQuantity', qty);
           await manager.increment(
             InventoryItem,
             {
@@ -2896,6 +2936,16 @@ async update(orderId: number, data: Order) {
     // ============================================================
 
     await queryRunner.commitTransaction();
+    // Status changes (including cancel, hold, processing and dispatch) can
+    // change sellable inventory. Recalculate rather than applying a delta.
+    for (const order of orders) {
+      if (!order.locationId) continue;
+      for (const product of allProducts.filter((item) => item.orderId === order.id)) {
+        void this.shopifyInventorySync.sync(product.productId, order.locationId, organizationId).catch((error) =>
+          this.logger.error(`Shopify stock sync failed after status transition: ${error.message}`),
+        );
+      }
+    }
   } catch (error: any) {
     await queryRunner.rollbackTransaction();
 
@@ -3990,6 +4040,19 @@ async update(orderId: number, data: Order) {
     await manager.save(OrdersLog, orderLogs);
 
     await queryRunner.commitTransaction();
+
+    // Returned stock is sellable only after it has been received above; now
+    // publish the recalculated warehouse quantity to Shopify.
+    for (const order of orders) {
+      const locationId = warehouse || order.locationId;
+      if (!locationId) continue;
+      const returnedProducts = await this.productsRepository.find({ where: { orderId: order.id } });
+      for (const product of returnedProducts) {
+        void this.shopifyInventorySync.sync(product.productId, locationId, order.organizationId).catch((error) =>
+          this.logger.error(`Shopify stock sync failed after return: ${error.message}`),
+        );
+      }
+    }
 
     return updatedOrders;
   } catch (error: any) {

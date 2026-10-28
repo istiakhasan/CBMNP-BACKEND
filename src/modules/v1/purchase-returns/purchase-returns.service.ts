@@ -14,6 +14,7 @@ import { SupplierQuotation } from './entities/supplier-quotation.entity';
 import { Inventory } from '../inventory/entities/inventory.entity';
 import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
+import { ShopifyInventorySyncService } from '../shopify/shopify-inventory-sync.service';
 import { Supplier } from '../supplier/entities/supplier.entity';
 
 @Injectable()
@@ -34,6 +35,7 @@ export class PurchaseReturnsService {
     private readonly quotationRepo: Repository<SupplierQuotation>,
     @InjectRepository(InventoryItem)
     private readonly inventoryItemRepo: Repository<InventoryItem>,
+    private readonly shopifyInventorySync: ShopifyInventorySyncService,
     @InjectRepository(Supplier)
     private readonly supplierRepo: Repository<Supplier>,
   ) {}
@@ -109,7 +111,7 @@ export class PurchaseReturnsService {
   }
 
   async approveReturn(returnId: string, organizationId: string, userId?: string): Promise<PurchaseReturn> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const pr = await manager.findOne(PurchaseReturn, {
         where: { id: returnId, organizationId },
         lock: { mode: 'pessimistic_write' },
@@ -163,6 +165,9 @@ export class PurchaseReturnsService {
 
       return manager.save(pr);
     });
+    const items = await this.returnItemRepo.find({ where: { purchaseReturnId: saved.id } });
+    for (const item of items) void this.shopifyInventorySync.sync(item.productId, saved.warehouseId, organizationId).catch(() => undefined);
+    return saved;
   }
 
   async getReturns(organizationId: string) {

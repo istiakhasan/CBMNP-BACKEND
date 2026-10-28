@@ -14,6 +14,7 @@ import { Product } from '../product/entity/product.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
 import { InventoryOperationsService } from './inventory-operations.service';
 import { InventoryOperationsController } from './inventory-operations.controller';
+import { ShopifyModule } from '../shopify/shopify.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { InventoryOperationsController } from './inventory-operations.controller
       Product,
       Warehouse,
     ]),
+    ShopifyModule,
   ],
   controllers: [InventoryOperationsController],
   providers: [InventoryOperationsService],

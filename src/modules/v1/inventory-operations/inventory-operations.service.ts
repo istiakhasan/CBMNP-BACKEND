@@ -17,6 +17,7 @@ import { InventoryItem } from '../inventory/entities/inventoryitem.entity';
 import { Transaction } from '../transaction/entities/transaction.entity';
 import { Product } from '../product/entity/product.entity';
 import { Warehouse } from '../warehouse/entities/warehouse.entity';
+import { ShopifyInventorySyncService } from '../shopify/shopify-inventory-sync.service';
 
 @Injectable()
 export class InventoryOperationsService {
@@ -42,6 +43,7 @@ export class InventoryOperationsService {
     private readonly productRepo: Repository<Product>,
     @InjectRepository(Warehouse)
     private readonly warehouseRepo: Repository<Warehouse>,
+    private readonly shopifyInventorySync: ShopifyInventorySyncService,
   ) {}
 
   private async ensureMasterInventory(manager: any, productId: string, organizationId: string): Promise<Inventory> {
@@ -124,7 +126,7 @@ export class InventoryOperationsService {
   }
 
   async dispatchTransfer(transferId: string, organizationId: string, userId?: string): Promise<StockTransfer> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const transfer = await manager.findOne(StockTransfer, {
         where: { id: transferId, organizationId },
         lock: { mode: 'pessimistic_write' },
@@ -182,10 +184,13 @@ export class InventoryOperationsService {
 
       return manager.save(transfer);
     });
+    const items = await this.transferItemRepo.find({ where: { stockTransferId: saved.id } });
+    for (const item of items) void this.shopifyInventorySync.sync(item.productId, saved.fromWarehouseId, organizationId).catch(() => undefined);
+    return saved;
   }
 
   async receiveTransfer(transferId: string, receivedItems: any[], organizationId: string, userId?: string): Promise<StockTransfer> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const transfer = await manager.findOne(StockTransfer, {
         where: { id: transferId, organizationId },
         lock: { mode: 'pessimistic_write' },
@@ -255,6 +260,9 @@ export class InventoryOperationsService {
 
       return manager.save(transfer);
     });
+    const items = await this.transferItemRepo.find({ where: { stockTransferId: saved.id } });
+    for (const item of items) void this.shopifyInventorySync.sync(item.productId, saved.toWarehouseId, organizationId).catch(() => undefined);
+    return saved;
   }
 
   async getTransfers(organizationId: string) {
@@ -311,7 +319,7 @@ export class InventoryOperationsService {
   }
 
   async approveAdjustment(adjustmentId: string, organizationId: string, userId?: string): Promise<StockAdjustment> {
-    return this.dataSource.transaction(async (manager) => {
+    const saved = await this.dataSource.transaction(async (manager) => {
       const adj = await manager.findOne(StockAdjustment, {
         where: { id: adjustmentId, organizationId },
         lock: { mode: 'pessimistic_write' },
@@ -408,6 +416,9 @@ export class InventoryOperationsService {
 
       return manager.save(adj);
     });
+    const items = await this.adjustmentItemRepo.find({ where: { stockAdjustmentId: saved.id } });
+    for (const item of items) void this.shopifyInventorySync.sync(item.productId, saved.warehouseId, organizationId).catch(() => undefined);
+    return saved;
   }
 
   async getAdjustments(organizationId: string) {
