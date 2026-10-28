@@ -103,14 +103,18 @@ export class AuthenTicationService {
     const { userId } = verifiedToken;
     const isUserExist = await this.usersRepository.findOne({
       where: { userId: userId },
+      relations: ['organization'],
     });
     if (!isUserExist) {
       throw new ApiError(HttpStatus.NOT_FOUND, 'User does not exist');
     }
-    const { role, id } = isUserExist;
+    if (!isUserExist.active) {
+      throw new ApiError(HttpStatus.FORBIDDEN, 'User is not active');
+    }
+    const { role, id, organization } = isUserExist;
 
     const newAccessToken = jwtHelpers.createToken(
-      { userId, role, id },
+      { userId, role, id, organizationId: organization?.id },
       config.jwt.secret as string,
       config.jwt.expires_in as string,
     );
