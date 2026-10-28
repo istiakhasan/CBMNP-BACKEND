@@ -24,8 +24,8 @@ import { join } from 'path';
         // dont use synchronize: ture in real projects
         // ssl: { rejectUnauthorized: false },
         // Production schema changes must be applied by an explicit migration.
-        synchronize: configService.get('NODE_ENV') !== 'production',
-        // synchronize: true,
+        // synchronize: configService.get('NODE_ENV') !== 'production',
+        synchronize: true,
       }),
     }),
   ],
