@@ -1892,6 +1892,15 @@ async update(orderId: number, data: Order) {
       rest.statusId = newStatusId;
     }
 
+    // Product/customer edits must never move inventory pipeline counters.
+    // Status transitions are handled only by changeStatusBulk, where the
+    // current state is locked and the matching counter is moved atomically.
+    if (existingOrder.statusId !== newStatusId) {
+      throw new BadRequestException(
+        'Use the order status-change endpoint to change status; direct order edit cannot change inventory status.',
+      );
+    }
+
     const existingProducts = await manager.find(Products, {
       where: { orderId },
     });
@@ -3677,6 +3686,12 @@ async update(orderId: number, data: Order) {
       });
 
       for (const order of orders) {
+        // This endpoint only restores/cancels an order that is actually on
+        // hold. Calling it for an approved/processing order was the source
+        // of negative hold/processing counters.
+        if (Number(order.statusId) !== OrderStatusId.Hold) {
+          throw new BadRequestException(`Order ${order.id} is not on hold`);
+        }
         const orderProducts = products.filter((p) => p.orderId === order.id);
 
         // FIX(A): normalize once per order instead of comparing the raw
@@ -3685,6 +3700,16 @@ async update(orderId: number, data: Order) {
         const previousStatusNum = order?.previousStatus
           ? Number(order.previousStatus)
           : null;
+
+        if (
+          previousStatusNum !== OrderStatusId.Approved &&
+          previousStatusNum !== OrderStatusId.Store &&
+          previousStatusNum !== OrderStatusId.Packing
+        ) {
+          throw new BadRequestException(
+            `Order ${order.id} has no valid pre-hold status; reconcile it before releasing the hold.`,
+          );
+        }
 
         for (const product of orderProducts) {
           // Lock right before use — no stale in-memory values.
@@ -3696,6 +3721,15 @@ async update(orderId: number, data: Order) {
                 order.locationId,
               )
             : null;
+
+          // Never manufacture a negative pipeline counter. A mismatch means
+          // historical data is inconsistent and must be reconciled first.
+          if (inventory && Number(inventory.hoildQue || 0) < Number(product.productQuantity || 0)) {
+            throw new BadRequestException(`Hold quantity is inconsistent for product ${product.productId}`);
+          }
+          if (inventoryItem && Number(inventoryItem.hoildQue || 0) < Number(product.productQuantity || 0)) {
+            throw new BadRequestException(`Warehouse hold quantity is inconsistent for product ${product.productId}`);
+          }
 
           // Previous status 2 or null, and new status is not 4
           if (
