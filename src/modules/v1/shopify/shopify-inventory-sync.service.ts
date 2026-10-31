@@ -13,6 +13,9 @@ import { ShopifyInventorySyncOutbox } from './entities/shopify-inventory-sync.en
 @Injectable()
 export class ShopifyInventorySyncService {
   private readonly logger = new Logger(ShopifyInventorySyncService.name);
+  // Dev Dashboard apps issue short-lived tokens. Keep them in memory only;
+  // client credentials stay in the deployment's secret store/environment.
+  private readonly tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
   constructor(
     @InjectRepository(InventoryItem) private readonly items: Repository<InventoryItem>,
@@ -22,13 +25,50 @@ export class ShopifyInventorySyncService {
     @InjectRepository(ShopifyInventorySyncOutbox) private readonly outbox: Repository<ShopifyInventorySyncOutbox>,
   ) {}
 
+  private async resolveAccessToken(shop: Shopify): Promise<string | null> {
+    // Retains compatibility with an existing admin-created custom-app token.
+    if (shop.accessToken) return shop.accessToken;
+
+    const clientId = process.env.SHOPIFY_CLIENT_ID;
+    const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
+    if (!shop.domain || !clientId || !clientSecret) return null;
+
+    const cached = this.tokenCache.get(shop.domain);
+    if (cached && cached.expiresAt > Date.now()) return cached.token;
+
+    try {
+      const form = new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: 'client_credentials',
+      });
+      const response = await axios.post(
+        `https://${shop.domain}/admin/oauth/access_token`,
+        form.toString(),
+        { headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, timeout: 15000 },
+      );
+      const token = response.data?.access_token;
+      const expiresIn = Number(response.data?.expires_in || 0);
+      if (!token || !expiresIn) throw new Error('Shopify did not return an access token');
+      // Refresh five minutes before Shopify expires the token.
+      this.tokenCache.set(shop.domain, {
+        token,
+        expiresAt: Date.now() + Math.max(60, expiresIn - 300) * 1000,
+      });
+      return token;
+    } catch (error: any) {
+      this.logger.error(`Shopify token request failed for ${shop.domain}: ${error?.response?.data?.error || error?.message || error}`);
+      return null;
+    }
+  }
+
   /** Audits the request first, then makes an immediate delivery attempt. */
   async sync(productId: string, warehouseId: string, organizationId: string) {
     // Shopify is an optional downstream integration. Never allow a missing
     // connection (or an outbox/database problem) to affect ERP operations.
     try {
       const shop = await this.shops.findOne({ where: { organizationId } });
-      if (!shop?.accessToken || !shop?.domain) {
+      if (!shop?.domain || !(await this.resolveAccessToken(shop))) {
         this.logger.warn(`Shopify sync skipped: no active connection for organization=${organizationId}`);
         return { skipped: true, reason: 'Shopify shop connection is missing' };
       }
@@ -56,7 +96,8 @@ export class ShopifyInventorySyncService {
       if (!item) throw new Error('ERP warehouse inventory item is missing');
       if (!product?.shopifyInventoryItemId) throw new Error('Shopify inventory item mapping is missing');
       if (!warehouse?.shopifyLocationId) throw new Error('Shopify location mapping is missing');
-      if (!shop?.accessToken || !shop?.domain) {
+      const accessToken = shop ? await this.resolveAccessToken(shop) : null;
+      if (!shop?.domain || !accessToken) {
         // Do not retry forever while the integration is deliberately absent.
         await this.outbox.update(event.id, {
           status: 'SKIPPED', lastError: 'Shopify shop connection is missing', nextRetryAt: null,
@@ -77,7 +118,7 @@ export class ShopifyInventorySyncService {
       const response = await axios.post(
         `https://${shop.domain}/admin/api/2026-10/graphql.json`,
         { query, variables: { key: event.id, input: { name: 'available', reason: 'correction', quantities: [{ inventoryItemId: gid('InventoryItem', product.shopifyInventoryItemId), locationId: gid('Location', warehouse.shopifyLocationId), quantity, changeFromQuantity: null }] } } },
-        { headers: { 'X-Shopify-Access-Token': shop.accessToken }, timeout: 15000 },
+        { headers: { 'X-Shopify-Access-Token': accessToken }, timeout: 15000 },
       );
       const errors = response.data?.data?.inventorySetQuantities?.userErrors || response.data?.errors;
       if (errors?.length) throw new Error(errors.map((x: any) => x.message).join(', '));

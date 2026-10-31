@@ -1,7 +1,7 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ZodFilter } from './middleware/ZodFilter';
-import { ValidationPipe } from '@nestjs/common';
+import { RequestMethod, ValidationPipe } from '@nestjs/common';
 import * as express from 'express'; //
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
@@ -149,7 +149,12 @@ async function bootstrap() {
 
   app.useGlobalFilters(new ZodFilter());
   app.useGlobalPipes(new ValidationPipe());
-  app.setGlobalPrefix('api');
+  // Shopify opens the configured app URL at the domain root after
+  // installation. Keep API routes under /api while allowing that landing
+  // request to succeed instead of returning a misleading 404.
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: '/', method: RequestMethod.GET }],
+  });
 
   const PORT = Number(process.env.PORT) || 8080;
   await app.listen(PORT, '0.0.0.0');
