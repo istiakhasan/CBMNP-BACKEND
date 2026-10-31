@@ -26,12 +26,13 @@ export class ShopifyInventorySyncService {
   ) {}
 
   private async resolveAccessToken(shop: Shopify): Promise<string | null> {
-    // Retains compatibility with an existing admin-created custom-app token.
-    if (shop.accessToken) return shop.accessToken;
-
     const clientId = process.env.SHOPIFY_CLIENT_ID;
     const clientSecret = process.env.SHOPIFY_CLIENT_SECRET;
-    if (!shop.domain || !clientId || !clientSecret) return null;
+    // Prefer current Dev Dashboard credentials. A stale legacy token in the
+    // database otherwise produces Shopify 401s forever after an app upgrade.
+    if (!shop.domain || !clientId || !clientSecret) {
+      return shop.accessToken || null;
+    }
 
     const cached = this.tokenCache.get(shop.domain);
     if (cached && cached.expiresAt > Date.now()) return cached.token;
