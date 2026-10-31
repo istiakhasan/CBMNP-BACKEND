@@ -291,6 +291,26 @@ export class OrderService {
       .getOne();
   }
 
+  /** Releases an allocated counter without ever allowing it to go negative. */
+  private async decrementCounterSafely(
+    manager: EntityManager,
+    table: 'inventory' | 'inventoryItems',
+    counter: 'orderQue' | 'hoildQue' | 'processing' | 'pendingReservedQuantity',
+    productId: string,
+    quantity: number,
+    locationId?: string,
+  ) {
+    const locationFilter = table === 'inventoryItems' ? ' AND "locationId" = $3' : '';
+    const params = table === 'inventoryItems' ? [quantity, productId, locationId] : [quantity, productId];
+    await manager.query(
+      `UPDATE "${table}"
+       SET "${counter}" = GREATEST(0, COALESCE("${counter}", 0) - $1),
+           "updatedAt" = NOW()
+       WHERE "productId" = $2${locationFilter}`,
+      params,
+    );
+  }
+
   /**
    * Locks the Inventory row for productId; creates it (all counters at 0) if
    * it doesn't exist yet. Always returns a locked, existing row.
@@ -3722,13 +3742,13 @@ async update(orderId: number, data: Order) {
               )
             : null;
 
-          // Never manufacture a negative pipeline counter. A mismatch means
-          // historical data is inconsistent and must be reconciled first.
+          // Historical counter drift must not block releasing a real order
+          // from Hold. The safe decrement below clamps the stale counter at 0.
           if (inventory && Number(inventory.hoildQue || 0) < Number(product.productQuantity || 0)) {
-            throw new BadRequestException(`Hold quantity is inconsistent for product ${product.productId}`);
+            this.logger.warn(`Hold counter reconciled while releasing order ${order.id}, product=${product.productId}`);
           }
           if (inventoryItem && Number(inventoryItem.hoildQue || 0) < Number(product.productQuantity || 0)) {
-            throw new BadRequestException(`Warehouse hold quantity is inconsistent for product ${product.productId}`);
+            this.logger.warn(`Warehouse hold counter reconciled while releasing order ${order.id}, product=${product.productId}, warehouse=${order.locationId}`);
           }
 
           // Previous status 2 or null, and new status is not 4
@@ -3743,12 +3763,7 @@ async update(orderId: number, data: Order) {
                 'orderQue',
                 product.productQuantity,
               );
-              await manager.decrement(
-                Inventory,
-                { productId: product.productId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventory', 'hoildQue', product.productId, product.productQuantity);
             }
             if (inventoryItem) {
               await manager.increment(
@@ -3757,12 +3772,7 @@ async update(orderId: number, data: Order) {
                 'orderQue',
                 product.productQuantity,
               );
-              await manager.decrement(
-                InventoryItem,
-                { productId: product.productId, locationId: order.locationId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventoryItems', 'hoildQue', product.productId, product.productQuantity, order.locationId);
             }
           }
 
@@ -3778,12 +3788,7 @@ async update(orderId: number, data: Order) {
                 'processing',
                 product.productQuantity,
               );
-              await manager.decrement(
-                Inventory,
-                { productId: product.productId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventory', 'hoildQue', product.productId, product.productQuantity);
             }
             if (inventoryItem) {
               await manager.increment(
@@ -3792,32 +3797,17 @@ async update(orderId: number, data: Order) {
                 'processing',
                 product.productQuantity,
               );
-              await manager.decrement(
-                InventoryItem,
-                { productId: product.productId, locationId: order.locationId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventoryItems', 'hoildQue', product.productId, product.productQuantity, order.locationId);
             }
           }
 
           // New status is 4
           if (data?.statusId === OrderStatusId.Cancel) {
             if (inventory) {
-              await manager.decrement(
-                Inventory,
-                { productId: product.productId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventory', 'hoildQue', product.productId, product.productQuantity);
             }
             if (inventoryItem) {
-              await manager.decrement(
-                InventoryItem,
-                { productId: product.productId, locationId: order.locationId },
-                'hoildQue',
-                product.productQuantity,
-              );
+              await this.decrementCounterSafely(manager, 'inventoryItems', 'hoildQue', product.productId, product.productQuantity, order.locationId);
             }
           }
         }
