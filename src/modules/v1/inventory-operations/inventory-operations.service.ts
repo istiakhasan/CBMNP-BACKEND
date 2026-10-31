@@ -87,6 +87,9 @@ export class InventoryOperationsService {
     if (data.fromWarehouseId === data.toWarehouseId) {
       throw new BadRequestException('Source and destination warehouses must be different');
     }
+    if (!Array.isArray(data.items) || !data.items.length || data.items.some((item: any) => !item.productId || Number(item.requestedQuantity || 0) <= 0)) {
+      throw new BadRequestException('At least one product with a positive transfer quantity is required');
+    }
 
     const year = new Date().getFullYear();
     const transferNumber = `ST-${year}-${Date.now().toString().slice(-6)}`;
@@ -209,6 +212,9 @@ export class InventoryOperationsService {
       for (const item of transfer.items) {
         const receivedEntry = receivedItems?.find((r: any) => r.itemId === item.id || r.productId === item.productId);
         const qtyReceived = receivedEntry ? Number(receivedEntry.quantity || 0) : item.dispatchedQuantity;
+        if (qtyReceived < 0 || qtyReceived > Number(item.dispatchedQuantity || 0)) {
+          throw new BadRequestException(`Received quantity for product cannot exceed dispatched quantity (${item.dispatchedQuantity})`);
+        }
 
         // Increment stock at destination warehouse
         let destInv = await manager.findOne(InventoryItem, {
@@ -275,6 +281,12 @@ export class InventoryOperationsService {
 
   // ================= STOCK ADJUSTMENT & PHYSICAL COUNT =================
   async createAdjustment(data: any, organizationId: string, userId?: string): Promise<StockAdjustment> {
+    if (!data.warehouseId || !Array.isArray(data.items) || !data.items.length) {
+      throw new BadRequestException('Warehouse and at least one adjustment item are required');
+    }
+    if (data.items.some((item: any) => !item.productId || Number(item.systemQuantity || 0) < 0 || Number(item.countedQuantity || 0) < 0)) {
+      throw new BadRequestException('Adjustment quantities must be zero or greater');
+    }
     const year = new Date().getFullYear();
     const adjustmentNumber = `ADJ-${year}-${Date.now().toString().slice(-6)}`;
 

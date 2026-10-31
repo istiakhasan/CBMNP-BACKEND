@@ -7,7 +7,7 @@ export class ShopifyInventorySyncOutbox {
   @Column() warehouseId: string;
   @Column() organizationId: string;
   @Column({ type: 'int', nullable: true }) quantity: number;
-  @Column({ default: 'PENDING' }) status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED';
+  @Column({ default: 'PENDING' }) status: 'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
   @Column({ type: 'int', default: 0 }) attempts: number;
   @Column({ type: 'text', nullable: true }) lastError: string;
   @Column({ type: 'timestamp', nullable: true }) nextRetryAt: Date;

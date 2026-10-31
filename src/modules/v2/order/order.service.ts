@@ -106,13 +106,13 @@ async changeStatusBulk(
             if (inv) {
               await this.inventoryRepository.update(
                 { productId: inv.productId },
-                { processing: inv.processing - qty, stock: inv.stock - qty },
+                { processing: Math.max(0, Number(inv.processing || 0) - qty), stock: Math.max(0, Number(inv.stock || 0) - qty) },
               );
             }
             if (invItem) {
               await this.InventoryItemItemRepository.update(
                 { productId: invItem.productId, locationId: order.locationId },
-                { processing: invItem.processing - qty, quantity: invItem.quantity - qty },
+                { processing: Math.max(0, Number(invItem.processing || 0) - qty), quantity: Math.max(0, Number(invItem.quantity || 0) - qty) },
               );
             }
           });
@@ -168,13 +168,13 @@ async changeStatusBulk(
               if (inv) {
                 await this.inventoryRepository.update(
                   { productId: inv.productId },
-                  { orderQue: inv.orderQue - qty },
+                  { orderQue: Math.max(0, Number(inv.orderQue || 0) - qty) },
                 );
               }
               if (invItem) {
                 await this.InventoryItemItemRepository.update(
                   { productId: invItem.productId, locationId: order.locationId },
-                  { orderQue: invItem.orderQue - qty },
+                  { orderQue: Math.max(0, Number(invItem.orderQue || 0) - qty) },
                 );
               }
             });
@@ -187,13 +187,13 @@ async changeStatusBulk(
               if (inv) {
                 await this.inventoryRepository.update(
                   { productId: inv.productId },
-                  { processing: inv.processing - qty },
+                  { processing: Math.max(0, Number(inv.processing || 0) - qty) },
                 );
               }
               if (invItem) {
                 await this.InventoryItemItemRepository.update(
                   { productId: invItem.productId, locationId: order.locationId },
-                  { processing: invItem.processing - qty },
+                  { processing: Math.max(0, Number(invItem.processing || 0) - qty) },
                 );
               }
             });
@@ -211,7 +211,7 @@ async changeStatusBulk(
                 await this.inventoryRepository.update(
                   { productId: inv.productId },
                   {
-                    orderQue: inv.orderQue - qty,
+                    orderQue: Math.max(0, Number(inv.orderQue || 0) - qty),
                     hoildQue: inv.hoildQue + qty,
                   },
                 );
@@ -220,7 +220,7 @@ async changeStatusBulk(
                 await this.InventoryItemItemRepository.update(
                   { productId: invItem.productId, locationId: order.locationId },
                   {
-                    orderQue: invItem.orderQue - qty,
+                    orderQue: Math.max(0, Number(invItem.orderQue || 0) - qty),
                     hoildQue: invItem.hoildQue + qty,
                   },
                 );
@@ -236,7 +236,7 @@ async changeStatusBulk(
                 await this.inventoryRepository.update(
                   { productId: inv.productId },
                   {
-                    processing: inv.processing - qty,
+                    processing: Math.max(0, Number(inv.processing || 0) - qty),
                     hoildQue: inv.hoildQue + qty,
                   },
                 );
@@ -245,7 +245,7 @@ async changeStatusBulk(
                 await this.InventoryItemItemRepository.update(
                   { productId: invItem.productId, locationId: order.locationId },
                   {
-                    processing: invItem.processing - qty,
+                    processing: Math.max(0, Number(invItem.processing || 0) - qty),
                     hoildQue: invItem.hoildQue + qty,
                   },
                 );

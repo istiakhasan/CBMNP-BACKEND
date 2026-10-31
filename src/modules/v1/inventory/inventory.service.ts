@@ -75,8 +75,14 @@ export class InventoryService {
             const itemQty = Number(item.quantity || 0);
             const itemWastage = Number(item.wastageQuantity || 0);
             const itemExpired = Number(item.expiredQuantity || 0);
+            if (itemQty < 0 || itemWastage < 0 || itemExpired < 0) {
+              throw new Error('Inventory quantities cannot be negative');
+            }
 
             if (isExist) {
+              if (!type && Number(isExist.quantity || 0) < itemQty) {
+                throw new Error(`Insufficient warehouse stock for product ${item.productId}`);
+              }
               isExist.quantity = type
                 ? Number(isExist.quantity || 0) + itemQty
                 : Number(isExist.quantity || 0) - itemQty;
@@ -108,6 +114,9 @@ export class InventoryService {
               await queryRunner.manager.save(inventoryItemTransaction);
               return isExist;
             } else {
+              if (!type) {
+                throw new Error(`Cannot deduct stock for product ${item.productId}: warehouse inventory does not exist`);
+              }
               const a = queryRunner.manager.create(InventoryItem, {
                 ...item,
                 inventory: inventory,
@@ -151,6 +160,10 @@ export class InventoryService {
         );
       } else {
         const directQty = Number(quantity || 0);
+        if (directQty < 0) throw new Error('Inventory quantity cannot be negative');
+        if (!type && Number(inventory.stock || 0) < directQty) {
+          throw new Error(`Insufficient master stock for product ${productId}`);
+        }
         inventory.stock = type
           ? Number(inventory.stock || 0) + directQty
           : Number(inventory.stock || 0) - directQty;

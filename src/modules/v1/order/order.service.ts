@@ -2661,7 +2661,7 @@ async update(orderId: number, data: Order) {
               `
               UPDATE "inventory"
               SET
-                "orderQue" = COALESCE("orderQue", 0) - $1,
+                "orderQue" = GREATEST(0, COALESCE("orderQue", 0) - $1),
                 "hoildQue" = COALESCE("hoildQue", 0) + $1,
                 "updatedAt" = NOW()
               WHERE "productId" = $2
@@ -2679,7 +2679,7 @@ async update(orderId: number, data: Order) {
               `
               UPDATE "inventory"
               SET
-                "processing" = COALESCE("processing", 0) - $1,
+                "processing" = GREATEST(0, COALESCE("processing", 0) - $1),
                 "hoildQue" = COALESCE("hoildQue", 0) + $1,
                 "updatedAt" = NOW()
               WHERE "productId" = $2
@@ -2696,7 +2696,7 @@ async update(orderId: number, data: Order) {
               `
               UPDATE "inventoryItems"
               SET
-                "orderQue" = COALESCE("orderQue", 0) - $1,
+                "orderQue" = GREATEST(0, COALESCE("orderQue", 0) - $1),
                 "hoildQue" = COALESCE("hoildQue", 0) + $1,
                 "updatedAt" = NOW()
               WHERE "productId" = $2
@@ -2719,7 +2719,7 @@ async update(orderId: number, data: Order) {
               `
               UPDATE "inventoryItems"
               SET
-                "processing" = COALESCE("processing", 0) - $1,
+                "processing" = GREATEST(0, COALESCE("processing", 0) - $1),
                 "hoildQue" = COALESCE("hoildQue", 0) + $1,
                 "updatedAt" = NOW()
               WHERE "productId" = $2

@@ -128,6 +128,7 @@ export class PurchaseReturnsService {
       pr.items = items;
 
       // Deduct stock from warehouse
+      const affectedProductIds = new Set<string>();
       for (const item of pr.items) {
         const inv = await manager.findOne(InventoryItem, {
           where: { locationId: pr.warehouseId, productId: item.productId },
@@ -142,6 +143,7 @@ export class PurchaseReturnsService {
 
         inv.quantity = Number(inv.quantity || 0) - item.quantity;
         await manager.save(inv);
+        affectedProductIds.add(item.productId);
         await manager.save(
           manager.create(Transaction, {
             productId: item.productId,
@@ -157,6 +159,15 @@ export class PurchaseReturnsService {
             performedById: userId,
           }),
         );
+      }
+
+      // Master stock is a derived total of all warehouse rows. Keep it in
+      // sync after a supplier return so dashboards and ERP availability agree.
+      for (const productId of affectedProductIds) {
+        const warehouseItems = await manager.find(InventoryItem, { where: { productId } });
+        const master = await this.ensureMasterInventory(manager, productId, organizationId);
+        master.stock = warehouseItems.reduce((sum, row) => sum + Math.max(0, Number(row.quantity || 0)), 0);
+        await manager.save(master);
       }
 
       const year = new Date().getFullYear();
@@ -180,7 +191,7 @@ export class PurchaseReturnsService {
 
   // ================= GOODS RECEIPT NOTE (GRN) & QA =================
   async createGRN(data: any, organizationId: string, userId?: string): Promise<GoodsReceiptNote> {
-    return this.dataSource.transaction(async (manager) => {
+    const savedGRN = await this.dataSource.transaction(async (manager) => {
       const year = new Date().getFullYear();
       const grnNumber = `GRN-${year}-${Date.now().toString().slice(-6)}`;
 
@@ -199,10 +210,14 @@ export class PurchaseReturnsService {
 
       const savedGRN = await manager.save(grn);
 
+      const acceptedProductIds = new Set<string>();
       if (data.items && Array.isArray(data.items)) {
         for (const i of data.items) {
           const acceptedQty = Number(i.acceptedQuantity || 0);
           const rejectedQty = Number(i.rejectedQuantity || 0);
+          if (acceptedQty < 0 || rejectedQty < 0) {
+            throw new BadRequestException('Accepted and rejected quantities cannot be negative');
+          }
 
           const item = manager.create(GoodsReceiptItem, {
             grnId: savedGRN.id,
@@ -220,6 +235,7 @@ export class PurchaseReturnsService {
 
           // Add accepted quantity to warehouse inventory
           if (acceptedQty > 0) {
+            acceptedProductIds.add(i.productId);
             let inv = await manager.findOne(InventoryItem, {
               where: { locationId: data.warehouseId, productId: i.productId },
               lock: { mode: 'pessimistic_write' },
@@ -261,8 +277,23 @@ export class PurchaseReturnsService {
         }
       }
 
+      // Master stock is derived from physical warehouse quantities, not from
+      // a separate incremental balance.
+      for (const productId of acceptedProductIds) {
+        const warehouseItems = await manager.find(InventoryItem, { where: { productId } });
+        const master = await this.ensureMasterInventory(manager, productId, organizationId);
+        master.stock = warehouseItems.reduce((sum, row) => sum + Math.max(0, Number(row.quantity || 0)), 0);
+        await manager.save(master);
+      }
+
       return savedGRN;
     });
+    for (const item of data.items || []) {
+      if (Number(item.acceptedQuantity || 0) > 0 && item.productId) {
+        void this.shopifyInventorySync.sync(item.productId, data.warehouseId, organizationId).catch(() => undefined);
+      }
+    }
+    return savedGRN;
   }
 
   async getGRNs(organizationId: string) {

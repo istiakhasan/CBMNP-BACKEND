@@ -24,10 +24,22 @@ export class ShopifyInventorySyncService {
 
   /** Audits the request first, then makes an immediate delivery attempt. */
   async sync(productId: string, warehouseId: string, organizationId: string) {
-    const event = await this.outbox.save(this.outbox.create({
-      productId, warehouseId, organizationId, status: 'PENDING', attempts: 0,
-    }));
-    return this.deliver(event);
+    // Shopify is an optional downstream integration. Never allow a missing
+    // connection (or an outbox/database problem) to affect ERP operations.
+    try {
+      const shop = await this.shops.findOne({ where: { organizationId } });
+      if (!shop?.accessToken || !shop?.domain) {
+        this.logger.warn(`Shopify sync skipped: no active connection for organization=${organizationId}`);
+        return { skipped: true, reason: 'Shopify shop connection is missing' };
+      }
+      const event = await this.outbox.save(this.outbox.create({
+        productId, warehouseId, organizationId, status: 'PENDING', attempts: 0,
+      }));
+      return this.deliver(event);
+    } catch (error: any) {
+      this.logger.error(`Shopify sync enqueue failed (ERP operation continues): ${error?.message || error}`);
+      return { skipped: true, reason: 'Shopify sync enqueue failed' };
+    }
   }
 
   private async deliver(event: ShopifyInventorySyncOutbox) {
@@ -44,11 +56,19 @@ export class ShopifyInventorySyncService {
       if (!item) throw new Error('ERP warehouse inventory item is missing');
       if (!product?.shopifyInventoryItemId) throw new Error('Shopify inventory item mapping is missing');
       if (!warehouse?.shopifyLocationId) throw new Error('Shopify location mapping is missing');
-      if (!shop?.accessToken || !shop?.domain) throw new Error('Shopify shop connection is missing');
+      if (!shop?.accessToken || !shop?.domain) {
+        // Do not retry forever while the integration is deliberately absent.
+        await this.outbox.update(event.id, {
+          status: 'SKIPPED', lastError: 'Shopify shop connection is missing', nextRetryAt: null,
+        });
+        this.logger.warn(`Shopify sync skipped event=${event.id}: shop connection is missing`);
+        return { skipped: true, eventId: event.id };
+      }
 
       const quantity = Math.max(0,
-        Number(item.quantity || 0) - Number(item.pendingReservedQuantity || 0) - Number(item.orderQue || 0)
-        - Number(item.processing || 0) - Number(item.hoildQue || 0) - Number(item.wastageQuantity || 0) - Number(item.expiredQuantity || 0),
+        Number(item.quantity || 0) - Math.max(0, Number(item.pendingReservedQuantity || 0)) - Math.max(0, Number(item.orderQue || 0))
+        - Math.max(0, Number(item.processing || 0)) - Math.max(0, Number(item.hoildQue || 0))
+        - Math.max(0, Number(item.wastageQuantity || 0)) - Math.max(0, Number(item.expiredQuantity || 0)),
       );
       const gid = (type: string, value: string) => value.startsWith('gid://') ? value : `gid://shopify/${type}/${value}`;
       const query = `mutation SetInventory($input: InventorySetQuantitiesInput!, $key: String!) {
