@@ -43,7 +43,9 @@ async function main() {
       const result = await inventory.reconcileOrderCounters(
         organization.id,
         'REBUILD_ORDER_COUNTERS',
-        'system:revalidatestock',
+        // This command is not associated with a logged-in ERP user. Keep the
+        // optional UUID audit field null instead of writing a text marker.
+        undefined,
       );
       console.log(`${organization.name || organization.id}: master=${result.masterChanges}, warehouse=${result.warehouseChanges}, audit=${result.auditId}`);
     }
