@@ -23,6 +23,15 @@ export class InventoryController {
           };
         });
   }
+  @Post('/reconcile-order-counters')
+  reconcileOrderCounters(@Body() body: { confirm?: string }, @Req() req: any) {
+    const organizationId = req.headers['x-organization-id'];
+    return this.inventoryService.reconcileOrderCounters(
+      organizationId,
+      body?.confirm,
+      req.user?.userId || req.user?.id,
+    );
+  }
 @Get()
 async loadAllInventory(
   @Req() req:any,

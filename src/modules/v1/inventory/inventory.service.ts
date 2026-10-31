@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, EntityManager, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import { Product } from '../product/entity/product.entity';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Inventory } from './entities/inventory.entity';
@@ -203,6 +204,107 @@ export class InventoryService {
     } finally {
       await queryRunner.release();
     }
+  }
+
+  /**
+   * Rebuilds derived order pipeline counters from the orders table. Physical
+   * stock, procurement records, orders, and stock transactions are never
+   * changed. `dryRun` is the default; applying requires an explicit phrase.
+   */
+  async reconcileOrderCounters(
+    organizationId: string,
+    confirm?: string,
+    executedById?: string,
+  ) {
+    const buildSnapshot = async (manager: EntityManager) => {
+      const masterRows = await manager.query(
+        `SELECT id, "productId", "pendingReservedQuantity", "orderQue", "hoildQue", processing
+         FROM inventory WHERE "organizationId" = $1`, [organizationId],
+      );
+      const masterTargets = await manager.query(
+        `SELECT p."productId",
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 1), 0)::int AS pending,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 2), 0)::int AS queue,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 3), 0)::int AS hold,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" IN (5, 6)), 0)::int AS processing
+         FROM products p INNER JOIN orders o ON o.id = p."orderId"
+         WHERE o."organizationId" = $1 GROUP BY p."productId"`, [organizationId],
+      );
+      const warehouseRows = await manager.query(
+        `SELECT ii."productId", ii."locationId", ii."pendingReservedQuantity", ii."orderQue", ii."hoildQue", ii.processing
+         FROM "inventoryItems" ii INNER JOIN warehouse w ON w.id = ii."locationId"
+         WHERE w."organizationId" = $1`, [organizationId],
+      );
+      const warehouseTargets = await manager.query(
+        `SELECT p."productId", o."locationId",
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 1), 0)::int AS pending,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 2), 0)::int AS queue,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" = 3), 0)::int AS hold,
+          COALESCE(SUM(p."productQuantity") FILTER (WHERE o."statusId" IN (5, 6)), 0)::int AS processing
+         FROM products p INNER JOIN orders o ON o.id = p."orderId"
+         WHERE o."organizationId" = $1 AND o."locationId" IS NOT NULL
+         GROUP BY p."productId", o."locationId"`, [organizationId],
+      );
+      const toNumber = (value: any) => Number(value || 0);
+      const same = (row: any, target: any) =>
+        toNumber(row.pendingReservedQuantity) === target.pending && toNumber(row.orderQue) === target.queue
+        && toNumber(row.hoildQue) === target.hold && toNumber(row.processing) === target.processing;
+      const masterMap = new Map(masterTargets.map((row: any) => [row.productId, {
+        pending: toNumber(row.pending), queue: toNumber(row.queue), hold: toNumber(row.hold), processing: toNumber(row.processing),
+      }]));
+      const warehouseMap = new Map(warehouseTargets.map((row: any) => [`${row.productId}:${row.locationId}`, {
+        pending: toNumber(row.pending), queue: toNumber(row.queue), hold: toNumber(row.hold), processing: toNumber(row.processing),
+      }]));
+      const current = (row: any) => ({ pending: toNumber(row.pendingReservedQuantity), queue: toNumber(row.orderQue), hold: toNumber(row.hoildQue), processing: toNumber(row.processing) });
+      const masterChanges = masterRows.map((row: any) => ({ id: row.id, productId: row.productId, before: current(row), after: masterMap.get(row.productId) || { pending: 0, queue: 0, hold: 0, processing: 0 } }))
+        .filter((row: any) => !same({ pendingReservedQuantity: row.before.pending, orderQue: row.before.queue, hoildQue: row.before.hold, processing: row.before.processing }, row.after));
+      const warehouseChanges = warehouseRows.map((row: any) => ({ productId: row.productId, locationId: row.locationId, before: current(row), after: warehouseMap.get(`${row.productId}:${row.locationId}`) || { pending: 0, queue: 0, hold: 0, processing: 0 } }))
+        .filter((row: any) => !same({ pendingReservedQuantity: row.before.pending, orderQue: row.before.queue, hoildQue: row.before.hold, processing: row.before.processing }, row.after));
+      return { masterChanges, warehouseChanges };
+    };
+
+    if (confirm !== 'REBUILD_ORDER_COUNTERS') {
+      const snapshot = await this.dataSource.transaction('SERIALIZABLE', buildSnapshot);
+      return { dryRun: true, message: 'No data changed. Send confirm=REBUILD_ORDER_COUNTERS to apply.', masterChanges: snapshot.masterChanges, warehouseChanges: snapshot.warehouseChanges };
+    }
+
+    const auditId = randomUUID();
+    const snapshot = await this.dataSource.transaction('SERIALIZABLE', async (manager) => {
+      // The CLI must also work on an existing production database without a
+      // separate schema deployment. This table is audit-only; it never
+      // changes stock or orders and preserves the exact before/after values.
+      await manager.query(`
+        CREATE TABLE IF NOT EXISTS inventory_counter_reconciliation_audits (
+          id uuid PRIMARY KEY,
+          "organizationId" uuid NOT NULL,
+          "executedById" uuid NULL,
+          "beforeSnapshot" jsonb NOT NULL,
+          "afterSnapshot" jsonb NOT NULL,
+          "createdAt" TIMESTAMP NOT NULL DEFAULT now()
+        )
+      `);
+      await manager.query(`
+        CREATE INDEX IF NOT EXISTS "IDX_inventory_counter_reconciliation_audits_org_created"
+          ON inventory_counter_reconciliation_audits ("organizationId", "createdAt" DESC)
+      `);
+      const changes = await buildSnapshot(manager);
+      for (const row of changes.masterChanges) {
+        await manager.update(Inventory, { id: row.id }, { pendingReservedQuantity: row.after.pending, orderQue: row.after.queue, hoildQue: row.after.hold, processing: row.after.processing });
+      }
+      for (const row of changes.warehouseChanges) {
+        await manager.update(InventoryItem, { productId: row.productId, locationId: row.locationId }, { pendingReservedQuantity: row.after.pending, orderQue: row.after.queue, hoildQue: row.after.hold, processing: row.after.processing });
+      }
+      await manager.query(
+        `INSERT INTO inventory_counter_reconciliation_audits (id, "organizationId", "executedById", "beforeSnapshot", "afterSnapshot")
+         VALUES ($1, $2, $3, $4::jsonb, $5::jsonb)`,
+        [auditId, organizationId, executedById || null, JSON.stringify(changes), JSON.stringify({ masterChanges: changes.masterChanges.map((x: any) => ({ ...x, before: x.after })), warehouseChanges: changes.warehouseChanges.map((x: any) => ({ ...x, before: x.after })) })],
+      );
+      return changes;
+    });
+    for (const row of snapshot.warehouseChanges) {
+      void this.shopifyInventorySync.sync(row.productId, row.locationId, organizationId).catch(() => undefined);
+    }
+    return { dryRun: false, auditId, message: 'Order counters rebuilt. Physical stock and order records were not changed.', masterChanges: snapshot.masterChanges.length, warehouseChanges: snapshot.warehouseChanges.length };
   }
 
   async loadInventory(organizationId: string, query: any) {
