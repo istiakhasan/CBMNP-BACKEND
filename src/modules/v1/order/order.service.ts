@@ -3699,9 +3699,10 @@ async update(orderId: number, data: Order) {
     await queryRunner.connect();
     await queryRunner.startTransaction();
     const manager = queryRunner.manager;
+    let products: Products[] = [];
 
     try {
-      const products = await manager.find(Products, {
+      products = await manager.find(Products, {
         where: { orderId: In(orderIds) },
       });
 
@@ -3850,6 +3851,18 @@ async update(orderId: number, data: Order) {
     }));
 
     await this.orderLogsRepository.save(orderLogs);
+
+    // Releasing/cancelling a held order changes sellable warehouse stock.
+    // Shopify is a background mirror, so this is intentionally non-blocking.
+    for (const order of orders) {
+      for (const product of products.filter((row) => row.orderId === order.id)) {
+        if (order.locationId) {
+          void this.shopifyInventorySync.sync(product.productId, order.locationId, organizationId).catch((error) =>
+            this.logger.error(`Shopify stock sync failed after hold status change: ${error.message}`),
+          );
+        }
+      }
+    }
 
     return updatedOrders;
   }
