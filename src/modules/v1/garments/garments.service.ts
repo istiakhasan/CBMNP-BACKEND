@@ -226,7 +226,48 @@ export class GarmentsService {
   }
 
   async updateOrder(id: string, dto: any) {
-    await this.orderRepo.update(id, dto);
+    const hasOrderQuantityUpdate = dto.orderQuantity !== undefined;
+    const orderQuantity = hasOrderQuantityUpdate ? Number(dto.orderQuantity) : undefined;
+
+    if (
+      hasOrderQuantityUpdate &&
+      (!Number.isInteger(orderQuantity) || (orderQuantity as number) < 0)
+    ) {
+      throw new BadRequestException('Order quantity must be a whole number of zero or greater');
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(GarmentsBuyerOrder).update(id, dto);
+
+      // An approved BOM may already have inventory reservations or POs. Only
+      // draft BOMs are safe to synchronize automatically with the buyer order.
+      if (!hasOrderQuantityUpdate) return;
+
+      const boms = await manager.getRepository(GarmentsBOM).find({
+        where: { orderId: id, status: 'draft' },
+        relations: ['items'],
+      });
+
+      for (const bom of boms) {
+        bom.orderQuantity = orderQuantity as number;
+        await manager.getRepository(GarmentsBOM).save(bom);
+
+        const recalculatedItems = bom.items.map((item) => {
+          const consumption = Number(item.consumption || 0);
+          const wastagePercent = Number(item.wastagePercent || 0);
+          const totalQty = (orderQuantity as number) * consumption * (1 + wastagePercent / 100);
+
+          item.totalQty = Number(totalQty.toFixed(4));
+          item.totalCost = Number((item.totalQty * Number(item.itemPrice || 0)).toFixed(2));
+          return item;
+        });
+
+        if (recalculatedItems.length > 0) {
+          await manager.getRepository(GarmentsBOMItem).save(recalculatedItems);
+        }
+      }
+    });
+
     return await this.getOrderById(id);
   }
 
@@ -314,6 +355,11 @@ export class GarmentsService {
 
   async updateBom(id: string, dto: any) {
     const bom = await this.getBomById(id);
+    if (bom.status === 'approved') {
+      throw new BadRequestException(
+        'Approved BOM is locked. Create a revised draft BOM to change its quantity or materials.',
+      );
+    }
     const { items, orderQuantity, ...rest } = dto;
     const targetOrderQty = orderQuantity !== undefined ? Number(orderQuantity) : bom.orderQuantity;
 
