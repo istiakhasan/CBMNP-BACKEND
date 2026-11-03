@@ -239,31 +239,85 @@ export class GarmentsService {
     await this.dataSource.transaction(async (manager) => {
       await manager.getRepository(GarmentsBuyerOrder).update(id, dto);
 
-      // An approved BOM may already have inventory reservations or POs. Only
-      // draft BOMs are safe to synchronize automatically with the buyer order.
       if (!hasOrderQuantityUpdate) return;
 
       const boms = await manager.getRepository(GarmentsBOM).find({
-        where: { orderId: id, status: 'draft' },
+        where: { orderId: id },
         relations: ['items'],
       });
 
       for (const bom of boms) {
+        if (bom.status === 'approved' && Number(bom.orderQuantity) !== orderQuantity) {
+          const materialMovementCount = await manager
+            .getRepository(GarmentsMaterialIssue)
+            .count({ where: { bomId: bom.id } });
+
+          if (materialMovementCount > 0) {
+            throw new BadRequestException(
+              `Cannot revise approved BOM ${bom.styleNo}: material has already been issued or returned. Reverse the material movement first.`,
+            );
+          }
+        }
+
         bom.orderQuantity = orderQuantity as number;
         await manager.getRepository(GarmentsBOM).save(bom);
 
         const recalculatedItems = bom.items.map((item) => {
+          const previousTotalQty = Number(item.totalQty || 0);
           const consumption = Number(item.consumption || 0);
           const wastagePercent = Number(item.wastagePercent || 0);
           const totalQty = (orderQuantity as number) * consumption * (1 + wastagePercent / 100);
 
           item.totalQty = Number(totalQty.toFixed(4));
           item.totalCost = Number((item.totalQty * Number(item.itemPrice || 0)).toFixed(2));
-          return item;
+
+          // Approval creates an inventory booking. Keep that booking aligned
+          // with the revised approved BOM quantity by applying only its delta.
+          return {
+            item,
+            bookingQtyDelta:
+              bom.status === 'approved'
+                ? Number((item.totalQty - previousTotalQty).toFixed(4))
+                : 0,
+          };
         });
 
         if (recalculatedItems.length > 0) {
-          await manager.getRepository(GarmentsBOMItem).save(recalculatedItems);
+          await manager
+            .getRepository(GarmentsBOMItem)
+            .save(recalculatedItems.map(({ item }) => item));
+        }
+
+        if (bom.status === 'approved') {
+          for (const { item, bookingQtyDelta } of recalculatedItems) {
+            if (bookingQtyDelta === 0) continue;
+
+            const inventoryWhere: any = {
+              itemName: item.itemName,
+              itemCategory: item.itemCategory,
+            };
+            if (bom.organizationId) inventoryWhere.organizationId = bom.organizationId;
+
+            const inventory = await manager
+              .getRepository(GarmentsInventory)
+              .findOne({ where: inventoryWhere });
+
+            if (!inventory) {
+              throw new BadRequestException(
+                `Cannot synchronize approved BOM: inventory booking for ${item.itemName} was not found`,
+              );
+            }
+
+            const nextBookingQty = Number(inventory.bookingQty || 0) + bookingQtyDelta;
+            if (nextBookingQty < 0) {
+              throw new BadRequestException(
+                `Cannot reduce BOM quantity: inventory booking for ${item.itemName} would become negative`,
+              );
+            }
+
+            inventory.bookingQty = Number(nextBookingQty.toFixed(4));
+            await manager.getRepository(GarmentsInventory).save(inventory);
+          }
         }
       }
     });
