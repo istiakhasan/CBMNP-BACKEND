@@ -4,7 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, In, Like, Repository } from 'typeorm';
+import { DataSource, In, IsNull, Like, Repository } from 'typeorm';
 import { GarmentsBuyerOrder } from './entities/garmentsBuyerOrder.entity';
 import { GarmentsBOM } from './entities/garmentsBom.entity';
 import { GarmentsBOMItem } from './entities/garmentsBomItem.entity';
@@ -298,14 +298,41 @@ export class GarmentsService {
             };
             if (bom.organizationId) inventoryWhere.organizationId = bom.organizationId;
 
-            const inventory = await manager
+            let inventory = await manager
               .getRepository(GarmentsInventory)
               .findOne({ where: inventoryWhere });
 
+            // Older inventory rows may not have an organization id. Reuse only
+            // that explicitly unscoped legacy row before creating a new one.
+            if (!inventory && bom.organizationId) {
+              inventory = await manager.getRepository(GarmentsInventory).findOne({
+                where: {
+                  itemName: item.itemName,
+                  itemCategory: item.itemCategory,
+                  organizationId: IsNull(),
+                },
+              });
+            }
+
             if (!inventory) {
-              throw new BadRequestException(
-                `Cannot synchronize approved BOM: inventory booking for ${item.itemName} was not found`,
-              );
+              // Legacy approved BOMs can exist without the inventory booking
+              // that approval normally creates. Reconcile that missing record
+              // using the newly calculated full requirement (not the delta).
+              inventory = manager.getRepository(GarmentsInventory).create({
+                itemName: item.itemName,
+                itemCategory: item.itemCategory,
+                itemCode: `REC-${new Date().getFullYear()}-${item.id.slice(0, 6).toUpperCase()}`,
+                unit: item.unit,
+                itemColor: item.itemColor || null,
+                bookingQty: item.totalQty,
+                receiveQty: 0,
+                issueQty: 0,
+                stock: 0,
+                unitPrice: Number(item.itemPrice || 0),
+                organizationId: bom.organizationId,
+              });
+              await manager.getRepository(GarmentsInventory).save(inventory);
+              continue;
             }
 
             const nextBookingQty = Number(inventory.bookingQty || 0) + bookingQtyDelta;
